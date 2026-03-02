@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter pub get)",
+      "Bash(flutter analyze)",
+      "Bash(xattr -cr /Users/mykolashcherbyna/Desktop/pharmacy_app)",
+      "Bash(flutter clean)",
+      "Bash(find /Users/mykolashcherbyna/Desktop/pharmacy_app/build -name \"*.app\" -exec xattr -l {} ;)",
+      "Bash(flutter devices)",
+      "Bash(flutter analyze --no-pub)",
+      "Bash(jobs -l)",
+      "Bash(flutter run -d macos)",
+      "Bash(xattr -cr /Users/mykolashcherbyna/Desktop/pharmacy_app/build)",
+      "Bash(open /Users/mykolashcherbyna/Desktop/pharmacy_app/build/macos/Build/Products/Debug/pharmacy_app.app)",
+      "Bash(kill 65479)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(screencapture -x /tmp/pharmacy_app_screen.png)",
+      "Bash(flutter build macos)",
+      "Bash(xattr -crs /Users/mykolashcherbyna/Desktop/pharmacy_app/build)",
+      "Bash(screencapture -x /tmp/pharmacy_live.png)",
+      "Bash(osascript -e 'tell application \"\"pharmacy_app\"\" to activate')",
+      "Bash(osascript -e 'tell application System Events to set frontmost of \\(first process whose name is \"\"pharmacy_app\"\"\\) to true')",
+      "Bash(screencapture -x /tmp/pharmacy_focused.png)",
+      "Bash(osascript:*)",
+      "Bash(screencapture -x /tmp/pharm_window.png)",
+      "Bash(screencapture -x /tmp/pharm_zoom.png)",
+      "Bash(screencapture -x /tmp/pharma_ui.png)",
+      "Bash(screencapture -x -R \"0,0,760,120\" /tmp/pharm_top_strip.png)",
+      "Bash(flutter analyze lib/screens/pos_screen.dart)",
+      "Bash(flutter build macos --debug)",
+      "WebFetch(domain:tabletki.ua)",
+      "WebFetch(domain:liki24.com)",
+      "WebFetch(domain:rozetka.com.ua)",
+      "WebFetch(domain:usaapteka.com)",
+      "WebFetch(domain:farmak.ua)",
+      "Bash(git init)",
+      "Bash(git add -A)"
+    ]
+  }
+}

@@ -7,11 +7,11 @@ import 'package:flutter/material.dart';
 class _ShiftData {
   static const double turnoverFact = 3200;
   static const double turnoverPlan = 5000;
-  static const int vtmFact = 10;
-  static const int vtmPlan = 12;
+  static const double vtmFact = 2100;   // UAH
+  static const double vtmPlan = 3000;   // UAH
 
-  // null = no alert to show right now
-  static const _AlertData? alert = _AlertData(
+  // set to null to hide the alert
+  static const _AlertData alert = _AlertData(
     type: _AlertType.warning,
     title: 'Показник Лайк нижче 70%',
     body:
@@ -52,14 +52,59 @@ class _MetricRow {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class ShiftDashboard extends StatefulWidget {
-  const ShiftDashboard({super.key});
+  /// Total amount earned since shift start (accumulates with each payment).
+  final double earnedAmount;
+
+  const ShiftDashboard({super.key, this.earnedAmount = 0.0});
 
   @override
   State<ShiftDashboard> createState() => _ShiftDashboardState();
 }
 
-class _ShiftDashboardState extends State<ShiftDashboard> {
+class _ShiftDashboardState extends State<ShiftDashboard>
+    with SingleTickerProviderStateMixin {
   bool _expanded = false;
+
+  // ── Earned counter animation ─────────────────────────────────────────────
+  late AnimationController _earningCtrl;
+  late Animation<double> _earningAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _earningCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
+    _earningAnim = Tween<double>(
+      begin: 0.0,
+      end: widget.earnedAmount,
+    ).animate(CurvedAnimation(parent: _earningCtrl, curve: Curves.easeOut));
+
+    // Animate in on first build if there's already a value
+    if (widget.earnedAmount > 0) _earningCtrl.forward();
+  }
+
+  @override
+  void didUpdateWidget(ShiftDashboard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Animate the counter from the previous value to the new one
+    if (oldWidget.earnedAmount != widget.earnedAmount) {
+      _earningAnim = Tween<double>(
+        begin: oldWidget.earnedAmount,
+        end: widget.earnedAmount,
+      ).animate(CurvedAnimation(parent: _earningCtrl, curve: Curves.easeOut));
+      _earningCtrl.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _earningCtrl.dispose();
+    super.dispose();
+  }
+
+  // ── Build ────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -68,8 +113,16 @@ class _ShiftDashboardState extends State<ShiftDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Alert is shown first — most important info for the pharmacist
+          _buildAlert(_ShiftData.alert),
+          const SizedBox(height: 16),
           _buildSectionLabel('Показники зміни', Icons.bar_chart_rounded),
           const SizedBox(height: 14),
+
+          // ── Earned counter (no goal — just current result) ──────────────
+          _buildEarnedCard(),
+          const SizedBox(height: 14),
+
           _buildKpiBar(
             label: 'Товарообіг',
             fact: _ShiftData.turnoverFact,
@@ -80,20 +133,91 @@ class _ShiftDashboardState extends State<ShiftDashboard> {
           const SizedBox(height: 14),
           _buildKpiBar(
             label: 'Продаж ВТМ',
-            fact: _ShiftData.vtmFact.toDouble(),
-            plan: _ShiftData.vtmPlan.toDouble(),
-            factLabel: '10 поз',
-            planLabel: '12 поз',
+            fact: _ShiftData.vtmFact,
+            plan: _ShiftData.vtmPlan,
+            factLabel: '2 100 грн',
+            planLabel: '3 000 грн',
           ),
-          if (_ShiftData.alert != null) ...[
-            const SizedBox(height: 20),
-            _buildAlert(_ShiftData.alert!),
-          ],
           const SizedBox(height: 12),
           _buildExpandable(),
         ],
       ),
     );
+  }
+
+  // ── Earned card ──────────────────────────────────────────────────────────
+
+  Widget _buildEarnedCard() {
+    return AnimatedBuilder(
+      animation: _earningAnim,
+      builder: (context, _) {
+        final displayValue = _earningAnim.value;
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+          ),
+          child: Row(
+            children: [
+              // Coin icon in a light-green circle
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: const Icon(
+                  Icons.monetization_on_rounded,
+                  color: Color(0xFF16A34A),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Зароблено з початку зміни',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF9CA3AF),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    _formatMoney(displayValue),
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1C1C2E),
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Format [value] as "3 200,00 ₴" (space thousands separator, comma decimal).
+  static String _formatMoney(double value) {
+    final cents = (value * 100).round();
+    final whole = cents ~/ 100;
+    final frac = (cents % 100).toString().padLeft(2, '0');
+    final s = whole.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write('\u00A0'); // narrow space
+      buf.write(s[i]);
+    }
+    return '$buf,$frac ₴';
   }
 
   // ── Section label ───────────────────────────────────────────────────────────
@@ -118,6 +242,9 @@ class _ShiftDashboardState extends State<ShiftDashboard> {
 
   // ── KPI progress bar ────────────────────────────────────────────────────────
 
+  // Progress bars always use primary blue; % badge uses status colour.
+  static const _barColor = Color(0xFF4F6EF7);
+
   Widget _buildKpiBar({
     required String label,
     required double fact,
@@ -127,7 +254,7 @@ class _ShiftDashboardState extends State<ShiftDashboard> {
   }) {
     final ratio = (fact / plan).clamp(0.0, 1.0);
     final pct = (ratio * 100).round();
-    final color = _progressColor(ratio);
+    final badgeColor = _progressColor(ratio); // status colour for % badge only
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -146,7 +273,7 @@ class _ShiftDashboardState extends State<ShiftDashboard> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
+                color: badgeColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
@@ -154,7 +281,7 @@ class _ShiftDashboardState extends State<ShiftDashboard> {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: color,
+                  color: badgeColor,
                 ),
               ),
             ),
@@ -167,7 +294,7 @@ class _ShiftDashboardState extends State<ShiftDashboard> {
             value: ratio,
             minHeight: 9,
             backgroundColor: const Color(0xFFF0F2F5),
-            valueColor: AlwaysStoppedAnimation<Color>(color),
+            valueColor: const AlwaysStoppedAnimation<Color>(_barColor),
           ),
         ),
         const SizedBox(height: 5),

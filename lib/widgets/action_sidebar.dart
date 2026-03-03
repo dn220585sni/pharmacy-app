@@ -21,12 +21,12 @@ class ActionSidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 46,
+      width: 64,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           for (int i = 0; i < _buttons.length; i++) ...[
-            if (i > 0) const SizedBox(height: 7),
+            if (i > 0) const SizedBox(height: 10),
             _SidebarButton(item: _buttons[i]),
           ],
         ],
@@ -70,13 +70,13 @@ class _SidebarButtonState extends State<_SidebarButton> {
           },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            width: 46,
-            height: 46,
+            width: 64,
+            height: 64,
             decoration: BoxDecoration(
               color: _hovered
                   ? const Color(0xFFEEF2FF)
                   : Colors.white,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: _hovered
                     ? const Color(0xFFBFCBFB)
@@ -85,7 +85,7 @@ class _SidebarButtonState extends State<_SidebarButton> {
             ),
             child: Icon(
               widget.item.icon,
-              size: 20,
+              size: 28,
               color: _hovered
                   ? const Color(0xFF4F6EF7)
                   : const Color(0xFF9CA3AF),

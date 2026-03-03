@@ -64,6 +64,15 @@ class _DrugListItemState extends State<DrugListItem> {
         return KeyEventResult.ignored;
       },
     );
+
+    // When the item is built fresh while already selected (e.g. after scroll
+    // into view following an analogue tap), didUpdateWidget never fires —
+    // so we must also request focus here.
+    if (widget.isSelected && widget.shouldFocusQty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.requestFocus();
+      });
+    }
   }
 
   @override

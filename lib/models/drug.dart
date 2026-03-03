@@ -59,6 +59,11 @@ class Drug {
   final DrugUsageInfo? usageInfo;
   final String? imageUrl;          // product photo; future: provided by API
 
+  // ── Batch / serialisation fields ──────────────────────────────────────────
+  final String? series;        // e.g. "036"
+  final String? serialNumber;  // e.g. "1234734678"
+  final String? barcode;       // e.g. "712467853"
+
   const Drug({
     required this.id,
     required this.name,
@@ -81,6 +86,9 @@ class Drug {
     this.locationCode,
     this.usageInfo,
     this.imageUrl,
+    this.series,
+    this.serialNumber,
+    this.barcode,
   });
 
   bool get isExpired {

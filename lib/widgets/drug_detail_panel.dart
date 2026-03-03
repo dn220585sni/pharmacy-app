@@ -70,12 +70,15 @@ class DrugDetailPanel extends StatelessWidget {
   final Drug? drug;
   final List<Drug> analogues;
   final void Function(Drug) onSelectAnalogue;
+  /// Passed through to ShiftDashboard when drug == null.
+  final double earnedAmount;
 
   const DrugDetailPanel({
     super.key,
     required this.drug,
     required this.analogues,
     required this.onSelectAnalogue,
+    this.earnedAmount = 0.0,
   });
 
   @override
@@ -100,32 +103,94 @@ class DrugDetailPanel extends StatelessWidget {
   // ── Empty state ─────────────────────────────────────────────────────────────
 
   Widget _buildEmptyState() {
-    return const ShiftDashboard();
+    return ShiftDashboard(earnedAmount: earnedAmount);
   }
 
   // ── Main content ────────────────────────────────────────────────────────────
 
   Widget _buildContent(Drug drug) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildHeader(drug),
+    final hasStorage = drug.storageConditions != null ||
+        (drug.locationType != null && drug.locationCode != null);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Fixed: header ───────────────────────────────────────────────────
+        _buildHeader(drug),
+        _buildDivider(),
+
+        // ── Fixed: usage properties ─────────────────────────────────────────
+        if (drug.usageInfo != null) ...[
+          _buildUsageProperties(drug),
           _buildDivider(),
-          if (drug.usageInfo != null) ...[
-            _buildUsageProperties(drug),
-            _buildDivider(),
-          ],
-          _buildAnaloguesSection(),
-          if (drug.storageConditions != null ||
-              (drug.locationType != null && drug.locationCode != null)) ...[
-            _buildDivider(),
-            _buildStorageSection(drug),
-          ],
-          const SizedBox(height: 8),
         ],
-      ),
+
+        // ── Fixed: analogues section label + column headers ─────────────────
+        _buildSectionHeader(
+            'Аналоги', count: analogues.isEmpty ? null : analogues.length),
+
+        if (analogues.isEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline_rounded,
+                    size: 14, color: Color(0xFFD1D5DB)),
+                const SizedBox(width: 6),
+                Text(
+                  'Аналоги відсутні',
+                  style: TextStyle(
+                      color: Colors.grey.shade400, fontSize: 12.5),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          // Fixed column headers
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
+            child: const Row(
+              children: [
+                SizedBox(width: kColBadge),
+                Expanded(
+                  child: Text('Назва',
+                      style: TextStyle(
+                          color: Color(0xFF9CA3AF),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500)),
+                ),
+                SizedBox(
+                  width: 72,
+                  child: Text('Ціна',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                          color: Color(0xFF9CA3AF),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500)),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, thickness: 1, color: Color(0xFFF3F4F6)),
+
+          // ── Scrollable: only the analogue rows ──────────────────────────
+          Expanded(
+            child: ListView(
+              children: analogues.asMap().entries.map((e) => _AnalogueDetailRow(
+                    drug: e.value,
+                    isEven: e.key.isEven,
+                    onTap: () => onSelectAnalogue(e.value),
+                  )).toList(),
+            ),
+          ),
+        ],
+
+        // ── Fixed bottom: storage location ──────────────────────────────────
+        if (hasStorage) ...[
+          _buildDivider(),
+          _buildStorageSection(drug),
+        ],
+      ],
     );
   }
 
@@ -184,60 +249,44 @@ class DrugDetailPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Drug photo (network image or placeholder)
-              _DrugPhoto(imageUrl: drug.imageUrl),
-              const SizedBox(width: 12),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Drug photo — height matches the text column automatically
+                _DrugPhoto(imageUrl: drug.imageUrl),
+                const SizedBox(width: 12),
 
-              // Name + meta
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      drug.name,
-                      style: const TextStyle(
-                        color: Color(0xFF1C1C2E),
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        height: 1.3,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${drug.category}  ·  ${drug.manufacturer}',
-                      style: const TextStyle(
-                        color: Color(0xFF9CA3AF),
-                        fontSize: 11.5,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Text(
-                          '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                          style: const TextStyle(
-                            color: Color(0xFF4F6EF7),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
+                // Name + meta
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        drug.name,
+                        style: const TextStyle(
+                          color: Color(0xFF1C1C2E),
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          height: 1.3,
                         ),
-                        const SizedBox(width: 10),
-                        Text(
-                          '${drug.stock} ${drug.unit}',
-                          style: const TextStyle(
-                            color: Color(0xFF6B7280),
-                            fontSize: 12,
-                          ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${drug.category}  ·  ${drug.manufacturer}',
+                        style: const TextStyle(
+                          color: Color(0xFF9CA3AF),
+                          fontSize: 11.5,
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                      const SizedBox(height: 6),
+                      _buildBatchInfo(drug),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
 
           const SizedBox(height: 10),
@@ -277,6 +326,47 @@ class DrugDetailPanel extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  // ── Batch / serial info (under drug name in header) ────────────────────────
+
+  Widget _buildBatchInfo(Drug drug) {
+    final rows = <_InfoRow>[
+      if (drug.series != null)
+        _InfoRow('Серія', drug.series!),
+      if (drug.serialNumber != null)
+        _InfoRow('Сер. номер', drug.serialNumber!),
+      if (drug.barcode != null)
+        _InfoRow('Штрих-код', drug.barcode!),
+    ];
+
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: rows.map((r) => Padding(
+        padding: const EdgeInsets.only(bottom: 2),
+        child: Row(
+          children: [
+            Text(
+              '${r.label}: ',
+              style: const TextStyle(
+                color: Color(0xFF9CA3AF),
+                fontSize: 11.5,
+              ),
+            ),
+            Text(
+              r.value,
+              style: const TextStyle(
+                color: Color(0xFF374151),
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      )).toList(),
     );
   }
 
@@ -361,69 +451,6 @@ class DrugDetailPanel extends StatelessWidget {
     }
   }
 
-  // ── Analogues section ───────────────────────────────────────────────────────
-
-  Widget _buildAnaloguesSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader(
-            'Аналоги', count: analogues.isEmpty ? null : analogues.length),
-        if (analogues.isEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline_rounded,
-                    size: 14, color: Color(0xFFD1D5DB)),
-                const SizedBox(width: 6),
-                Text(
-                  'Аналоги відсутні',
-                  style: TextStyle(
-                    color: Colors.grey.shade400,
-                    fontSize: 12.5,
-                  ),
-                ),
-              ],
-            ),
-          )
-        else ...[
-          // Column header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
-            child: const Row(
-              children: [
-                SizedBox(width: kColBadge),
-                Expanded(
-                  child: Text('Назва',
-                      style: TextStyle(
-                          color: Color(0xFF9CA3AF),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500)),
-                ),
-                SizedBox(
-                  width: 72,
-                  child: Text('Ціна',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                          color: Color(0xFF9CA3AF),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500)),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1, thickness: 1, color: Color(0xFFF3F4F6)),
-          ...analogues.asMap().entries.map((e) => _AnalogueDetailRow(
-                drug: e.value,
-                isEven: e.key.isEven,
-                onTap: () => onSelectAnalogue(e.value),
-              )),
-        ],
-      ],
-    );
-  }
-
   // ── Storage location section ────────────────────────────────────────────────
 
   Widget _buildStorageSection(Drug drug) {
@@ -484,36 +511,47 @@ class _DrugPhoto extends StatelessWidget {
   final String? imageUrl;
   const _DrugPhoto({this.imageUrl});
 
+  // imageUrl prefixed with "asset:" → local asset; otherwise treated as network URL.
+  bool get _isAsset => imageUrl?.startsWith('asset:') ?? false;
+  String get _assetPath => imageUrl!.substring('asset:'.length);
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 68,
-      height: 68,
+      // Width fixed; height stretches to match the sibling text column via
+      // IntrinsicHeight in the parent Row.
+      width: 90,
       decoration: BoxDecoration(
         color: const Color(0xFFF4F5F8),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
       clipBehavior: Clip.antiAlias,
-      child: imageUrl != null
-          ? Image.network(
-              imageUrl!,
-              fit: BoxFit.contain,
-              loadingBuilder: (_, child, progress) => progress == null
-                  ? child
-                  : const Center(
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 1.5,
-                          color: Color(0xFFD1D5DB),
+      child: imageUrl == null
+          ? _placeholder()
+          : _isAsset
+              ? Image.asset(
+                  _assetPath,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stack) => _placeholder(),
+                )
+              : Image.network(
+                  imageUrl!,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (_, child, progress) => progress == null
+                      ? child
+                      : const Center(
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: Color(0xFFD1D5DB),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-              errorBuilder: (context, error, stack) => _placeholder(),
-            )
-          : _placeholder(),
+                  errorBuilder: (context, error, stack) => _placeholder(),
+                ),
     );
   }
 
@@ -527,6 +565,12 @@ class _DrugPhoto extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 // Private helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+class _InfoRow {
+  final String label;
+  final String value;
+  const _InfoRow(this.label, this.value);
+}
 
 class _PropData {
   final IconData icon;

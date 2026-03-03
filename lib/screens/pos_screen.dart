@@ -4,7 +4,7 @@ import '../data/mock_drugs.dart';
 import '../models/cart_item.dart';
 import '../models/drug.dart';
 import '../widgets/action_sidebar.dart';
-import '../widgets/cart_dialog.dart';
+import '../widgets/cart_panel.dart';
 import '../widgets/drug_detail_panel.dart';
 import '../widgets/drug_list_item.dart';
 
@@ -26,6 +26,7 @@ class _PosScreenState extends State<PosScreen> {
   List<Drug> _searchResults = mockDrugs;
   final List<CartItem> _cart = [];
   Drug? _selectedDrug;
+  double _totalEarned = 0.0;
   String _selectedSymptom = 'Всі';
 
   /// Whether the next selection change should auto-focus the qty field.
@@ -36,6 +37,11 @@ class _PosScreenState extends State<PosScreen> {
   /// A digit character waiting to be injected into the qty field on the
   /// next frame after focus transfers from the search field.
   String? _pendingQtyInput;
+
+  /// Whether the cart panel is shown in the right column.
+  bool _cartOpen = false;
+
+  void _toggleCart() => setState(() => _cartOpen = !_cartOpen);
 
   // ── Symptom filters ───────────────────────────────────────────────────────
 
@@ -146,9 +152,17 @@ class _PosScreenState extends State<PosScreen> {
       return false;
     }
 
-    // ── Esc: clear search field OR open clear-cart confirmation ─────────────
+    // ── F2: toggle cart panel ────────────────────────────────────────────────
+    if (event.logicalKey == LogicalKeyboardKey.f2) {
+      _toggleCart();
+      return true;
+    }
+
+    // ── Esc: close cart panel → clear cart confirm → clear search → deselect
     if (event.logicalKey == LogicalKeyboardKey.escape) {
-      if (_cart.isNotEmpty) {
+      if (_cartOpen) {
+        setState(() => _cartOpen = false);
+      } else if (_cart.isNotEmpty) {
         _openClearCartConfirmDialog();
       } else if (_searchController.text.isNotEmpty) {
         _searchController.clear();
@@ -329,9 +343,44 @@ class _PosScreenState extends State<PosScreen> {
 
   void _clearCart() => setState(() => _cart.clear());
 
+  // TODO: offers will come from recommendations service based on cart contents
+  List<CartOffer> get _recommendedOffers => [
+    CartOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '019'),
+      reason: 'Підтримка імунітету при застуді',
+    ),
+    CartOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '017'),
+      reason: 'Супутній препарат при кашлі',
+    ),
+  ];
+
+  void _addOfferToCart(Drug drug) {
+    setState(() {
+      final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
+      if (idx >= 0) {
+        if (_cart[idx].quantity < drug.stock) _cart[idx].quantity++;
+      } else {
+        _cart.add(CartItem(drug: drug, quantity: 1));
+      }
+    });
+  }
+
   void _processPayment() {
     if (_cart.isEmpty) return;
-    setState(() => _cart.clear());
+    // Accumulate earnings BEFORE clearing the cart
+    final saleAmount = _cartTotal;
+    // Bypass the listener so _filterDrugs doesn't auto-select a drug,
+    // then reset everything including _selectedDrug → ShiftDashboard appears.
+    _searchController.removeListener(_filterDrugs);
+    _searchController.clear();
+    _searchController.addListener(_filterDrugs);
+    setState(() {
+      _totalEarned += saleAmount;
+      _cart.clear();
+      _selectedDrug = null;   // show ShiftDashboard after payment
+      _searchResults = mockDrugs;
+    });
   }
 
   // ─── Analogues ─────────────────────────────────────────────────────────────
@@ -352,6 +401,7 @@ class _PosScreenState extends State<PosScreen> {
     setState(() {
       _selectedDrug = drug;
       _focusQtyOnSelect = true;
+      _cartOpen = false;
     });
     final idx = _searchResults.indexWhere((d) => d.id == drug.id);
     if (idx >= 0) _scrollToIndex(idx);
@@ -465,36 +515,6 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
-  void _openCartDialog() {
-    showDialog(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setDialogState) => CartDialog(
-          cart: List.unmodifiable(_cart),
-          onClear: () {
-            _clearCart();
-            setDialogState(() {});
-          },
-          onIncrease: (i) {
-            _increaseQty(i);
-            setDialogState(() {});
-          },
-          onDecrease: (i) {
-            _decreaseQty(i);
-            setDialogState(() {});
-          },
-          onRemove: (i) {
-            _removeFromCart(i);
-            setDialogState(() {});
-          },
-          onPay: () {
-            _processPayment();
-            setDialogState(() {});
-          },
-        ),
-      ),
-    );
-  }
 
   // ─── Build ─────────────────────────────────────────────────────────────────
 
@@ -530,26 +550,63 @@ class _PosScreenState extends State<PosScreen> {
 
                   const SizedBox(width: 10),
 
-                  // Right column — drug detail card, top-aligned with search field
+                  // Right column — drug detail OR cart panel with smooth fade+slide
                   Expanded(
-                    flex: 4,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: DrugDetailPanel(
-                        drug: _selectedDrug,
-                        analogues: _analogues,
-                        onSelectAnalogue: _selectAnalogue,
+                    flex: 3,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      reverseDuration: const Duration(milliseconds: 160),
+                      // Custom layoutBuilder: use Positioned.fill so children
+                      // always receive tight constraints (full column height).
+                      // The default Stack uses alignment: Alignment.center which
+                      // passes LOOSE constraints and causes panels to float.
+                      layoutBuilder: (currentChild, previousChildren) => Stack(
+                        children: [
+                          ...previousChildren
+                              .map((c) => Positioned.fill(child: c)),
+                          if (currentChild != null)
+                            Positioned.fill(child: currentChild),
+                        ],
                       ),
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: CurvedAnimation(
+                            parent: animation, curve: Curves.easeOut),
+                        child: SlideTransition(
+                          position: Tween<Offset>(
+                            begin: const Offset(0.0, 0.025),
+                            end: Offset.zero,
+                          ).animate(CurvedAnimation(
+                              parent: animation, curve: Curves.easeOut)),
+                          child: child,
+                        ),
+                      ),
+                      child: _cartOpen
+                          ? CartPanel(
+                              key: const ValueKey('cart'),
+                              cart: List.unmodifiable(_cart),
+                              offers: _recommendedOffers,
+                              onClear: _clearCart,
+                              onIncrease: _increaseQty,
+                              onDecrease: _decreaseQty,
+                              onRemove: _removeFromCart,
+                              onPay: _processPayment,
+                              onClose: _toggleCart,
+                              onAddOffer: _addOfferToCart,
+                            )
+                          : DrugDetailPanel(
+                              key: const ValueKey('detail'),
+                              drug: _selectedDrug,
+                              analogues: _analogues,
+                              onSelectAnalogue: _selectAnalogue,
+                              earnedAmount: _totalEarned,
+                            ),
                     ),
                   ),
 
                   const SizedBox(width: 8),
 
                   // Quick-action sidebar
-                  const Padding(
-                    padding: EdgeInsets.only(top: 12),
-                    child: ActionSidebar(),
-                  ),
+                  const ActionSidebar(),
                 ],
               ),
             ),
@@ -638,7 +695,7 @@ class _PosScreenState extends State<PosScreen> {
       children: [
         // Search input — arrows intercepted via _searchFocusNode
         Padding(
-          padding: const EdgeInsets.fromLTRB(0, 12, 0, 8),
+          padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
           child: TextField(
             controller: _searchController,
             focusNode: _searchFocusNode,
@@ -830,19 +887,23 @@ class _PosScreenState extends State<PosScreen> {
 
   Widget _buildCartChip() {
     final hasItems = _cart.isNotEmpty;
+    // Active when cart is open OR has items
+    final isActive = hasItems || _cartOpen;
+    final isOpen = _cartOpen;
+
     return GestureDetector(
-      onTap: _openCartDialog,
+      onTap: _toggleCart,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         height: 36,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: hasItems
+          color: isActive
               ? const Color(0xFF4F6EF7)
               : const Color(0xFFF4F5F8),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: hasItems
+            color: isActive
                 ? const Color(0xFF4F6EF7)
                 : const Color(0xFFE5E7EB),
           ),
@@ -851,8 +912,10 @@ class _PosScreenState extends State<PosScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.shopping_cart_outlined,
-              color: hasItems ? Colors.white : const Color(0xFF9CA3AF),
+              isOpen
+                  ? Icons.shopping_cart_rounded
+                  : Icons.shopping_cart_outlined,
+              color: isActive ? Colors.white : const Color(0xFF9CA3AF),
               size: 15,
             ),
             const SizedBox(width: 6),
@@ -861,12 +924,31 @@ class _PosScreenState extends State<PosScreen> {
                   ? '$_cartItemCount поз.  |  ${_cartTotal.toStringAsFixed(2).replaceAll('.', ',')} ₴'
                   : 'Кошик',
               style: TextStyle(
-                color: hasItems ? Colors.white : const Color(0xFF6B7280),
+                color: isActive ? Colors.white : const Color(0xFF6B7280),
                 fontSize: 13,
-                fontWeight:
-                    hasItems ? FontWeight.w600 : FontWeight.w400,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
               ),
             ),
+            // F2 key hint when cart is open
+            if (isOpen) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.20),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: const Text(
+                  'F2',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -933,6 +1015,7 @@ class _PosScreenState extends State<PosScreen> {
           onTap: () => setState(() {
             _selectedDrug = drug;
             _focusQtyOnSelect = true;
+            _cartOpen = false;
           }),
           onQuantityChanged: (qty) => _setQuantity(drug, qty),
           onNavigate: _moveSelection,

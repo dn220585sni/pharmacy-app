@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/drug.dart';
 import 'drug_list_item.dart'; // for kColBadge
+import 'shift_dashboard.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Location chip widget
@@ -99,19 +100,7 @@ class DrugDetailPanel extends StatelessWidget {
   // ── Empty state ─────────────────────────────────────────────────────────────
 
   Widget _buildEmptyState() {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.medication_outlined, size: 48, color: Color(0xFFD1D5DB)),
-          SizedBox(height: 12),
-          Text(
-            'Оберіть препарат',
-            style: TextStyle(color: Color(0xFFB0B7C3), fontSize: 14),
-          ),
-        ],
-      ),
-    );
+    return const ShiftDashboard();
   }
 
   // ── Main content ────────────────────────────────────────────────────────────

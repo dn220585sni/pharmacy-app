@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pharmacy POS — Color Mockup (Сміливість АНЦ)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, 'Segoe UI', sans-serif; }
+
+  /* ── PALETTE ──────────────────────────────────────────────── */
+  :root {
+    --bg:          #F4F5F8;
+    --surface:     #FFFFFF;
+    --primary:     #FFD600;        /* жовтий */
+    --primary-dim: #FFF3A3;        /* світло-жовтий фон */
+    --green:       #2D7A46;        /* темно-зелений */
+    --green-dim:   #E5F4EA;
+    --teal:        #00AECB;        /* бірюзовий */
+    --text1:       #1C1C2E;
+    --text2:       #6B7280;
+    --text3:       #9CA3AF;
+    --border:      #E5E7EB;
+    --selected:    #FFFDE7;        /* рядок вибраний — жовта тінь */
+    --chip-active-bg: #FFD600;
+    --chip-active-fg: #1C1C2E;
+    --chip-bg:     #EDEEF3;
+    --badge-bonus: #FFD600;
+  }
+
+  body { background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── TOP BAR ────────────────────────────────────────────── */
+  .topbar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 16px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 15px; font-weight: 700; color: var(--teal); letter-spacing: 0.5px;
+  }
+  .logo-badge {
+    background: var(--primary); color: var(--text1); font-weight: 800;
+    font-size: 11px; padding: 2px 5px; border-radius: 4px;
+  }
+  .topbar-spacer { flex: 1; }
+  .topbar-info { font-size: 12px; color: var(--text2); }
+  .topbar-info span { color: var(--text1); font-weight: 600; }
+  .shift-btn {
+    background: var(--green); color: #fff; border: none; border-radius: 8px;
+    padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+
+  /* ── MAIN CONTENT ───────────────────────────────────────── */
+  .main { display: flex; flex: 1; overflow: hidden; padding: 12px; gap: 12px; }
+
+  /* ── LEFT PANEL ─────────────────────────────────────────── */
+  .left { flex: 6; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+  /* Search */
+  .search-row { display: flex; gap: 8px; align-items: center; }
+  .search-wrap {
+    flex: 1; background: var(--surface); border: 1.5px solid var(--border);
+    border-radius: 10px; display: flex; align-items: center; padding: 0 12px;
+    height: 40px; gap: 8px;
+  }
+  .search-wrap:focus-within { border-color: var(--primary); }
+  .search-wrap input {
+    flex: 1; border: none; outline: none; font-size: 14px; color: var(--text1);
+    background: transparent;
+  }
+  .search-icon { color: var(--text3); font-size: 16px; }
+  .scan-btn {
+    background: var(--primary); border: none; border-radius: 10px;
+    width: 40px; height: 40px; cursor: pointer; font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* Filter chips */
+  .chips-row { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; overflow: hidden; }
+  .chip {
+    background: var(--chip-bg); color: var(--text2); border: none;
+    border-radius: 20px; padding: 5px 12px; font-size: 12px; cursor: pointer;
+    white-space: nowrap; flex-shrink: 0;
+  }
+  .chip.active {
+    background: var(--chip-active-bg); color: var(--chip-active-fg);
+    font-weight: 600; box-shadow: 0 1px 4px rgba(255,214,0,.35);
+  }
+  .chip-more { background: var(--surface); border: 1px solid var(--border); }
+  .cart-chip {
+    margin-left: auto; flex-shrink: 0;
+    background: var(--green); color: #fff; border: none;
+    border-radius: 20px; padding: 5px 14px; font-size: 12px;
+    font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 5px;
+  }
+  .cart-chip-count {
+    background: #fff; color: var(--green);
+    border-radius: 10px; font-size: 11px; font-weight: 700;
+    padding: 1px 6px;
+  }
+
+  /* Table */
+  .table-card {
+    flex: 1; background: var(--surface); border-radius: 12px;
+    border: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column;
+  }
+  .table-header {
+    display: grid;
+    grid-template-columns: 44px 1fr 52px 58px 78px 54px 82px;
+    padding: 0 12px; height: 36px; align-items: center;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase;
+    background: #FAFAFA;
+  }
+  .table-body { flex: 1; overflow-y: auto; }
+
+  .table-row {
+    display: grid;
+    grid-template-columns: 44px 1fr 52px 58px 78px 54px 82px;
+    padding: 0 12px; height: 44px; align-items: center;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px; color: var(--text1); cursor: pointer;
+    transition: background 0.1s;
+  }
+  .table-row:hover { background: #FFFDE7; }
+  .table-row.selected { background: var(--selected); }
+  .table-row.selected .drug-name { color: var(--green); font-weight: 600; }
+
+  .drug-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .drug-name small { display: block; font-size: 11px; color: var(--text3); font-weight: 400; }
+
+  .badge {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+  }
+  .badge-bonus { background: var(--badge-bonus); color: var(--text1); }
+  .badge-rx { background: #FEF3C7; color: #D97706; font-size: 10px; }
+  .badge-expired { background: #FEE2E2; color: #DC2626; font-size: 13px; }
+  .badge-transit { background: #F3F4F6; color: var(--text2); font-size: 13px; }
+
+  .col-num { color: var(--text2); font-size: 12px; }
+  .col-price { font-weight: 700; font-size: 13px; color: var(--text1); }
+  .col-expiry { font-size: 12px; color: var(--text2); }
+  .col-mfr { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .qty-input {
+    width: 46px; border: 1.5px solid var(--border); border-radius: 7px;
+    text-align: center; font-size: 13px; font-weight: 600; padding: 4px 0;
+    outline: none; color: var(--text1);
+  }
+  .qty-input:focus { border-color: var(--primary); }
+
+  /* ── RIGHT PANEL ─────────────────────────────────────────── */
+  .right { flex: 4; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+  /* Detail panel */
+  .detail-card {
+    background: var(--surface); border-radius: 12px; border: 1px solid var(--border);
+    overflow: hidden; display: flex; flex-direction: column; flex: 1;
+  }
+
+  /* Header */
+  .detail-header {
+    background: var(--primary-dim);
+    border-bottom: 1px solid #FFE082;
+    padding: 14px 16px; display: flex; gap: 14px;
+  }
+  .drug-photo {
+    width: 72px; height: 72px; border-radius: 10px;
+    background: #FFF8E1; border: 1.5px solid #FFE082;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; flex-shrink: 0;
+  }
+  .detail-title { font-size: 14px; font-weight: 700; color: var(--text1); line-height: 1.3; }
+  .detail-cat { font-size: 11px; color: var(--text2); margin-top: 4px; }
+  .detail-price { font-size: 18px; font-weight: 800; color: var(--green); margin-top: 6px; }
+  .detail-stock { font-size: 12px; color: var(--text2); }
+  .instr-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--primary); color: var(--text1);
+    border: none; border-radius: 7px; padding: 5px 11px;
+    font-size: 12px; font-weight: 600; cursor: pointer; margin-top: 8px;
+  }
+
+  /* Usage grid */
+  .section-title {
+    font-size: 11px; font-weight: 700; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 10px 16px 6px;
+  }
+  .usage-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 8px; padding: 0 16px 12px;
+  }
+  .usage-cell {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px; display: flex; align-items: center; gap: 10px;
+  }
+  .icon-wrap {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: #F0F2F5; display: flex; align-items: center;
+    justify-content: center; font-size: 16px; flex-shrink: 0; position: relative;
+  }
+  .status-dot {
+    position: absolute; top: -2px; right: -2px;
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid #fff; font-size: 8px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ok .status-dot    { background: #22C55E; }
+  .caution .status-dot { background: #F59E0B; }
+  .contra .status-dot  { background: #EF4444; }
+  .usage-label { font-size: 11px; color: var(--text2); }
+  .usage-status { font-size: 12px; font-weight: 600; }
+  .ok .usage-status    { color: #16A34A; }
+  .caution .usage-status { color: #D97706; }
+  .contra .usage-status  { color: #DC2626; }
+
+  /* Analogues */
+  .analogue-row {
+    display: flex; align-items: center; padding: 8px 16px;
+    border-top: 1px solid var(--border); cursor: pointer; gap: 10px;
+  }
+  .analogue-row:hover { background: var(--selected); }
+  .analogue-row:hover .analogue-name { color: var(--green); }
+  .analogue-name { font-size: 13px; color: var(--text1); flex: 1; }
+  .analogue-price { font-size: 13px; font-weight: 700; color: var(--green); }
+  .analogue-stock { font-size: 11px; color: var(--text3); }
+
+  /* Location */
+  .location-chip {
+    margin: 0 16px 8px;
+    background: #F4F5F8; border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .loc-icon { font-size: 18px; color: var(--text2); }
+  .loc-label { font-size: 12px; color: var(--text2); }
+  .loc-code {
+    background: var(--green); color: #fff;
+    font-size: 12px; font-weight: 700; border-radius: 5px;
+    padding: 2px 9px; margin-left: auto;
+  }
+  .loc-temp { padding: 0 16px 12px; font-size: 11px; color: var(--text3); }
+
+  /* Cart panel */
+  .cart-card {
+    background: var(--surface); border-radius: 12px; border: 1px solid var(--border);
+    padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .cart-title { font-size: 13px; font-weight: 700; color: var(--text1); }
+  .cart-item-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px; background: var(--bg); border-radius: 8px;
+  }
+  .cart-item-name { font-size: 12px; color: var(--text1); flex: 1; }
+  .cart-item-qty {
+    font-size: 12px; font-weight: 700; color: var(--text1);
+    background: var(--primary); border-radius: 12px; padding: 2px 8px;
+  }
+  .cart-item-price { font-size: 12px; font-weight: 700; color: var(--green); min-width: 58px; text-align: right; }
+  .cart-total-row { display: flex; justify-content: space-between; align-items: center; padding-top: 6px; border-top: 1px solid var(--border); }
+  .cart-total-label { font-size: 12px; color: var(--text2); }
+  .cart-total-price { font-size: 18px; font-weight: 800; color: var(--text1); }
+  .checkout-btn {
+    background: var(--green); color: #fff; border: none; border-radius: 10px;
+    height: 42px; font-size: 14px; font-weight: 700; cursor: pointer; width: 100%;
+    transition: background 0.15s;
+  }
+  .checkout-btn:hover { background: #235f37; }
+  .clear-btn {
+    background: transparent; color: var(--text3); border: none;
+    font-size: 12px; cursor: pointer; text-align: center; width: 100%;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
+
+  .col-right { text-align: right; }
+  .col-center { text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="logo">
+    СМІЛИВІСТЬ <span class="logo-badge">АНЦ</span>
+  </div>
+  <div class="topbar-info">Зміна: <span>09:00 – зараз</span></div>
+  <div class="topbar-info" style="margin-left:8px">Касир: <span>Марія Ковальчук</span></div>
+  <div class="topbar-spacer"></div>
+  <button class="shift-btn">Закрити зміну</button>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- LEFT -->
+  <div class="left">
+
+    <!-- Search -->
+    <div class="search-row">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" placeholder="Пошук препарату, МНН, штрих-код..." value="Джардінс">
+      </div>
+      <button class="scan-btn">📷</button>
+    </div>
+
+    <!-- Chips -->
+    <div class="chips-row">
+      <button class="chip active">Всі</button>
+      <button class="chip">Біль</button>
+      <button class="chip">Нежить</button>
+      <button class="chip">Застуда</button>
+      <button class="chip">Кашель</button>
+      <button class="chip">Отруєння</button>
+      <button class="chip">Стрес</button>
+      <button class="chip chip-more">Більше...</button>
+      <button class="cart-chip">🛒 Кошик <span class="cart-chip-count">3</span></button>
+    </div>
+
+    <!-- Table -->
+    <div class="table-card">
+      <div class="table-header">
+        <div></div>
+        <div>Найменування</div>
+        <div class="col-center">Залишок</div>
+        <div class="col-center">Відпущ.</div>
+        <div class="col-right">Ціна</div>
+        <div class="col-center">Термін</div>
+        <div>Виробник</div>
+      </div>
+      <div class="table-body">
+
+        <!-- Row 1 — selected -->
+        <div class="table-row selected">
+          <div><div class="badge badge-bonus">12</div></div>
+          <div class="drug-name">Джардінс 10 мг №30<small>таб. вкр. плів. об.</small></div>
+          <div class="col-num col-center">4</div>
+          <div class="col-center"><input class="qty-input" type="text" value="1"></div>
+          <div class="col-price col-right">863.55</div>
+          <div class="col-expiry col-center">11/26</div>
+          <div class="col-mfr">Берінгер Інгельхайм</div>
+        </div>
+
+        <!-- Row 2 -->
+        <div class="table-row">
+          <div></div>
+          <div class="drug-name">Джардінс 25 мг №30<small>таб. вкр. плів. об.</small></div>
+          <div class="col-num col-center">12</div>
+          <div class="col-center"><input class="qty-input" type="text" value="0"></div>
+          <div class="col-price col-right">951.90</div>
+          <div class="col-expiry col-center">08/26</div>
+          <div class="col-mfr">Берінгер Інгельхайм</div>
+        </div>
+
+        <!-- Row 3 — expiring -->
+        <div class="table-row">
+          <div><div class="badge badge-expired">⏳</div></div>
+          <div class="drug-name">Форсига 10 мг №30<small>таб. вкр. плів. об.</small></div>
+          <div class="col-num col-center">2</div>
+          <div class="col-center"><input class="qty-input" type="text" value="0"></div>
+          <div class="col-price col-right">720.00</div>
+          <div class="col-expiry col-center" style="color:#EF4444">04/26</div>
+          <div class="col-mfr">AstraZeneca</div>
+        </div>
+
+        <!-- Row 4 — transit -->
+        <div class="table-row">
+          <div><div class="badge badge-transit">🚚</div></div>
+          <div class="drug-name">Інвокана 100 мг №30<small>таб.</small></div>
+          <div class="col-num col-center">0</div>
+          <div class="col-center"><input class="qty-input" type="text" value="0" disabled></div>
+          <div class="col-price col-right">880.00</div>
+          <div class="col-expiry col-center">02/27</div>
+          <div class="col-mfr">Janssen</div>
+        </div>
+
+        <!-- Row 5 -->
+        <div class="table-row">
+          <div></div>
+          <div class="drug-name">Метформін 1000 мг №60<small>таб.</small></div>
+          <div class="col-num col-center">34</div>
+          <div class="col-center"><input class="qty-input" type="text" value="0"></div>
+          <div class="col-price col-right">89.50</div>
+          <div class="col-expiry col-center">06/27</div>
+          <div class="col-mfr">Дарниця</div>
+        </div>
+
+        <!-- Row 6 -->
+        <div class="table-row">
+          <div><div class="badge badge-bonus">8</div></div>
+          <div class="drug-name">Глюкофаж 1000 мг №60<small>таб.</small></div>
+          <div class="col-num col-center">7</div>
+          <div class="col-center"><input class="qty-input" type="text" value="0"></div>
+          <div class="col-price col-right">142.00</div>
+          <div class="col-expiry col-center">09/26</div>
+          <div class="col-mfr">Merck</div>
+        </div>
+
+        <!-- Row 7 -->
+        <div class="table-row">
+          <div></div>
+          <div class="drug-name">Сіофор 1000 мг №60<small>таб.</small></div>
+          <div class="col-num col-center">18</div>
+          <div class="col-center"><input class="qty-input" type="text" value="0"></div>
+          <div class="col-price col-right">118.00</div>
+          <div class="col-expiry col-center">01/27</div>
+          <div class="col-mfr">Berlin-Chemie</div>
+        </div>
+
+      </div>
+    </div>
+  </div><!-- /left -->
+
+  <!-- RIGHT -->
+  <div class="right">
+
+    <!-- Detail panel -->
+    <div class="detail-card">
+
+      <!-- Header -->
+      <div class="detail-header">
+        <div class="drug-photo">💊</div>
+        <div>
+          <div class="detail-title">Джардінс таблетки вкриті плівковою оболонкою 10 мг блістер №30</div>
+          <div class="detail-cat">Ліки від діабету · таб. вкр. плів. об.</div>
+          <div class="detail-price">863.55 грн</div>
+          <div class="detail-stock">Залишок: 4 уп.</div>
+          <button class="instr-btn">📄 Переглянути інструкцію</button>
+        </div>
+      </div>
+
+      <!-- Usage -->
+      <div class="section-title">Основні властивості</div>
+      <div class="usage-grid">
+        <div class="usage-cell ok">
+          <div class="icon-wrap">👤<div class="status-dot"></div></div>
+          <div><div class="usage-label">Дорослі</div><div class="usage-status">Застосовується</div></div>
+        </div>
+        <div class="usage-cell contra">
+          <div class="icon-wrap">🤰<div class="status-dot"></div></div>
+          <div><div class="usage-label">Вагітні</div><div class="usage-status">Протипоказано</div></div>
+        </div>
+        <div class="usage-cell caution">
+          <div class="icon-wrap">🧒<div class="status-dot"></div></div>
+          <div><div class="usage-label">Діти</div><div class="usage-status">З обережністю</div></div>
+        </div>
+        <div class="usage-cell ok">
+          <div class="icon-wrap">🚗<div class="status-dot"></div></div>
+          <div><div class="usage-label">Водії</div><div class="usage-status">Можна</div></div>
+        </div>
+      </div>
+
+      <!-- Analogues -->
+      <div class="section-title">Аналоги</div>
+      <div class="analogue-row">
+        <span style="font-size:16px">💊</span>
+        <div>
+          <div class="analogue-name">Форсига 10 мг №30</div>
+          <div class="analogue-stock">Залишок: 2 уп.</div>
+        </div>
+        <div class="analogue-price">720.00 грн</div>
+        <span style="color:var(--text3);font-size:14px">›</span>
+      </div>
+      <div class="analogue-row">
+        <span style="font-size:16px">💊</span>
+        <div>
+          <div class="analogue-name">Інвокана 100 мг №30</div>
+          <div class="analogue-stock" style="color:#EF4444">Транзит</div>
+        </div>
+        <div class="analogue-price">880.00 грн</div>
+        <span style="color:var(--text3);font-size:14px">›</span>
+      </div>
+
+      <!-- Location -->
+      <div class="section-title">Місце зберігання</div>
+      <div class="location-chip">
+        <span class="loc-icon">🗄</span>
+        <span class="loc-label">Розташування на стелажу</span>
+        <span class="loc-code">C3/02</span>
+      </div>
+      <div class="loc-temp">При t° не вище 25°C, у захищеному від вологи місці</div>
+
+    </div><!-- /detail-card -->
+
+    <!-- Cart -->
+    <div class="cart-card">
+      <div class="cart-title">🛒 Кошик (3 позиції)</div>
+      <div class="cart-item-row">
+        <div class="cart-item-name">Джардінс 10 мг №30</div>
+        <div class="cart-item-qty">×1</div>
+        <div class="cart-item-price">863.55 грн</div>
+      </div>
+      <div class="cart-item-row">
+        <div class="cart-item-name">Нурофен 200 мг №24</div>
+        <div class="cart-item-qty">×2</div>
+        <div class="cart-item-price">156.00 грн</div>
+      </div>
+      <div class="cart-item-row">
+        <div class="cart-item-name">Но-шпа 40 мг №100</div>
+        <div class="cart-item-qty">×1</div>
+        <div class="cart-item-price">98.00 грн</div>
+      </div>
+      <div class="cart-total-row">
+        <span class="cart-total-label">До сплати:</span>
+        <span class="cart-total-price">1 117.55 грн</span>
+      </div>
+      <button class="checkout-btn">Оформити продаж</button>
+      <button class="clear-btn">Очистити кошик</button>
+    </div>
+
+  </div><!-- /right -->
+
+</div><!-- /main -->
+
+</body>
+</html>

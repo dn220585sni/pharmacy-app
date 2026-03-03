@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../data/mock_drugs.dart';
 import '../models/cart_item.dart';
 import '../models/drug.dart';
+import '../widgets/action_sidebar.dart';
 import '../widgets/cart_dialog.dart';
 import '../widgets/drug_detail_panel.dart';
 import '../widgets/drug_list_item.dart';
@@ -151,6 +152,9 @@ class _PosScreenState extends State<PosScreen> {
         _openClearCartConfirmDialog();
       } else if (_searchController.text.isNotEmpty) {
         _searchController.clear();
+        setState(() => _selectedDrug = null);
+      } else if (_selectedDrug != null) {
+        setState(() => _selectedDrug = null);
       }
       return true;
     }
@@ -526,14 +530,25 @@ class _PosScreenState extends State<PosScreen> {
 
                   const SizedBox(width: 10),
 
-                  // Right column — drug detail card (full height)
+                  // Right column — drug detail card, top-aligned with search field
                   Expanded(
                     flex: 4,
-                    child: DrugDetailPanel(
-                      drug: _selectedDrug,
-                      analogues: _analogues,
-                      onSelectAnalogue: _selectAnalogue,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: DrugDetailPanel(
+                        drug: _selectedDrug,
+                        analogues: _analogues,
+                        onSelectAnalogue: _selectAnalogue,
+                      ),
                     ),
+                  ),
+
+                  const SizedBox(width: 8),
+
+                  // Quick-action sidebar
+                  const Padding(
+                    padding: EdgeInsets.only(top: 12),
+                    child: ActionSidebar(),
                   ),
                 ],
               ),

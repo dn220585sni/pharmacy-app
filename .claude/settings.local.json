@@ -34,7 +34,9 @@
       "WebFetch(domain:usaapteka.com)",
       "WebFetch(domain:farmak.ua)",
       "Bash(git init)",
-      "Bash(git add -A)"
+      "Bash(git add -A)",
+      "Bash(git commit:*)",
+      "Bash(open /Users/mykolashcherbyna/Desktop/pharmacy_app/mockup_color_scheme.html)"
     ]
   }
 }

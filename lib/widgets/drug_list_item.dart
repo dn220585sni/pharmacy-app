@@ -215,7 +215,7 @@ class _DrugListItemState extends State<DrugListItem> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
         color: widget.isSelected
-            ? const Color(0xFFEEF2FF)
+            ? const Color(0xFFE8F3FB)
             : widget.isEvenRow
                 ? Colors.white
                 : const Color(0xFFF8F9FB),
@@ -253,15 +253,15 @@ class _DrugListItemState extends State<DrugListItem> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFFFEBEE),
+                              color: const Color(0xFFF3F4F6),
                               borderRadius: BorderRadius.circular(3),
                             ),
                             child: const Text(
                               'Рецепт',
                               style: TextStyle(
-                                color: Color(0xFFEF5350),
+                                color: Color(0xFF9CA3AF),
                                 fontSize: 9,
-                                fontWeight: FontWeight.w600,
+                                fontWeight: FontWeight.w500,
                                 letterSpacing: 0.2,
                               ),
                             ),
@@ -307,7 +307,7 @@ class _DrugListItemState extends State<DrugListItem> {
                                       horizontal: 4, vertical: 5),
                                   filled: true,
                                   fillColor: widget.cartQuantity > 0
-                                      ? const Color(0xFFEEF2FF)
+                                      ? const Color(0xFFE8F3FB)
                                       : const Color(0xFFF9FAFB),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(6),
@@ -318,7 +318,7 @@ class _DrugListItemState extends State<DrugListItem> {
                                     borderRadius: BorderRadius.circular(6),
                                     borderSide: BorderSide(
                                       color: widget.cartQuantity > 0
-                                          ? const Color(0xFF4F6EF7)
+                                          ? const Color(0xFF1E7DC8)
                                           : const Color(0xFFE5E7EB),
                                       width: 1,
                                     ),
@@ -326,7 +326,7 @@ class _DrugListItemState extends State<DrugListItem> {
                                   focusedBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(6),
                                     borderSide: const BorderSide(
-                                        color: Color(0xFF4F6EF7), width: 1.5),
+                                        color: Color(0xFF1E7DC8), width: 1.5),
                                   ),
                                 ),
                                 onChanged: (value) {

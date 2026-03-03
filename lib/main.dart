@@ -25,8 +25,8 @@ class PharmacyApp extends StatelessWidget {
         brightness: Brightness.light,
         scaffoldBackgroundColor: const Color(0xFFF4F5F8),
         colorScheme: const ColorScheme.light(
-          primary: Color(0xFF4F6EF7),
-          secondary: Color(0xFF4F6EF7),
+          primary: Color(0xFF1E7DC8),
+          secondary: Color(0xFF1E7DC8),
           surface: Color(0xFFFFFFFF),
           error: Color(0xFFEF5350),
         ),

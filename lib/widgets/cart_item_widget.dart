@@ -32,12 +32,12 @@ class CartItemWidget extends StatelessWidget {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: const Color(0xFFEEF2FF),
+              color: const Color(0xFFE8F3FB),
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(
               Icons.medication_rounded,
-              color: Color(0xFF4F6EF7),
+              color: Color(0xFF1E7DC8),
               size: 17,
             ),
           ),
@@ -106,7 +106,7 @@ class CartItemWidget extends StatelessWidget {
               '${item.total.toStringAsFixed(2).replaceAll('.', ',')} ₴',
               textAlign: TextAlign.right,
               style: const TextStyle(
-                color: Color(0xFF4F6EF7),
+                color: Color(0xFF1E7DC8),
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
               ),
@@ -153,14 +153,14 @@ class _ControlButton extends StatelessWidget {
         height: 24,
         decoration: BoxDecoration(
           color: enabled
-              ? const Color(0xFFEEF2FF)
+              ? const Color(0xFFE8F3FB)
               : const Color(0xFFF4F5F8),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Icon(
           icon,
           color: enabled
-              ? const Color(0xFF4F6EF7)
+              ? const Color(0xFF1E7DC8)
               : const Color(0xFFD1D5DB),
           size: 15,
         ),

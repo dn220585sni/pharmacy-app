@@ -43,7 +43,7 @@ class _LocationChip extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
             decoration: BoxDecoration(
-              color: const Color(0xFF4F6EF7),
+              color: const Color(0xFF1E7DC8),
               borderRadius: BorderRadius.circular(5),
             ),
             child: Text(
@@ -223,13 +223,13 @@ class DrugDetailPanel extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
-                color: const Color(0xFFEEF2FF),
+                color: const Color(0xFFE8F3FB),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
                 '$count',
                 style: const TextStyle(
-                  color: Color(0xFF4F6EF7),
+                  color: Color(0xFF1E7DC8),
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
                 ),
@@ -307,12 +307,12 @@ class DrugDetailPanel extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.description_outlined,
-                      size: 14, color: Color(0xFF4F6EF7)),
+                      size: 14, color: Color(0xFF1E7DC8)),
                   SizedBox(width: 6),
                   Text(
                     'Переглянути інструкцію',
                     style: TextStyle(
-                      color: Color(0xFF4F6EF7),
+                      color: Color(0xFF1E7DC8),
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
@@ -676,7 +676,7 @@ class _UsagePropCell extends StatelessWidget {
     switch (s) {
       case UsageStatus.ok:
         return (
-          const Color(0xFF4F6EF7),
+          const Color(0xFF1E7DC8),
           Icons.check_rounded,
           const Color(0xFF22C55E),
         );

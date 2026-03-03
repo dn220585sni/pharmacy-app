@@ -84,7 +84,7 @@ class _CartDialogState extends State<CartDialog> {
       child: Row(
         children: [
           const Icon(Icons.receipt_long_rounded,
-              color: Color(0xFF4F6EF7), size: 18),
+              color: Color(0xFF1E7DC8), size: 18),
           const SizedBox(width: 8),
           const Text(
             'Поточний чек',
@@ -228,7 +228,7 @@ class _CartDialogState extends State<CartDialog> {
               Text(
                 '${_cartTotal.toStringAsFixed(2).replaceAll('.', ',')} ₴',
                 style: const TextStyle(
-                  color: Color(0xFF4F6EF7),
+                  color: Color(0xFF1E7DC8),
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
                 ),
@@ -276,7 +276,7 @@ class _CartDialogState extends State<CartDialog> {
                       height: 50,
                       decoration: BoxDecoration(
                         color: widget.cart.isNotEmpty
-                            ? const Color(0xFF4F6EF7)
+                            ? const Color(0xFF1E7DC8)
                             : const Color(0xFFE5E7EB),
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -352,18 +352,18 @@ class _SecondaryButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 9),
         decoration: BoxDecoration(
-          color: const Color(0xFFEEF2FF),
+          color: const Color(0xFFE8F3FB),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-              color: const Color(0xFF4F6EF7).withValues(alpha: 0.2)),
+              color: const Color(0xFF1E7DC8).withValues(alpha: 0.2)),
         ),
         child: Column(
           children: [
-            Icon(icon, color: const Color(0xFF4F6EF7), size: 17),
+            Icon(icon, color: const Color(0xFF1E7DC8), size: 17),
             const SizedBox(height: 3),
             Text(label,
                 style: const TextStyle(
-                    color: Color(0xFF4F6EF7), fontSize: 11.5)),
+                    color: Color(0xFF1E7DC8), fontSize: 11.5)),
           ],
         ),
       ),

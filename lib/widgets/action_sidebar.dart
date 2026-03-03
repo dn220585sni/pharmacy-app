@@ -74,7 +74,7 @@ class _SidebarButtonState extends State<_SidebarButton> {
             height: 64,
             decoration: BoxDecoration(
               color: _hovered
-                  ? const Color(0xFFEEF2FF)
+                  ? const Color(0xFFE8F3FB)
                   : Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
@@ -87,7 +87,7 @@ class _SidebarButtonState extends State<_SidebarButton> {
               widget.item.icon,
               size: 28,
               color: _hovered
-                  ? const Color(0xFF4F6EF7)
+                  ? const Color(0xFF1E7DC8)
                   : const Color(0xFF9CA3AF),
             ),
           ),

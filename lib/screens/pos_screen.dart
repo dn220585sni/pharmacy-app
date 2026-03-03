@@ -622,26 +622,44 @@ class _PosScreenState extends State<PosScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 20),
       decoration: const BoxDecoration(
         color: Colors.white,
-        border:
-            Border(bottom: BorderSide(color: Color(0xFFE5E7EB), width: 1)),
+        border: Border(
+          bottom: BorderSide(color: Color(0xFFE5E7EB), width: 1),
+        ),
       ),
       child: Row(
         children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: const Color(0xFF4F6EF7),
-              borderRadius: BorderRadius.circular(8),
+          // АНЦ logo — yellow circle with blue arcs + bold lettering
+          ClipOval(
+            child: Container(
+              width: 40,
+              height: 40,
+              color: const Color(0xFFFFCC00),
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.keyboard_arrow_up_rounded,
+                      color: Color(0xFF1E7DC8), size: 13),
+                  Text(
+                    'АНЦ',
+                    style: TextStyle(
+                      color: Color(0xFF1E7DC8),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                      height: 1.0,
+                    ),
+                  ),
+                  Icon(Icons.keyboard_arrow_down_rounded,
+                      color: Color(0xFF1E7DC8), size: 13),
+                ],
+              ),
             ),
-            child: const Icon(Icons.local_pharmacy_rounded,
-                color: Colors.white, size: 17),
           ),
           const SizedBox(width: 10),
           const Text(
-            'ФармаПОС',
+            'EuroPharma',
             style: TextStyle(
-              color: Color(0xFF1C1C2E),
+              color: Color(0xFF1E7DC8),
               fontSize: 17,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.3,
@@ -659,19 +677,19 @@ class _PosScreenState extends State<PosScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
             decoration: BoxDecoration(
-              color: const Color(0xFFEEF2FF),
+              color: const Color(0xFFE8F3FB),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                  color: const Color(0xFF4F6EF7).withValues(alpha: 0.25)),
+                  color: const Color(0xFF1E7DC8).withValues(alpha: 0.25)),
             ),
             child: const Row(
               children: [
                 Icon(Icons.person_outline_rounded,
-                    color: Color(0xFF4F6EF7), size: 15),
+                    color: Color(0xFF1E7DC8), size: 15),
                 SizedBox(width: 5),
                 Text('Касир: Микола',
                     style:
-                        TextStyle(color: Color(0xFF4F6EF7), fontSize: 13)),
+                        TextStyle(color: Color(0xFF1E7DC8), fontSize: 13)),
               ],
             ),
           ),
@@ -727,7 +745,7 @@ class _PosScreenState extends State<PosScreen> {
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide:
-                    const BorderSide(color: Color(0xFF4F6EF7), width: 1.5),
+                    const BorderSide(color: Color(0xFF1E7DC8), width: 1.5),
               ),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
@@ -760,20 +778,18 @@ class _PosScreenState extends State<PosScreen> {
                                 horizontal: 12, vertical: 6),
                             decoration: BoxDecoration(
                               color: isActive
-                                  ? const Color(0xFF4F6EF7)
+                                  ? Colors.white
                                   : const Color(0xFFF4F5F8),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: isActive
-                                    ? const Color(0xFF4F6EF7)
-                                    : const Color(0xFFE5E7EB),
+                                color: const Color(0xFFE5E7EB),
                               ),
                             ),
                             child: Text(
                               symptom,
                               style: TextStyle(
                                 color: isActive
-                                    ? Colors.white
+                                    ? const Color(0xFF1E7DC8)
                                     : const Color(0xFF6B7280),
                                 fontSize: 12.5,
                                 fontWeight: isActive
@@ -830,11 +846,11 @@ class _PosScreenState extends State<PosScreen> {
                 symptom,
                 style: TextStyle(
                   color: sel
-                      ? const Color(0xFF4F6EF7)
+                      ? const Color(0xFF1E7DC8)
                       : const Color(0xFF1C1C2E),
                   fontSize: 13,
                   fontWeight:
-                      sel ? FontWeight.w600 : FontWeight.w400,
+                      sel ? FontWeight.w700 : FontWeight.w400,
                 ),
               ),
             ));
@@ -850,13 +866,11 @@ class _PosScreenState extends State<PosScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: isActive
-              ? const Color(0xFF4F6EF7)
+              ? Colors.white
               : const Color(0xFFF4F5F8),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isActive
-                ? const Color(0xFF4F6EF7)
-                : const Color(0xFFE5E7EB),
+            color: const Color(0xFFE5E7EB),
           ),
         ),
         child: Row(
@@ -865,7 +879,9 @@ class _PosScreenState extends State<PosScreen> {
             Text(
               isActive ? _selectedSymptom : 'Більше...',
               style: TextStyle(
-                color: isActive ? Colors.white : const Color(0xFF6B7280),
+                color: isActive
+                    ? const Color(0xFF1E7DC8)
+                    : const Color(0xFF6B7280),
                 fontSize: 12.5,
                 fontWeight:
                     isActive ? FontWeight.w600 : FontWeight.w400,
@@ -875,7 +891,9 @@ class _PosScreenState extends State<PosScreen> {
             Icon(
               Icons.keyboard_arrow_down_rounded,
               size: 15,
-              color: isActive ? Colors.white : const Color(0xFF9CA3AF),
+              color: isActive
+                  ? const Color(0xFF1E7DC8)
+                  : const Color(0xFF9CA3AF),
             ),
           ],
         ),
@@ -899,12 +917,12 @@ class _PosScreenState extends State<PosScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: isActive
-              ? const Color(0xFF4F6EF7)
+              ? const Color(0xFF1E7DC8)
               : const Color(0xFFF4F5F8),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: isActive
-                ? const Color(0xFF4F6EF7)
+                ? const Color(0xFF1E7DC8)
                 : const Color(0xFFE5E7EB),
           ),
         ),

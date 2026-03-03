@@ -243,7 +243,7 @@ class _ShiftDashboardState extends State<ShiftDashboard>
   // ── KPI progress bar ────────────────────────────────────────────────────────
 
   // Progress bars always use primary blue; % badge uses status colour.
-  static const _barColor = Color(0xFF4F6EF7);
+  static const _barColor = Color(0xFF1E7DC8);
 
   Widget _buildKpiBar({
     required String label,
@@ -254,7 +254,6 @@ class _ShiftDashboardState extends State<ShiftDashboard>
   }) {
     final ratio = (fact / plan).clamp(0.0, 1.0);
     final pct = (ratio * 100).round();
-    final badgeColor = _progressColor(ratio); // status colour for % badge only
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -273,15 +272,15 @@ class _ShiftDashboardState extends State<ShiftDashboard>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: badgeColor.withValues(alpha: 0.12),
+                color: const Color(0xFFF0F2F5),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
                 '$pct%',
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: badgeColor,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1C1C2E),
                 ),
               ),
             ),
@@ -325,7 +324,7 @@ class _ShiftDashboardState extends State<ShiftDashboard>
     final (bgColor, accentColor, icon) = switch (alert.type) {
       _AlertType.tip => (
           const Color(0xFFEFF6FF),
-          const Color(0xFF4F6EF7),
+          const Color(0xFF1E7DC8),
           Icons.lightbulb_outline_rounded,
         ),
       _AlertType.success => (

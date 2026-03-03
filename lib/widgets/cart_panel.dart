@@ -160,7 +160,7 @@ class _CartPanelState extends State<CartPanel> {
       child: Row(
         children: [
           const Icon(Icons.receipt_long_rounded,
-              color: Color(0xFF4F6EF7), size: 17),
+              color: Color(0xFF1E7DC8), size: 17),
           const SizedBox(width: 8),
           const Text(
             'Поточний чек',
@@ -370,7 +370,7 @@ class _CartPanelState extends State<CartPanel> {
             Text(
               '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
               style: const TextStyle(
-                color: Color(0xFF4F6EF7),
+                color: Color(0xFF1E7DC8),
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
@@ -382,7 +382,7 @@ class _CartPanelState extends State<CartPanel> {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4F6EF7),
+                  color: const Color(0xFF1E7DC8),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: const Text(
@@ -417,7 +417,7 @@ class _CartPanelState extends State<CartPanel> {
             padding:
                 const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0xFF4F6EF7),
+              color: const Color(0xFF1E7DC8),
               borderRadius: BorderRadius.circular(5),
             ),
             child: const Text(
@@ -473,7 +473,7 @@ class _CartPanelState extends State<CartPanel> {
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide:
-                        const BorderSide(color: Color(0xFF4F6EF7)),
+                        const BorderSide(color: Color(0xFF1E7DC8)),
                   ),
                 ),
               ),
@@ -517,7 +517,7 @@ class _CartPanelState extends State<CartPanel> {
               Text(
                 '${_cartTotal.toStringAsFixed(2).replaceAll('.', ',')} ₴',
                 style: const TextStyle(
-                  color: Color(0xFF4F6EF7),
+                  color: Color(0xFF1E7DC8),
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
                 ),
@@ -612,7 +612,7 @@ class _CartPanelState extends State<CartPanel> {
           height: 46,
           decoration: BoxDecoration(
             color: widget.cart.isNotEmpty
-                ? const Color(0xFF4F6EF7)
+                ? const Color(0xFF1E7DC8)
                 : const Color(0xFFE5E7EB),
             borderRadius: BorderRadius.circular(10),
           ),
@@ -659,18 +659,18 @@ class _SmallButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: const Color(0xFFEEF2FF),
+          color: const Color(0xFFE8F3FB),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-              color: const Color(0xFF4F6EF7).withValues(alpha: 0.2)),
+              color: const Color(0xFF1E7DC8).withValues(alpha: 0.2)),
         ),
         child: Column(
           children: [
-            Icon(icon, color: const Color(0xFF4F6EF7), size: 16),
+            Icon(icon, color: const Color(0xFF1E7DC8), size: 16),
             const SizedBox(height: 3),
             Text(label,
                 style: const TextStyle(
-                    color: Color(0xFF4F6EF7), fontSize: 11)),
+                    color: Color(0xFF1E7DC8), fontSize: 11)),
           ],
         ),
       ),

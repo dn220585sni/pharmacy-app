@@ -11,6 +11,38 @@ import '../widgets/drug_list_item.dart';
 // Approximate item row height for scroll-to-selection
 const double _kItemHeight = 49.0;
 
+// Phone prefix formatter — always keeps "+380 ", only digits allowed after it.
+class _PhonePrefixFormatter extends TextInputFormatter {
+  static const prefix = '+380 ';
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    String text = newValue.text;
+    if (!text.startsWith(prefix)) {
+      final allDigits = text.replaceAll(RegExp(r'\D'), '');
+      final afterCode =
+          allDigits.startsWith('380') ? allDigits.substring(3) : allDigits;
+      final result = prefix + afterCode;
+      return TextEditingValue(
+        text: result,
+        selection: TextSelection.collapsed(offset: result.length),
+      );
+    }
+    final afterPrefix = text.substring(prefix.length);
+    final cleanAfter = afterPrefix.replaceAll(RegExp(r'\D'), '');
+    final result = prefix + cleanAfter;
+    final cursor =
+        newValue.selection.end.clamp(prefix.length, result.length).toInt();
+    return TextEditingValue(
+      text: result,
+      selection: TextSelection.collapsed(offset: cursor),
+    );
+  }
+}
+
 class PosScreen extends StatefulWidget {
   const PosScreen({super.key});
 
@@ -22,6 +54,7 @@ class _PosScreenState extends State<PosScreen> {
   final TextEditingController _searchController = TextEditingController();
   late final FocusNode _searchFocusNode;
   final ScrollController _listScrollController = ScrollController();
+  final _searchBarKey = GlobalKey();
 
   List<Drug> _searchResults = mockDrugs;
   final List<CartItem> _cart = [];
@@ -41,7 +74,23 @@ class _PosScreenState extends State<PosScreen> {
   /// Whether the cart panel is shown in the right column.
   bool _cartOpen = false;
 
+  /// Key for accessing CartPanelState (enterCheckout via F5).
+  final _cartPanelKey = GlobalKey<CartPanelState>();
+
   void _toggleCart() => setState(() => _cartOpen = !_cartOpen);
+
+  /// Auth card is visible when a drug row is selected OR cart is open.
+  /// Hidden only on the dashboard view (no drug selected, cart closed).
+  bool get _showAuthCard => _cartOpen || _selectedDrug != null;
+
+  // ── Customer loyalty (phone auth) ─────────────────────────────────────────
+  final _loyaltyPhoneController = TextEditingController();
+  final _loyaltyPhoneFocusNode = FocusNode();
+  CustomerLoyalty? _customerLoyalty;
+  bool _isLoadingLoyalty = false;
+  String? _previousCustomerPhone;
+
+  static const _loyaltyPhonePrefix = '+380 ';
 
   // ── Symptom filters ───────────────────────────────────────────────────────
 
@@ -122,6 +171,10 @@ class _PosScreenState extends State<PosScreen> {
 
     _searchController.addListener(_filterDrugs);
 
+    // Loyalty phone setup
+    _loyaltyPhoneController.text = _loyaltyPhonePrefix;
+    _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
+
     // Auto-select first row on startup
     if (_searchResults.isNotEmpty) {
       _selectedDrug = _searchResults.first;
@@ -137,6 +190,9 @@ class _PosScreenState extends State<PosScreen> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _listScrollController.dispose();
+    _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.dispose();
+    _loyaltyPhoneFocusNode.dispose();
     super.dispose();
   }
 
@@ -158,9 +214,27 @@ class _PosScreenState extends State<PosScreen> {
       return true;
     }
 
-    // ── Esc: close cart panel → clear cart confirm → clear search → deselect
+    // ── F5: enter checkout mode (cart must be open with items) ──────────────
+    if (event.logicalKey == LogicalKeyboardKey.f5) {
+      if (_cart.isNotEmpty) {
+        if (!_cartOpen) {
+          setState(() => _cartOpen = true);
+          // Wait for CartPanel to build, then enter checkout
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _cartPanelKey.currentState?.enterCheckout();
+          });
+        } else {
+          _cartPanelKey.currentState?.enterCheckout();
+        }
+      }
+      return true;
+    }
+
+    // ── Esc: exit checkout → close cart → clear cart confirm → clear search → deselect
     if (event.logicalKey == LogicalKeyboardKey.escape) {
-      if (_cartOpen) {
+      if (_cartOpen && _cartPanelKey.currentState?.isInCheckout == true) {
+        _cartPanelKey.currentState?.exitCheckout();
+      } else if (_cartOpen) {
         setState(() => _cartOpen = false);
       } else if (_cart.isNotEmpty) {
         _openClearCartConfirmDialog();
@@ -343,6 +417,73 @@ class _PosScreenState extends State<PosScreen> {
 
   void _clearCart() => setState(() => _cart.clear());
 
+  // ── Loyalty phone listener ────────────────────────────────────────────────
+
+  void _onLoyaltyPhoneChanged() {
+    // Only rebuild UI so buttons react to digit count changes.
+    // Actual fetch happens on Ок press or Enter.
+    final digits = _loyaltyPhoneController.text
+        .substring(_loyaltyPhonePrefix.length)
+        .replaceAll(RegExp(r'\D'), '');
+
+    if (digits.length < 9 && _customerLoyalty != null) {
+      setState(() {
+        _customerLoyalty = null;
+      });
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<void> _fetchLoyalty(String digits) async {
+    setState(() => _isLoadingLoyalty = true);
+    await Future.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+    final lastDigit = int.tryParse(digits[digits.length - 1]) ?? 0;
+    final balance = (lastDigit + 1) * 25.0;
+    setState(() {
+      _customerLoyalty = CustomerLoyalty(
+        phone: '+380$digits',
+        bonusBalance: balance,
+      );
+      _isLoadingLoyalty = false;
+    });
+  }
+
+  void _resetLoyalty() {
+    if (_customerLoyalty != null) {
+      _previousCustomerPhone = _loyaltyPhoneController.text;
+    }
+    _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.text = _loyaltyPhonePrefix;
+    _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
+    _customerLoyalty = null;
+    _isLoadingLoyalty = false;
+  }
+
+  void _recallPreviousCustomer() {
+    if (_previousCustomerPhone == null) return;
+    _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.text = _previousCustomerPhone!;
+    _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
+    // Extract digits after +380 and fetch
+    final digits = _previousCustomerPhone!
+        .substring(_loyaltyPhonePrefix.length)
+        .replaceAll(RegExp(r'\D'), '');
+    if (digits.length >= 9) {
+      _fetchLoyalty(digits);
+    }
+  }
+
+  void _confirmPhone() {
+    final digits = _loyaltyPhoneController.text
+        .substring(_loyaltyPhonePrefix.length)
+        .replaceAll(RegExp(r'\D'), '');
+    if (digits.length >= 9 && !_isLoadingLoyalty) {
+      _fetchLoyalty(digits);
+    }
+  }
+
   // TODO: offers will come from recommendations service based on cart contents
   List<CartOffer> get _recommendedOffers => [
     CartOffer(
@@ -380,6 +521,7 @@ class _PosScreenState extends State<PosScreen> {
       _cart.clear();
       _selectedDrug = null;   // show ShiftDashboard after payment
       _searchResults = mockDrugs;
+      _resetLoyalty();
     });
   }
 
@@ -526,81 +668,105 @@ class _PosScreenState extends State<PosScreen> {
         children: [
           _buildTopBar(),
 
-          // ── Two-column layout ─────────────────────────────────────────────
-          // Left:  search bar (chips + cart) + table card
-          // Right: full-height drug detail card
+          // ── Main content area ──────────────────────────────────────────────
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Left column
+                  // ── Left + Right content columns ──────────────────────────
+                  // SearchBar uses GlobalKey to survive layout switches.
                   Expanded(
-                    flex: 6,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _buildSearchBar(),
-                        const SizedBox(height: 8),
-                        Expanded(child: _buildTableCard()),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(width: 10),
-
-                  // Right column — drug detail OR cart panel with smooth fade+slide
-                  Expanded(
-                    flex: 3,
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 220),
-                      reverseDuration: const Duration(milliseconds: 160),
-                      // Custom layoutBuilder: use Positioned.fill so children
-                      // always receive tight constraints (full column height).
-                      // The default Stack uses alignment: Alignment.center which
-                      // passes LOOSE constraints and causes panels to float.
-                      layoutBuilder: (currentChild, previousChildren) => Stack(
-                        children: [
-                          ...previousChildren
-                              .map((c) => Positioned.fill(child: c)),
-                          if (currentChild != null)
-                            Positioned.fill(child: currentChild),
-                        ],
-                      ),
-                      transitionBuilder: (child, animation) => FadeTransition(
-                        opacity: CurvedAnimation(
-                            parent: animation, curve: Curves.easeOut),
-                        child: SlideTransition(
-                          position: Tween<Offset>(
-                            begin: const Offset(0.0, 0.025),
-                            end: Offset.zero,
-                          ).animate(CurvedAnimation(
-                              parent: animation, curve: Curves.easeOut)),
-                          child: child,
-                        ),
-                      ),
-                      child: _cartOpen
-                          ? CartPanel(
-                              key: const ValueKey('cart'),
-                              cart: List.unmodifiable(_cart),
-                              offers: _recommendedOffers,
-                              onClear: _clearCart,
-                              onIncrease: _increaseQty,
-                              onDecrease: _decreaseQty,
-                              onRemove: _removeFromCart,
-                              onPay: _processPayment,
-                              onClose: _toggleCart,
-                              onAddOffer: _addOfferToCart,
-                            )
-                          : DrugDetailPanel(
-                              key: const ValueKey('detail'),
-                              drug: _selectedDrug,
-                              analogues: _analogues,
-                              onSelectAnalogue: _selectAnalogue,
-                              earnedAmount: _totalEarned,
-                            ),
-                    ),
+                    child: _showAuthCard
+                        // ── Auth card visible: split layout ────────────
+                        ? Column(
+                            children: [
+                              IntrinsicHeight(
+                                child: Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(
+                                      flex: 6,
+                                      child: _buildSearchBar(),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      flex: 3,
+                                      child: _buildCustomerAuthCard(),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Expanded(
+                                child: Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(
+                                      flex: 6,
+                                      child: _buildTableCard(),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      flex: 3,
+                                      child: _cartOpen
+                                          ? CartPanel(
+                                              key: _cartPanelKey,
+                                              cart: List.unmodifiable(_cart),
+                                              offers: _recommendedOffers,
+                                              onClear: _clearCart,
+                                              onIncrease: _increaseQty,
+                                              onDecrease: _decreaseQty,
+                                              onRemove: _removeFromCart,
+                                              onPay: _processPayment,
+                                              onClose: _toggleCart,
+                                              onAddOffer: _addOfferToCart,
+                                              loyalty: _customerLoyalty,
+                                            )
+                                          : DrugDetailPanel(
+                                              key: const ValueKey('detail'),
+                                              drug: _selectedDrug,
+                                              analogues: _analogues,
+                                              onSelectAnalogue:
+                                                  _selectAnalogue,
+                                              earnedAmount: _totalEarned,
+                                            ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          )
+                        // ── Dashboard: full-height right panel ─────────
+                        : Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                flex: 6,
+                                child: Column(
+                                  children: [
+                                    _buildSearchBar(),
+                                    const SizedBox(height: 8),
+                                    Expanded(child: _buildTableCard()),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                flex: 3,
+                                child: DrugDetailPanel(
+                                  key: const ValueKey('detail'),
+                                  drug: _selectedDrug,
+                                  analogues: _analogues,
+                                  onSelectAnalogue: _selectAnalogue,
+                                  earnedAmount: _totalEarned,
+                                ),
+                              ),
+                            ],
+                          ),
                   ),
 
                   const SizedBox(width: 8),
@@ -707,7 +873,9 @@ class _PosScreenState extends State<PosScreen> {
   // ── Search bar (open strip, no card) ───────────────────────────────────────
 
   Widget _buildSearchBar() {
-    return Column(
+    return KeyedSubtree(
+      key: _searchBarKey,
+      child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -813,6 +981,262 @@ class _PosScreenState extends State<PosScreen> {
           ),
         ),
       ],
+    ),
+    );
+  }
+
+  // ── Customer auth card (above right panel) ─────────────────────────────────
+
+  Widget _buildCustomerAuthCard() {
+    final hasLoyalty = _customerLoyalty != null;
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0D000000),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // ── Header row ─────────────────────────────────────────────
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E7DC8),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: const Text(
+                    'ЛАЙК',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Картка клієнта',
+                  style: TextStyle(
+                    color: Color(0xFF6B7280),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const Spacer(),
+                if (hasLoyalty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.check_circle_rounded,
+                            color: Color(0xFF10B981), size: 12),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${_customerLoyalty!.bonusBalance.toStringAsFixed(0)} бонусів',
+                          style: const TextStyle(
+                            color: Color(0xFF10B981),
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // ── Phone input + action buttons in a row ─────────────────
+            Builder(builder: (context) {
+              final phoneDigits = _loyaltyPhoneController.text
+                  .substring(_loyaltyPhonePrefix.length)
+                  .replaceAll(RegExp(r'\D'), '');
+              final hasDigits = phoneDigits.isNotEmpty;
+              final canConfirm = phoneDigits.length >= 9 &&
+                  !hasLoyalty &&
+                  !_isLoadingLoyalty;
+
+              return SizedBox(
+                height: 34,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _loyaltyPhoneController,
+                        focusNode: _loyaltyPhoneFocusNode,
+                        keyboardType: TextInputType.phone,
+                        inputFormatters: [_PhonePrefixFormatter()],
+                        onSubmitted: (_) => _confirmPhone(),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF1C1C2E),
+                        ),
+                        decoration: InputDecoration(
+                          hintText: '+380 __ ___ __ __',
+                          hintStyle: const TextStyle(
+                              color: Color(0xFFB0B7C3), fontSize: 13),
+                          prefixIcon: const Padding(
+                            padding: EdgeInsets.only(left: 10, right: 6),
+                            child: Icon(Icons.phone_outlined,
+                                size: 15, color: Color(0xFF9CA3AF)),
+                          ),
+                          prefixIconConstraints:
+                              const BoxConstraints(minWidth: 0, minHeight: 0),
+                          suffixIcon: _isLoadingLoyalty
+                              ? const Padding(
+                                  padding: EdgeInsets.all(8),
+                                  child: SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Color(0xFF1E7DC8),
+                                    ),
+                                  ),
+                                )
+                              : hasLoyalty
+                                  ? GestureDetector(
+                                      onTap: () {
+                                        setState(() => _resetLoyalty());
+                                      },
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(8),
+                                        child: Icon(Icons.close_rounded,
+                                            size: 16,
+                                            color: Color(0xFFB0B7C3)),
+                                      ),
+                                    )
+                                  : null,
+                          filled: true,
+                          fillColor: hasLoyalty
+                              ? const Color(0xFFF0FDF4)
+                              : const Color(0xFFF9FAFB),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 9),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide:
+                                const BorderSide(color: Color(0xFFE5E7EB)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(
+                              color: hasLoyalty
+                                  ? const Color(0xFF10B981)
+                                      .withValues(alpha: 0.4)
+                                  : const Color(0xFFDDE1F5),
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide:
+                                const BorderSide(color: Color(0xFF1E7DC8)),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    _buildAuthActionButton(
+                      label: 'Ок',
+                      icon: Icons.check_rounded,
+                      enabled: canConfirm,
+                      primary: true,
+                      onTap: _confirmPhone,
+                    ),
+                    // «Попередній» — visible only before typing digits
+                    if (!hasDigits &&
+                        !hasLoyalty &&
+                        _previousCustomerPhone != null) ...[
+                      const SizedBox(width: 4),
+                      _buildAuthActionButton(
+                        label: 'Попередній',
+                        icon: Icons.history_rounded,
+                        enabled: !_isLoadingLoyalty,
+                        primary: false,
+                        onTap: _recallPreviousCustomer,
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAuthActionButton({
+    required String label,
+    required IconData icon,
+    required bool enabled,
+    required bool primary,
+    required VoidCallback onTap,
+  }) {
+    final Color bg = !enabled
+        ? const Color(0xFFF4F5F8)
+        : primary
+            ? const Color(0xFF1E7DC8)
+            : const Color(0xFFF4F5F8);
+    final Color fg = !enabled
+        ? const Color(0xFFB0B7C3)
+        : primary
+            ? Colors.white
+            : const Color(0xFF6B7280);
+    final Color borderColor = !enabled
+        ? const Color(0xFFE5E7EB)
+        : primary
+            ? const Color(0xFF1E7DC8)
+            : const Color(0xFFE5E7EB);
+
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        height: 26,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: fg),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: fg,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -947,8 +1371,8 @@ class _PosScreenState extends State<PosScreen> {
                 fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
               ),
             ),
-            // F2 key hint when cart is open
-            if (isOpen) ...[
+            // F2 key hint when cart has items or is open
+            if (isActive) ...[
               const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),

@@ -19,7 +19,7 @@ class CartItemWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      padding: const EdgeInsets.all(11),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
       decoration: BoxDecoration(
         color: const Color(0xFFF9FAFB),
         border: Border.all(color: const Color(0xFFE5E7EB)),
@@ -106,7 +106,7 @@ class CartItemWidget extends StatelessWidget {
               '${item.total.toStringAsFixed(2).replaceAll('.', ',')} ₴',
               textAlign: TextAlign.right,
               style: const TextStyle(
-                color: Color(0xFF1E7DC8),
+                color: Color(0xFF1C1C2E),
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
               ),

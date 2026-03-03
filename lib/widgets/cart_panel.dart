@@ -5,6 +5,22 @@ import '../models/drug.dart';
 import 'cart_item_widget.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Payment method enum
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PaymentMethod { cash, card }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CustomerLoyalty — result from loyalty service after phone lookup.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class CustomerLoyalty {
+  final String phone;
+  final double bonusBalance; // bonus points in ₴
+  const CustomerLoyalty({required this.phone, required this.bonusBalance});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CartOffer — public model for pharmacist offer recommendations.
 // Populated by PosScreen from a service; mock data used until service is ready.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19,47 +35,9 @@ class CartOffer {
 // Phone prefix formatter — always keeps "+380 ", only digits allowed after it.
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _PhonePrefixFormatter extends TextInputFormatter {
-  static const _prefix = '+380 ';
-
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    String text = newValue.text;
-
-    if (!text.startsWith(_prefix)) {
-      // User tried to delete prefix — rebuild from raw digits
-      final allDigits = text.replaceAll(RegExp(r'\D'), '');
-      // Strip leading "380" if it got included
-      final afterCode = allDigits.startsWith('380')
-          ? allDigits.substring(3)
-          : allDigits;
-      final result = _prefix + afterCode;
-      return TextEditingValue(
-        text: result,
-        selection: TextSelection.collapsed(offset: result.length),
-      );
-    }
-
-    // Prefix is intact — allow only digits after it
-    final afterPrefix = text.substring(_prefix.length);
-    final cleanAfter = afterPrefix.replaceAll(RegExp(r'\D'), '');
-    final result = _prefix + cleanAfter;
-    final cursor = newValue.selection.end
-        .clamp(_prefix.length, result.length)
-        .toInt();
-    return TextEditingValue(
-      text: result,
-      selection: TextSelection.collapsed(offset: cursor),
-    );
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // CartPanel — inline cart shown in the right detail panel.
-// Matches the visual style of DrugDetailPanel (white card, rounded 14, shadow).
+// Two-screen flow: Cart → Checkout (via F5 / "Розрахувати").
 // ─────────────────────────────────────────────────────────────────────────────
 
 class CartPanel extends StatefulWidget {
@@ -72,6 +50,7 @@ class CartPanel extends StatefulWidget {
   final VoidCallback onPay;
   final VoidCallback onClose;
   final void Function(Drug drug) onAddOffer;
+  final CustomerLoyalty? loyalty;
 
   const CartPanel({
     super.key,
@@ -84,33 +63,113 @@ class CartPanel extends StatefulWidget {
     required this.onPay,
     required this.onClose,
     required this.onAddOffer,
+    this.loyalty,
   });
 
   @override
-  State<CartPanel> createState() => _CartPanelState();
+  State<CartPanel> createState() => CartPanelState();
 }
 
-class _CartPanelState extends State<CartPanel> {
+class CartPanelState extends State<CartPanel> {
+  // ── Two-screen mode ────────────────────────────────────────────────────────
+  bool _checkoutMode = false;
   bool _showPaymentSuccess = false;
 
-  final _phoneController = TextEditingController();
-  final _phoneFocusNode = FocusNode();
+  // Bonuses
+  bool _useBonuses = false;
+  final _bonusController = TextEditingController();
+
+  // Personal discount
+  double? _personalDiscount;
+  bool _isLoadingDiscount = false;
+
+  // Payment method
+  PaymentMethod _paymentMethod = PaymentMethod.card;
+
+  // Cash change
+  final _cashController = TextEditingController();
+  final _cashFocusNode = FocusNode();
+
+  // ── Computed getters ──────────────────────────────────────────────────────
 
   double get _cartTotal => widget.cart.fold(0.0, (s, i) => s + i.total);
   int get _cartItemCount => widget.cart.fold(0, (s, i) => s + i.quantity);
 
-  @override
-  void initState() {
-    super.initState();
-    _phoneController.text = '+380 ';
+  double get _discountAmount {
+    if (_personalDiscount == null) return 0;
+    return _cartTotal * _personalDiscount! / 100;
   }
+
+  double get _effectiveBonusAmount {
+    if (!_useBonuses || widget.loyalty == null) return 0;
+    final text = _bonusController.text.replaceAll(',', '.');
+    final entered = double.tryParse(text) ?? 0;
+    final maxByBalance = widget.loyalty!.bonusBalance;
+    final maxByTotal = _cartTotal - _discountAmount;
+    return entered.clamp(0, maxByBalance).clamp(0, maxByTotal).toDouble();
+  }
+
+  double get _finalTotal {
+    final raw = _cartTotal - _discountAmount - _effectiveBonusAmount;
+    return raw < 0 ? 0 : raw;
+  }
+
+  double? get _changeAmount {
+    final text = _cashController.text.replaceAll(',', '.').replaceAll(' ', '');
+    final cash = double.tryParse(text);
+    if (cash == null) return null;
+    return cash - _finalTotal;
+  }
+
+  /// Public method — allows PosScreen to enter checkout mode via F5
+  void enterCheckout() {
+    if (widget.cart.isEmpty) return;
+    setState(() => _checkoutMode = true);
+  }
+
+  /// Public method — allows PosScreen to exit checkout back to cart
+  void exitCheckout() {
+    setState(() => _checkoutMode = false);
+  }
+
+  bool get isInCheckout => _checkoutMode;
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   @override
   void dispose() {
-    _phoneController.dispose();
-    _phoneFocusNode.dispose();
+    _bonusController.dispose();
+    _cashController.dispose();
+    _cashFocusNode.dispose();
     super.dispose();
   }
+
+  // ── Mock discount service ─────────────────────────────────────────────────
+
+  Future<void> _requestDiscount() async {
+    if (widget.loyalty == null || _isLoadingDiscount) return;
+    setState(() => _isLoadingDiscount = true);
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    final lastDigit = widget.loyalty!.phone.characters.last;
+    final d = int.tryParse(lastDigit) ?? 0;
+    final discount = d >= 5 ? (d.toDouble()) : null;
+    setState(() {
+      _personalDiscount = discount;
+      _isLoadingDiscount = false;
+    });
+    if (discount == null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Знижка для цього клієнта не передбачена'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // ── Payment ───────────────────────────────────────────────────────────────
 
   void _processPayment() {
     if (widget.cart.isEmpty) return;
@@ -118,11 +177,31 @@ class _CartPanelState extends State<CartPanel> {
     setState(() => _showPaymentSuccess = true);
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
-        setState(() => _showPaymentSuccess = false);
+        setState(() {
+          _showPaymentSuccess = false;
+          _checkoutMode = false;
+          _paymentMethod = PaymentMethod.card;
+          _useBonuses = false;
+          _bonusController.clear();
+          _personalDiscount = null;
+          _cashController.clear();
+        });
         widget.onClose();
       }
     });
   }
+
+  void _resetCheckoutState() {
+    _paymentMethod = PaymentMethod.card;
+    _useBonuses = false;
+    _bonusController.clear();
+    _personalDiscount = null;
+    _cashController.clear();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BUILD
+  // ═══════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -139,22 +218,46 @@ class _CartPanelState extends State<CartPanel> {
         ],
       ),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          _buildHeader(),
-          const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
-          Expanded(child: _buildItemsList()),
-          _buildOffersSection(),
-          _buildPhoneSection(),
-          _buildSummary(),
-        ],
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.03, 0),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(
+                parent: animation, curve: Curves.easeOut)),
+            child: child,
+          ),
+        ),
+        child: _checkoutMode
+            ? _buildCheckoutScreen()
+            : _buildCartScreen(),
       ),
     );
   }
 
-  // ── Header ──────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SCREEN 1 — CART (items + offers + simple total + "Розрахувати")
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildHeader() {
+  Widget _buildCartScreen() {
+    return Column(
+      key: const ValueKey('cart_screen'),
+      children: [
+        _buildCartHeader(),
+        const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
+        // Items + Offers scroll together so offers sit right under items
+        Expanded(child: _buildItemsAndOffers()),
+        _buildCartFooter(),
+      ],
+    );
+  }
+
+  // ── Cart header ───────────────────────────────────────────────────────────
+
+  Widget _buildCartHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
       child: Row(
@@ -171,7 +274,6 @@ class _CartPanelState extends State<CartPanel> {
             ),
           ),
           const SizedBox(width: 8),
-          // F2 shortcut hint
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
@@ -216,7 +318,6 @@ class _CartPanelState extends State<CartPanel> {
             ),
             const SizedBox(width: 7),
           ],
-          // Close button
           GestureDetector(
             onTap: widget.onClose,
             child: Container(
@@ -235,9 +336,9 @@ class _CartPanelState extends State<CartPanel> {
     );
   }
 
-  // ── Items list ──────────────────────────────────────────────────────────────
+  // ── Items + Offers (scrollable together) ────────────────────────────────
 
-  Widget _buildItemsList() {
+  Widget _buildItemsAndOffers() {
     if (widget.cart.isEmpty) {
       return Center(
         child: Column(
@@ -259,24 +360,26 @@ class _CartPanelState extends State<CartPanel> {
         ),
       );
     }
-    return ListView.builder(
+    return ListView(
       padding: const EdgeInsets.symmetric(vertical: 6),
-      itemCount: widget.cart.length,
-      itemBuilder: (context, index) => CartItemWidget(
-        item: widget.cart[index],
-        onIncrease: () => setState(() => widget.onIncrease(index)),
-        onDecrease: () => setState(() => widget.onDecrease(index)),
-        onRemove: () => setState(() => widget.onRemove(index)),
-      ),
+      children: [
+        for (int i = 0; i < widget.cart.length; i++)
+          CartItemWidget(
+            item: widget.cart[i],
+            onIncrease: () => setState(() => widget.onIncrease(i)),
+            onDecrease: () => setState(() => widget.onDecrease(i)),
+            onRemove: () => setState(() => widget.onRemove(i)),
+          ),
+        // Offers sit right under items
+        if (widget.offers.isNotEmpty) _buildOffersSection(),
+      ],
     );
   }
 
-  // ── "Турбота про клієнта" offers section ────────────────────────────────────
+  // ── Offers section ────────────────────────────────────────────────────────
 
   Widget _buildOffersSection() {
-    // TODO: replace widget.offers with response from recommendations service
     if (widget.offers.isEmpty) return const SizedBox.shrink();
-
     return Container(
       decoration: const BoxDecoration(
         border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
@@ -285,7 +388,6 @@ class _CartPanelState extends State<CartPanel> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Section header
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 9, 14, 7),
             child: Row(
@@ -302,26 +404,9 @@ class _CartPanelState extends State<CartPanel> {
                   ),
                 ),
                 const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '${widget.offers.length}',
-                    style: const TextStyle(
-                      color: Color(0xFFD97706),
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
-          // Offer cards
           for (final offer in widget.offers) _buildOfferCard(offer),
           const SizedBox(height: 6),
         ],
@@ -366,13 +451,35 @@ class _CartPanelState extends State<CartPanel> {
                 ],
               ),
             ),
+            // Pharmacist bonus badge
+            if (drug.pharmacistBonus != null) ...[
+              const SizedBox(width: 6),
+              Container(
+                width: 24,
+                height: 24,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF5F0E8),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    '${drug.pharmacistBonus}',
+                    style: const TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(width: 8),
             Text(
               '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
               style: const TextStyle(
-                color: Color(0xFF1E7DC8),
+                color: Color(0xFF6B7280),
                 fontSize: 12,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(width: 8),
@@ -401,92 +508,13 @@ class _CartPanelState extends State<CartPanel> {
     );
   }
 
-  // ── Phone number / loyalty section ──────────────────────────────────────────
+  // ── Cart footer (simple total + "Розрахувати" button) ─────────────────────
 
-  Widget _buildPhoneSection() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-      decoration: const BoxDecoration(
-        color: Color(0xFFF5F7FF),
-        border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
-      ),
-      child: Row(
-        children: [
-          // ЛАЙК loyalty badge
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E7DC8),
-              borderRadius: BorderRadius.circular(5),
-            ),
-            child: const Text(
-              'ЛАЙК',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 9.5,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.6,
-              ),
-            ),
-          ),
-          const SizedBox(width: 9),
-          // Phone input — prefix "+380 " is always kept
-          Expanded(
-            child: SizedBox(
-              height: 34,
-              child: TextField(
-                controller: _phoneController,
-                focusNode: _phoneFocusNode,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [_PhonePrefixFormatter()],
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: Color(0xFF1C1C2E),
-                ),
-                decoration: InputDecoration(
-                  hintText: '+380 __ ___ __ __',
-                  hintStyle: const TextStyle(
-                      color: Color(0xFFB0B7C3), fontSize: 13),
-                  prefixIcon: const Padding(
-                    padding: EdgeInsets.only(left: 10, right: 6),
-                    child: Icon(Icons.phone_outlined,
-                        size: 15, color: Color(0xFF9CA3AF)),
-                  ),
-                  prefixIconConstraints:
-                      const BoxConstraints(minWidth: 0, minHeight: 0),
-                  filled: true,
-                  fillColor: Colors.white,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 9),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        const BorderSide(color: Color(0xFFE5E7EB)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        const BorderSide(color: Color(0xFFDDE1F5)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        const BorderSide(color: Color(0xFF1E7DC8)),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _buildCartFooter() {
+    final formattedTotal =
+        _cartTotal.toStringAsFixed(2).replaceAll('.', ',');
+    final hasItems = widget.cart.isNotEmpty;
 
-  // ── Summary + pay ───────────────────────────────────────────────────────────
-
-  Widget _buildSummary() {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
       decoration: const BoxDecoration(
@@ -496,13 +524,6 @@ class _CartPanelState extends State<CartPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _summaryRow('Кількість позицій:', '$_cartItemCount шт.'),
-          const SizedBox(height: 5),
-          _summaryRow('Знижка:', '0,00 ₴'),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 10),
-            child: Divider(color: Color(0xFFE5E7EB), height: 1),
-          ),
           Row(
             children: [
               const Text(
@@ -515,7 +536,7 @@ class _CartPanelState extends State<CartPanel> {
               ),
               const Spacer(),
               Text(
-                '${_cartTotal.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                '$formattedTotal ₴',
                 style: const TextStyle(
                   color: Color(0xFF1E7DC8),
                   fontSize: 20,
@@ -526,7 +547,212 @@ class _CartPanelState extends State<CartPanel> {
           ),
           const SizedBox(height: 12),
 
-          // Pay / success button
+          // "Розрахувати" button
+          GestureDetector(
+            onTap: hasItems ? enterCheckout : null,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: double.infinity,
+              height: 46,
+              decoration: BoxDecoration(
+                color: hasItems
+                    ? const Color(0xFF1E7DC8)
+                    : const Color(0xFFE5E7EB),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.calculate_outlined,
+                    color: hasItems ? Colors.white : const Color(0xFFB0B7C3),
+                    size: 18,
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    'Розрахувати',
+                    style: TextStyle(
+                      color:
+                          hasItems ? Colors.white : const Color(0xFFB0B7C3),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (hasItems) ...[
+                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.20),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'F5',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SCREEN 2 — CHECKOUT (phone, bonuses, discount, payment, change)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildCheckoutScreen() {
+    return Column(
+      key: const ValueKey('checkout_screen'),
+      children: [
+        _buildCheckoutHeader(),
+        const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
+        // Scrollable: total → bonuses/discount → payment → pay → change
+        Expanded(
+          child: SingleChildScrollView(
+            child: _buildCheckoutBody(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Checkout header ───────────────────────────────────────────────────────
+
+  Widget _buildCheckoutHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      child: Row(
+        children: [
+          // Back button
+          GestureDetector(
+            onTap: () {
+              _resetCheckoutState();
+              setState(() => _checkoutMode = false);
+            },
+            child: Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF4F5F8),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: const Icon(Icons.arrow_back_rounded,
+                  color: Color(0xFF6B7280), size: 16),
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Icon(Icons.point_of_sale_rounded,
+              color: Color(0xFF1E7DC8), size: 17),
+          const SizedBox(width: 8),
+          const Text(
+            'Розрахунок',
+            style: TextStyle(
+              color: Color(0xFF1C1C2E),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          // Item count badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F3FB),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '$_cartItemCount шт.',
+              style: const TextStyle(
+                color: Color(0xFF1E7DC8),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 7),
+          GestureDetector(
+            onTap: widget.onClose,
+            child: Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF4F5F8),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: const Icon(Icons.close_rounded,
+                  color: Color(0xFF9CA3AF), size: 15),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Checkout body ──────────────────────────────────────────────────────
+
+  // ── Checkout body: total → bonuses/discount → payment → pay → change ────
+
+  Widget _buildCheckoutBody() {
+    final formattedTotal =
+        _finalTotal.toStringAsFixed(2).replaceAll('.', ',');
+    final hasLoyalty = widget.loyalty != null;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF9FAFB),
+        border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── "До сплати" — big total ──────────────────────────────────────
+          Row(
+            children: [
+              const Text(
+                'До сплати:',
+                style: TextStyle(
+                  color: Color(0xFF1C1C2E),
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '$formattedTotal ₴',
+                style: const TextStyle(
+                  color: Color(0xFF1E7DC8),
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+
+          // ── Bonuses + Discount block (appears after phone lookup) ────────
+          if (hasLoyalty) ...[
+            const SizedBox(height: 12),
+            _buildBonusAndDiscountBlock(),
+          ],
+
+          const SizedBox(height: 14),
+
+          // ── Payment method toggle ────────────────────────────────────────
+          _buildPaymentMethodToggle(),
+          const SizedBox(height: 10),
+
+          // ── Pay / success button ─────────────────────────────────────────
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 280),
             child: _showPaymentSuccess
@@ -534,21 +760,19 @@ class _CartPanelState extends State<CartPanel> {
                 : _payButtonWidget(),
           ),
 
+          // ── Cash change section ──────────────────────────────────────────
+          if (_paymentMethod == PaymentMethod.cash && !_showPaymentSuccess)
+            _buildCashChangeSection(),
+
           const SizedBox(height: 8),
 
-          // Secondary actions row
+          // ── Secondary actions ────────────────────────────────────────────
           Row(
             children: [
               Expanded(
                   child: _SmallButton(
                       icon: Icons.print_outlined,
                       label: 'Друк',
-                      onTap: () {})),
-              const SizedBox(width: 7),
-              Expanded(
-                  child: _SmallButton(
-                      icon: Icons.discount_outlined,
-                      label: 'Знижка',
                       onTap: () {})),
               const SizedBox(width: 7),
               Expanded(
@@ -563,17 +787,404 @@ class _CartPanelState extends State<CartPanel> {
     );
   }
 
-  Widget _summaryRow(String label, String value) => Row(
+  // ── Combined bonuses + discount block ─────────────────────────────────────
+
+  Widget _buildBonusAndDiscountBlock() {
+    final loyalty = widget.loyalty!;
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFDDE1F5)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label,
-              style: const TextStyle(
-                  color: Color(0xFF9CA3AF), fontSize: 12.5)),
-          const Spacer(),
-          Text(value,
-              style: const TextStyle(
-                  color: Color(0xFF6B7280), fontSize: 12.5)),
+          // ── Bonus row ────────────────────────────────────────────────────
+          Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: Checkbox(
+                  value: _useBonuses,
+                  onChanged: (v) {
+                    setState(() {
+                      _useBonuses = v ?? false;
+                      if (_useBonuses) {
+                        final max = _cartTotal - _discountAmount;
+                        final capped = loyalty.bonusBalance.clamp(0, max);
+                        _bonusController.text = capped.toStringAsFixed(0);
+                      }
+                    });
+                  },
+                  activeColor: const Color(0xFF1E7DC8),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  side: const BorderSide(color: Color(0xFFD1D5DB)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(4)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    text: 'Списати бонуси ',
+                    style: const TextStyle(
+                        color: Color(0xFF1C1C2E), fontSize: 12),
+                    children: [
+                      TextSpan(
+                        text: '(доступно ${loyalty.bonusBalance.toStringAsFixed(2).replaceAll('.', ',')})',
+                        style: const TextStyle(
+                            color: Color(0xFF9CA3AF), fontSize: 11.5),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          // Bonus amount input (if checked)
+          if (_useBonuses) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const SizedBox(width: 28), // align with text above
+                SizedBox(
+                  width: 80,
+                  height: 30,
+                  child: TextField(
+                    controller: _bonusController,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.right,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                          RegExp(r'[\d,.]')),
+                    ],
+                    onChanged: (_) => setState(() {}),
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1C1C2E),
+                    ),
+                    decoration: InputDecoration(
+                      suffixText: '₴',
+                      suffixStyle: const TextStyle(
+                        color: Color(0xFF9CA3AF),
+                        fontSize: 12,
+                      ),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 7),
+                      filled: true,
+                      fillColor: const Color(0xFFF9FAFB),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide:
+                            const BorderSide(color: Color(0xFFE5E7EB)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide:
+                            const BorderSide(color: Color(0xFFE5E7EB)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide:
+                            const BorderSide(color: Color(0xFF1E7DC8)),
+                      ),
+                    ),
+                  ),
+                ),
+                if (_effectiveBonusAmount > 0) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '-${_effectiveBonusAmount.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                    style: const TextStyle(
+                      color: Color(0xFF10B981),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+
+          // ── Divider ──────────────────────────────────────────────────────
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Divider(color: Color(0xFFE5E7EB), height: 1),
+          ),
+
+          // ── Personal discount row ────────────────────────────────────────
+          GestureDetector(
+            onTap: () {
+              if (_personalDiscount != null) {
+                // Already applied — toggle off
+                setState(() => _personalDiscount = null);
+              } else {
+                _requestDiscount();
+              }
+            },
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: _isLoadingDiscount
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFF1E7DC8),
+                          ),
+                        )
+                      : Checkbox(
+                          value: _personalDiscount != null,
+                          onChanged: (_) {
+                            if (_personalDiscount != null) {
+                              setState(() => _personalDiscount = null);
+                            } else {
+                              _requestDiscount();
+                            }
+                          },
+                          activeColor: const Color(0xFF1E7DC8),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                          side:
+                              const BorderSide(color: Color(0xFFD1D5DB)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(4)),
+                        ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      text: 'Застосувати персон. знижку',
+                      style: const TextStyle(
+                          color: Color(0xFF1C1C2E), fontSize: 12),
+                      children: [
+                        if (_personalDiscount != null)
+                          TextSpan(
+                            text: '  -${_discountAmount.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                            style: const TextStyle(
+                              color: Color(0xFF10B981),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
-      );
+      ),
+    );
+  }
+
+  // ── Payment method toggle ─────────────────────────────────────────────────
+
+  Widget _buildPaymentMethodToggle() {
+    return Container(
+      height: 38,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F5F8),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        children: [
+          _paymentSegment(
+            icon: Icons.payments_outlined,
+            label: 'Готівка',
+            method: PaymentMethod.cash,
+            isLeft: true,
+          ),
+          _paymentSegment(
+            icon: Icons.credit_card,
+            label: 'Картка',
+            method: PaymentMethod.card,
+            isLeft: false,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _paymentSegment({
+    required IconData icon,
+    required String label,
+    required PaymentMethod method,
+    required bool isLeft,
+  }) {
+    final isActive = _paymentMethod == method;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() {
+          _paymentMethod = method;
+          if (method != PaymentMethod.cash) {
+            _cashController.clear();
+          }
+        }),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          height: double.infinity,
+          decoration: BoxDecoration(
+            color: isActive ? const Color(0xFF1E7DC8) : Colors.transparent,
+            borderRadius: BorderRadius.horizontal(
+              left: isLeft ? const Radius.circular(7) : Radius.zero,
+              right: !isLeft ? const Radius.circular(7) : Radius.zero,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: isActive ? Colors.white : const Color(0xFF6B7280),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isActive ? Colors.white : const Color(0xFF6B7280),
+                  fontSize: 12.5,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Cash change section ───────────────────────────────────────────────────
+
+  Widget _buildCashChangeSection() {
+    final change = _changeAmount;
+    final hasChange = change != null;
+    final isPositive = hasChange && change >= 0;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                const Text(
+                  'Сума від клієнта:',
+                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+                ),
+                const Spacer(),
+                SizedBox(
+                  width: 100,
+                  height: 32,
+                  child: TextField(
+                    controller: _cashController,
+                    focusNode: _cashFocusNode,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.right,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[\d,.]')),
+                    ],
+                    onChanged: (_) => setState(() {}),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1C1C2E),
+                    ),
+                    decoration: InputDecoration(
+                      suffixText: '₴',
+                      suffixStyle: const TextStyle(
+                        color: Color(0xFF9CA3AF),
+                        fontSize: 13,
+                      ),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      filled: true,
+                      fillColor: const Color(0xFFF9FAFB),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide:
+                            const BorderSide(color: Color(0xFFE5E7EB)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide:
+                            const BorderSide(color: Color(0xFFE5E7EB)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide:
+                            const BorderSide(color: Color(0xFF1E7DC8)),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (hasChange)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      isPositive
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.warning_amber_rounded,
+                      size: 15,
+                      color: isPositive
+                          ? const Color(0xFF10B981)
+                          : const Color(0xFFEF4444),
+                    ),
+                    const SizedBox(width: 5),
+                    const Text(
+                      'Решта:',
+                      style: TextStyle(
+                          color: Color(0xFF6B7280), fontSize: 12),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${change.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                      style: TextStyle(
+                        color: isPositive
+                            ? const Color(0xFF10B981)
+                            : const Color(0xFFEF4444),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Shared helpers ────────────────────────────────────────────────────────
 
   Widget _paySuccessWidget() => Container(
         key: const ValueKey('success'),
@@ -648,29 +1259,49 @@ class _CartPanelState extends State<CartPanel> {
 class _SmallButton extends StatelessWidget {
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
-  const _SmallButton(
-      {required this.icon, required this.label, required this.onTap});
+  final VoidCallback? onTap;
+  final bool enabled;
+  const _SmallButton({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.enabled = true, // ignore: unused_element_parameter
+  });
 
   @override
   Widget build(BuildContext context) {
+    final isEnabled = enabled && onTap != null;
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
+      onTap: isEnabled ? onTap : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: const Color(0xFFE8F3FB),
+          color: isEnabled
+              ? const Color(0xFFE8F3FB)
+              : const Color(0xFFF4F5F8),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-              color: const Color(0xFF1E7DC8).withValues(alpha: 0.2)),
+            color: isEnabled
+                ? const Color(0xFF1E7DC8).withValues(alpha: 0.2)
+                : const Color(0xFFE5E7EB),
+          ),
         ),
         child: Column(
           children: [
-            Icon(icon, color: const Color(0xFF1E7DC8), size: 16),
+            Icon(icon,
+                color: isEnabled
+                    ? const Color(0xFF1E7DC8)
+                    : const Color(0xFFD1D5DB),
+                size: 16),
             const SizedBox(height: 3),
             Text(label,
-                style: const TextStyle(
-                    color: Color(0xFF1E7DC8), fontSize: 11)),
+                style: TextStyle(
+                  color: isEnabled
+                      ? const Color(0xFF1E7DC8)
+                      : const Color(0xFFD1D5DB),
+                  fontSize: 11,
+                )),
           ],
         ),
       ),

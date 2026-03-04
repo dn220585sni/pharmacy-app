@@ -706,7 +706,6 @@ class CartPanelState extends State<CartPanel> {
   Widget _buildCheckoutBody() {
     final formattedTotal =
         _finalTotal.toStringAsFixed(2).replaceAll('.', ',');
-    final hasLoyalty = widget.loyalty != null;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
@@ -740,16 +739,19 @@ class CartPanelState extends State<CartPanel> {
             ],
           ),
 
-          // ── Bonuses + Discount block (appears after phone lookup) ────────
-          if (hasLoyalty) ...[
-            const SizedBox(height: 12),
-            _buildBonusAndDiscountBlock(),
-          ],
+          // ── Bonuses + Discount block (always visible, disabled w/o loyalty)
+          const SizedBox(height: 12),
+          _buildBonusAndDiscountBlock(),
 
           const SizedBox(height: 14),
 
           // ── Payment method toggle ────────────────────────────────────────
           _buildPaymentMethodToggle(),
+
+          // ── Cash: amount from client + change ────────────────────────────
+          if (_paymentMethod == PaymentMethod.cash && !_showPaymentSuccess)
+            _buildCashChangeSection(),
+
           const SizedBox(height: 10),
 
           // ── Pay / success button ─────────────────────────────────────────
@@ -759,10 +761,6 @@ class CartPanelState extends State<CartPanel> {
                 ? _paySuccessWidget()
                 : _payButtonWidget(),
           ),
-
-          // ── Cash change section ──────────────────────────────────────────
-          if (_paymentMethod == PaymentMethod.cash && !_showPaymentSuccess)
-            _buildCashChangeSection(),
 
           const SizedBox(height: 8),
 
@@ -790,7 +788,10 @@ class CartPanelState extends State<CartPanel> {
   // ── Combined bonuses + discount block ─────────────────────────────────────
 
   Widget _buildBonusAndDiscountBlock() {
-    final loyalty = widget.loyalty!;
+    final loyalty = widget.loyalty;
+    final hasLoyalty = loyalty != null;
+    final disabledText = const Color(0xFFB0B7C3);
+
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
@@ -809,20 +810,27 @@ class CartPanelState extends State<CartPanel> {
                 height: 20,
                 child: Checkbox(
                   value: _useBonuses,
-                  onChanged: (v) {
-                    setState(() {
-                      _useBonuses = v ?? false;
-                      if (_useBonuses) {
-                        final max = _cartTotal - _discountAmount;
-                        final capped = loyalty.bonusBalance.clamp(0, max);
-                        _bonusController.text = capped.toStringAsFixed(0);
-                      }
-                    });
-                  },
+                  onChanged: hasLoyalty
+                      ? (v) {
+                          setState(() {
+                            _useBonuses = v ?? false;
+                            if (_useBonuses) {
+                              final max = _cartTotal - _discountAmount;
+                              final capped =
+                                  loyalty.bonusBalance.clamp(0, max);
+                              _bonusController.text =
+                                  capped.toStringAsFixed(0);
+                            }
+                          });
+                        }
+                      : null,
                   activeColor: const Color(0xFF1E7DC8),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   visualDensity: VisualDensity.compact,
-                  side: const BorderSide(color: Color(0xFFD1D5DB)),
+                  side: BorderSide(
+                      color: hasLoyalty
+                          ? const Color(0xFFD1D5DB)
+                          : const Color(0xFFE5E7EB)),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(4)),
                 ),
@@ -831,15 +839,19 @@ class CartPanelState extends State<CartPanel> {
               Expanded(
                 child: Text.rich(
                   TextSpan(
-                    text: 'Списати бонуси ',
-                    style: const TextStyle(
-                        color: Color(0xFF1C1C2E), fontSize: 12),
+                    text: 'Списати бонуси',
+                    style: TextStyle(
+                        color: hasLoyalty
+                            ? const Color(0xFF1C1C2E)
+                            : disabledText,
+                        fontSize: 12),
                     children: [
-                      TextSpan(
-                        text: '(доступно ${loyalty.bonusBalance.toStringAsFixed(2).replaceAll('.', ',')})',
-                        style: const TextStyle(
-                            color: Color(0xFF9CA3AF), fontSize: 11.5),
-                      ),
+                      if (hasLoyalty)
+                        TextSpan(
+                          text: ' (доступно ${loyalty.bonusBalance.toStringAsFixed(2).replaceAll('.', ',')})',
+                          style: const TextStyle(
+                              color: Color(0xFF9CA3AF), fontSize: 11.5),
+                        ),
                     ],
                   ),
                 ),
@@ -848,7 +860,7 @@ class CartPanelState extends State<CartPanel> {
           ),
 
           // Bonus amount input (if checked)
-          if (_useBonuses) ...[
+          if (_useBonuses && hasLoyalty) ...[
             const SizedBox(height: 8),
             Row(
               children: [
@@ -922,14 +934,15 @@ class CartPanelState extends State<CartPanel> {
 
           // ── Personal discount row ────────────────────────────────────────
           GestureDetector(
-            onTap: () {
-              if (_personalDiscount != null) {
-                // Already applied — toggle off
-                setState(() => _personalDiscount = null);
-              } else {
-                _requestDiscount();
-              }
-            },
+            onTap: hasLoyalty
+                ? () {
+                    if (_personalDiscount != null) {
+                      setState(() => _personalDiscount = null);
+                    } else {
+                      _requestDiscount();
+                    }
+                  }
+                : null,
             child: Row(
               children: [
                 SizedBox(
@@ -946,19 +959,24 @@ class CartPanelState extends State<CartPanel> {
                         )
                       : Checkbox(
                           value: _personalDiscount != null,
-                          onChanged: (_) {
-                            if (_personalDiscount != null) {
-                              setState(() => _personalDiscount = null);
-                            } else {
-                              _requestDiscount();
-                            }
-                          },
+                          onChanged: hasLoyalty
+                              ? (_) {
+                                  if (_personalDiscount != null) {
+                                    setState(
+                                        () => _personalDiscount = null);
+                                  } else {
+                                    _requestDiscount();
+                                  }
+                                }
+                              : null,
                           activeColor: const Color(0xFF1E7DC8),
                           materialTapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
                           visualDensity: VisualDensity.compact,
-                          side:
-                              const BorderSide(color: Color(0xFFD1D5DB)),
+                          side: BorderSide(
+                              color: hasLoyalty
+                                  ? const Color(0xFFD1D5DB)
+                                  : const Color(0xFFE5E7EB)),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(4)),
                         ),
@@ -968,8 +986,11 @@ class CartPanelState extends State<CartPanel> {
                   child: Text.rich(
                     TextSpan(
                       text: 'Застосувати персон. знижку',
-                      style: const TextStyle(
-                          color: Color(0xFF1C1C2E), fontSize: 12),
+                      style: TextStyle(
+                          color: hasLoyalty
+                              ? const Color(0xFF1C1C2E)
+                              : disabledText,
+                          fontSize: 12),
                       children: [
                         if (_personalDiscount != null)
                           TextSpan(
@@ -1144,40 +1165,48 @@ class CartPanelState extends State<CartPanel> {
                 ),
               ],
             ),
-            if (hasChange)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Row(
-                  children: [
-                    Icon(
-                      isPositive
-                          ? Icons.check_circle_outline_rounded
-                          : Icons.warning_amber_rounded,
-                      size: 15,
-                      color: isPositive
-                          ? const Color(0xFF10B981)
-                          : const Color(0xFFEF4444),
-                    ),
-                    const SizedBox(width: 5),
-                    const Text(
-                      'Решта:',
-                      style: TextStyle(
-                          color: Color(0xFF6B7280), fontSize: 12),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${change.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                      style: TextStyle(
-                        color: isPositive
+            // ── Change row — always visible, empty until amount entered ───
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    hasChange
+                        ? (isPositive
+                            ? Icons.check_circle_outline_rounded
+                            : Icons.warning_amber_rounded)
+                        : Icons.swap_horiz_rounded,
+                    size: 15,
+                    color: hasChange
+                        ? (isPositive
                             ? const Color(0xFF10B981)
-                            : const Color(0xFFEF4444),
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
+                            : const Color(0xFFEF4444))
+                        : const Color(0xFFB0B7C3),
+                  ),
+                  const SizedBox(width: 5),
+                  const Text(
+                    'Решта:',
+                    style: TextStyle(
+                        color: Color(0xFF6B7280), fontSize: 12),
+                  ),
+                  const Spacer(),
+                  Text(
+                    hasChange
+                        ? '${change.toStringAsFixed(2).replaceAll('.', ',')} ₴'
+                        : '— ₴',
+                    style: TextStyle(
+                      color: hasChange
+                          ? (isPositive
+                              ? const Color(0xFF10B981)
+                              : const Color(0xFFEF4444))
+                          : const Color(0xFFB0B7C3),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
+            ),
           ],
         ),
       ),

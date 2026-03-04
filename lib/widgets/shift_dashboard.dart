@@ -21,7 +21,7 @@ class _ShiftData {
 
   static const List<_MetricRow> allMetrics = [
     _MetricRow('Чеків за зміну', '18', _RowStatus.neutral),
-    _MetricRow('Середній чек', '177.78 грн', _RowStatus.neutral),
+    _MetricRow('Середній чек', '177,78', _RowStatus.neutral),
     _MetricRow('Показник Лайк', '62%', _RowStatus.bad),
     _MetricRow('ТПК (з клієнтів)', '44%', _RowStatus.warning),
     _MetricRow('Препаратів відпущено', '24 уп.', _RowStatus.neutral),
@@ -114,6 +114,8 @@ class _ShiftDashboardState extends State<ShiftDashboard>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Alert is shown first — most important info for the pharmacist
+          _buildSectionLabel('Зверніть увагу', Icons.info_outline_rounded),
+          const SizedBox(height: 10),
           _buildAlert(_ShiftData.alert),
           const SizedBox(height: 16),
           _buildSectionLabel('Показники зміни', Icons.bar_chart_rounded),
@@ -127,16 +129,16 @@ class _ShiftDashboardState extends State<ShiftDashboard>
             label: 'Товарообіг',
             fact: _ShiftData.turnoverFact,
             plan: _ShiftData.turnoverPlan,
-            factLabel: '3 200 грн',
-            planLabel: '5 000 грн',
+            factLabel: '3 200',
+            planLabel: '5 000',
           ),
           const SizedBox(height: 14),
           _buildKpiBar(
             label: 'Продаж ВТМ',
             fact: _ShiftData.vtmFact,
             plan: _ShiftData.vtmPlan,
-            factLabel: '2 100 грн',
-            planLabel: '3 000 грн',
+            factLabel: '2 100',
+            planLabel: '3 000',
           ),
           const SizedBox(height: 12),
           _buildExpandable(),
@@ -161,18 +163,34 @@ class _ShiftDashboardState extends State<ShiftDashboard>
           ),
           child: Row(
             children: [
-              // Coin icon in a light-green circle
               Container(
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF0FDF4),
+                  color: const Color(0xFFFFF8E1),
                   borderRadius: BorderRadius.circular(11),
                 ),
-                child: const Icon(
-                  Icons.monetization_on_rounded,
-                  color: Color(0xFF16A34A),
-                  size: 22,
+                child: Center(
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Color(0xFFFFCC00),
+                    ),
+                    child: const Center(
+                      child: Text(
+                        'АНЦ',
+                        style: TextStyle(
+                          color: Color(0xFF1E7DC8),
+                          fontSize: 7,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.2,
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -180,7 +198,7 @@ class _ShiftDashboardState extends State<ShiftDashboard>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Зароблено з початку зміни',
+                    'Нараховано з початку зміни',
                     style: TextStyle(
                       fontSize: 11,
                       color: Color(0xFF9CA3AF),
@@ -217,7 +235,7 @@ class _ShiftDashboardState extends State<ShiftDashboard>
       if (i > 0 && (s.length - i) % 3 == 0) buf.write('\u00A0'); // narrow space
       buf.write(s[i]);
     }
-    return '$buf,$frac ₴';
+    return '$buf,$frac';
   }
 
   // ── Section label ───────────────────────────────────────────────────────────
@@ -487,13 +505,5 @@ class _ShiftDashboardState extends State<ShiftDashboard>
         ],
       ),
     );
-  }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-
-  Color _progressColor(double ratio) {
-    if (ratio >= 0.90) return const Color(0xFF22C55E);
-    if (ratio >= 0.70) return const Color(0xFFF59E0B);
-    return const Color(0xFFEF4444);
   }
 }

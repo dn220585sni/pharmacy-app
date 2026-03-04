@@ -77,7 +77,31 @@ class _PosScreenState extends State<PosScreen> {
   /// Key for accessing CartPanelState (enterCheckout via F5).
   final _cartPanelKey = GlobalKey<CartPanelState>();
 
-  void _toggleCart() => setState(() => _cartOpen = !_cartOpen);
+  void _toggleCart() {
+    setState(() => _cartOpen = !_cartOpen);
+    if (_cartOpen) _focusPhoneField();
+  }
+
+  /// Focus the loyalty phone field with the cursor after the prefix.
+  void _focusPhoneField() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final len = _loyaltyPhoneController.text.length;
+      _loyaltyPhoneController.selection =
+          TextSelection.collapsed(offset: len);
+      _loyaltyPhoneFocusNode.requestFocus();
+    });
+  }
+
+  /// Prevent the cursor / selection from landing inside the "+380 " prefix.
+  void _guardPhoneCursor() {
+    final sel = _loyaltyPhoneController.selection;
+    if (!sel.isValid) return;
+    final minOffset = _loyaltyPhonePrefix.length;
+    if (sel.baseOffset < minOffset || sel.extentOffset < minOffset) {
+      _loyaltyPhoneController.selection =
+          TextSelection.collapsed(offset: _loyaltyPhoneController.text.length);
+    }
+  }
 
   /// Auth card is visible when a drug row is selected OR cart is open.
   /// Hidden only on the dashboard view (no drug selected, cart closed).
@@ -174,6 +198,7 @@ class _PosScreenState extends State<PosScreen> {
     // Loyalty phone setup
     _loyaltyPhoneController.text = _loyaltyPhonePrefix;
     _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.addListener(_guardPhoneCursor);
 
     // Auto-select first row on startup
     if (_searchResults.isNotEmpty) {
@@ -208,7 +233,7 @@ class _PosScreenState extends State<PosScreen> {
       return false;
     }
 
-    // ── F2: toggle cart panel ────────────────────────────────────────────────
+    // ── F2: toggle cart panel (focus handled inside _toggleCart) ────────────
     if (event.logicalKey == LogicalKeyboardKey.f2) {
       _toggleCart();
       return true;
@@ -217,6 +242,7 @@ class _PosScreenState extends State<PosScreen> {
     // ── F5: enter checkout mode (cart must be open with items) ──────────────
     if (event.logicalKey == LogicalKeyboardKey.f5) {
       if (_cart.isNotEmpty) {
+        _loyaltyPhoneFocusNode.unfocus();
         if (!_cartOpen) {
           setState(() => _cartOpen = true);
           // Wait for CartPanel to build, then enter checkout
@@ -415,7 +441,10 @@ class _PosScreenState extends State<PosScreen> {
   double get _cartTotal => _cart.fold(0, (s, i) => s + i.total);
   int get _cartItemCount => _cart.fold(0, (s, i) => s + i.quantity);
 
-  void _clearCart() => setState(() => _cart.clear());
+  void _clearCart() => setState(() {
+    _cart.clear();
+    _resetLoyalty();
+  });
 
   // ── Loyalty phone listener ────────────────────────────────────────────────
 
@@ -455,8 +484,10 @@ class _PosScreenState extends State<PosScreen> {
       _previousCustomerPhone = _loyaltyPhoneController.text;
     }
     _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.removeListener(_guardPhoneCursor);
     _loyaltyPhoneController.text = _loyaltyPhonePrefix;
     _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.addListener(_guardPhoneCursor);
     _customerLoyalty = null;
     _isLoadingLoyalty = false;
   }
@@ -464,8 +495,10 @@ class _PosScreenState extends State<PosScreen> {
   void _recallPreviousCustomer() {
     if (_previousCustomerPhone == null) return;
     _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.removeListener(_guardPhoneCursor);
     _loyaltyPhoneController.text = _previousCustomerPhone!;
     _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.addListener(_guardPhoneCursor);
     // Extract digits after +380 and fetch
     final digits = _previousCustomerPhone!
         .substring(_loyaltyPhonePrefix.length)
@@ -794,50 +827,14 @@ class _PosScreenState extends State<PosScreen> {
       ),
       child: Row(
         children: [
-          // АНЦ logo — yellow circle with blue arcs + bold lettering
-          ClipOval(
-            child: Container(
-              width: 40,
+          // АНЦ Каса — logo image from asset
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.asset(
+              'assets/images/Logo1.png',
               height: 40,
-              color: const Color(0xFFFFCC00),
-              child: const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.keyboard_arrow_up_rounded,
-                      color: Color(0xFF1E7DC8), size: 13),
-                  Text(
-                    'АНЦ',
-                    style: TextStyle(
-                      color: Color(0xFF1E7DC8),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.5,
-                      height: 1.0,
-                    ),
-                  ),
-                  Icon(Icons.keyboard_arrow_down_rounded,
-                      color: Color(0xFF1E7DC8), size: 13),
-                ],
-              ),
+              fit: BoxFit.contain,
             ),
-          ),
-          const SizedBox(width: 10),
-          const Text(
-            'EuroPharma',
-            style: TextStyle(
-              color: Color(0xFF1E7DC8),
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.3,
-            ),
-          ),
-          const SizedBox(width: 24),
-          const Icon(Icons.access_time_rounded,
-              color: Color(0xFF9CA3AF), size: 15),
-          const SizedBox(width: 5),
-          Text(
-            _getCurrentDateTime(),
-            style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
           ),
           const Spacer(),
           Container(
@@ -862,12 +859,6 @@ class _PosScreenState extends State<PosScreen> {
         ],
       ),
     );
-  }
-
-  String _getCurrentDateTime() {
-    final now = DateTime.now();
-    return '${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year}  '
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
   }
 
   // ── Search bar (open strip, no card) ───────────────────────────────────────
@@ -1030,7 +1021,7 @@ class _PosScreenState extends State<PosScreen> {
                 ),
                 const SizedBox(width: 8),
                 const Text(
-                  'Картка клієнта',
+                  'Номер клієнта',
                   style: TextStyle(
                     color: Color(0xFF6B7280),
                     fontSize: 12,
@@ -1165,15 +1156,14 @@ class _PosScreenState extends State<PosScreen> {
                       primary: true,
                       onTap: _confirmPhone,
                     ),
-                    // «Попередній» — visible only before typing digits
-                    if (!hasDigits &&
-                        !hasLoyalty &&
-                        _previousCustomerPhone != null) ...[
+                    // «Попередній» — visible before user starts typing digits
+                    if (!hasDigits && !hasLoyalty) ...[
                       const SizedBox(width: 4),
                       _buildAuthActionButton(
                         label: 'Попередній',
                         icon: Icons.history_rounded,
-                        enabled: !_isLoadingLoyalty,
+                        enabled: _previousCustomerPhone != null &&
+                            !_isLoadingLoyalty,
                         primary: false,
                         onTap: _recallPreviousCustomer,
                       ),

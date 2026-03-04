@@ -124,6 +124,7 @@ final List<Drug> mockDrugs = [
     serialNumber: '1234734678',
     barcode: '4820191580014',
     imageUrl: 'asset:assets/images/paracetamol.jpg',
+    unitsPerPackage: 2,
     usageInfo: DrugUsageInfo(
       adults: UsageStatus.ok,
       children: UsageStatus.ok,
@@ -156,7 +157,9 @@ final List<Drug> mockDrugs = [
     series: '114',
     serialNumber: '9876543210',
     barcode: '4820009510328',
+    unitsPerPackage: 3,
     usageInfo: _uiNsaid,
+    intakeWarning: 'Вживайте тільки після їжі!',
   ),
   const Drug(
     id: '003',
@@ -176,6 +179,7 @@ final List<Drug> mockDrugs = [
     series: '221',
     serialNumber: '5647382910',
     barcode: '4007221042519',
+    unitsPerPackage: 3,
     usageInfo: DrugUsageInfo(
       adults: UsageStatus.ok,
       children: UsageStatus.contraindicated,
@@ -208,6 +212,7 @@ final List<Drug> mockDrugs = [
     series: '089',
     serialNumber: '3021948576',
     barcode: '4820025500048',
+    unitsPerPackage: 2,
     usageInfo: _uiAntibiotics,
   ),
   const Drug(
@@ -254,6 +259,7 @@ final List<Drug> mockDrugs = [
     serialNumber: '4501239876',
     barcode: '4820009511432',
     usageInfo: _uiGastro,
+    intakeWarning: 'Вживайте за 30 хв до їжі, не розжовуючи!',
   ),
   const Drug(
     id: '007',
@@ -283,6 +289,7 @@ final List<Drug> mockDrugs = [
       pregnant: UsageStatus.caution,
       drivers: UsageStatus.ok,
     ),
+    intakeWarning: 'Приймати під час або після їжі, не подрібнювати!',
   ),
   const Drug(
     id: '008',

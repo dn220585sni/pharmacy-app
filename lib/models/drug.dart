@@ -58,6 +58,8 @@ class Drug {
   final String? locationCode;             // "C3/02", "А4/07"
   final DrugUsageInfo? usageInfo;
   final String? imageUrl;          // product photo; future: provided by API
+  final int? unitsPerPackage;      // blisters/units per package (null = not splittable)
+  final String? intakeWarning;     // e.g. "Вживайте тільки після їжі!" (from external service)
 
   // ── Batch / serialisation fields ──────────────────────────────────────────
   final String? series;        // e.g. "036"
@@ -86,6 +88,8 @@ class Drug {
     this.locationCode,
     this.usageInfo,
     this.imageUrl,
+    this.unitsPerPackage,
+    this.intakeWarning,
     this.series,
     this.serialNumber,
     this.barcode,

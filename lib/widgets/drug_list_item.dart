@@ -16,9 +16,12 @@ class DrugListItem extends StatefulWidget {
   final bool shouldFocusQty;
   final bool isEvenRow;
   final int cartQuantity;
+  final int? cartFractionalQty; // null = whole package mode
   final String? pendingInput; // digit to inject when qty field gets focused
   final VoidCallback onTap;
   final ValueChanged<int> onQuantityChanged;
+  final ValueChanged<int>? onFractionalChanged; // Ctrl+digit → blisters
+  final VoidCallback? onFractionalUnavailable; // drug can't be split
   final ValueChanged<int> onNavigate; // +1 = down, -1 = up
 
   const DrugListItem({
@@ -28,9 +31,12 @@ class DrugListItem extends StatefulWidget {
     required this.shouldFocusQty,
     required this.isEvenRow,
     required this.cartQuantity,
+    this.cartFractionalQty,
     this.pendingInput,
     required this.onTap,
     required this.onQuantityChanged,
+    this.onFractionalChanged,
+    this.onFractionalUnavailable,
     required this.onNavigate,
   });
 
@@ -45,9 +51,11 @@ class _DrugListItemState extends State<DrugListItem> {
   @override
   void initState() {
     super.initState();
-    _qtyController = TextEditingController(
-      text: widget.cartQuantity > 0 ? '${widget.cartQuantity}' : '',
-    );
+    final frac = widget.cartFractionalQty;
+    final initText = (frac != null && widget.drug.unitsPerPackage != null)
+        ? '$frac/${widget.drug.unitsPerPackage}'
+        : (widget.cartQuantity > 0 ? '${widget.cartQuantity}' : '');
+    _qtyController = TextEditingController(text: initText);
     _focusNode = FocusNode(
       onKeyEvent: (node, event) {
         if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
@@ -61,6 +69,20 @@ class _DrugListItemState extends State<DrugListItem> {
           widget.onNavigate(-1);
           return KeyEventResult.handled;
         }
+
+        // Ctrl+digit → fractional (blister) mode
+        if (HardwareKeyboard.instance.isControlPressed) {
+          final digit = _ctrlDigit(event.logicalKey);
+          if (digit != null) {
+            if (widget.drug.unitsPerPackage != null) {
+              widget.onFractionalChanged?.call(digit);
+            } else {
+              widget.onFractionalUnavailable?.call();
+            }
+            return KeyEventResult.handled;
+          }
+        }
+
         return KeyEventResult.ignored;
       },
     );
@@ -108,16 +130,10 @@ class _DrugListItemState extends State<DrugListItem> {
       });
     }
 
-    // Sync controller when cart quantity changes externally
-    if (oldWidget.cartQuantity != widget.cartQuantity) {
-      final newText =
-          widget.cartQuantity > 0 ? '${widget.cartQuantity}' : '';
-      if (_qtyController.text != newText) {
-        _qtyController.value = _qtyController.value.copyWith(
-          text: newText,
-          selection: TextSelection.collapsed(offset: newText.length),
-        );
-      }
+    // Sync controller when cart quantity or fractional qty changes externally
+    if (oldWidget.cartQuantity != widget.cartQuantity ||
+        oldWidget.cartFractionalQty != widget.cartFractionalQty) {
+      _syncQtyText();
     }
   }
 
@@ -126,6 +142,35 @@ class _DrugListItemState extends State<DrugListItem> {
     _qtyController.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  /// Map Ctrl+key to digit 0-9, or null if not a digit key.
+  static int? _ctrlDigit(LogicalKeyboardKey key) {
+    final id = key.keyId;
+    // Digit row: 0x00000000030 .. 0x00000000039
+    if (id >= 0x30 && id <= 0x39) return id - 0x30;
+    // Numpad: 0x0000000100000060 .. 0x0000000100000069
+    if (id >= 0x0000000100000060 && id <= 0x0000000100000069) {
+      return id - 0x0000000100000060;
+    }
+    return null;
+  }
+
+  /// Programmatically set the qty field text (for fractional "N/M" format).
+  void _syncQtyText() {
+    final frac = widget.cartFractionalQty;
+    final String newText;
+    if (frac != null && widget.drug.unitsPerPackage != null) {
+      newText = '$frac/${widget.drug.unitsPerPackage}';
+    } else {
+      newText = widget.cartQuantity > 0 ? '${widget.cartQuantity}' : '';
+    }
+    if (_qtyController.text != newText) {
+      _qtyController.value = _qtyController.value.copyWith(
+        text: newText,
+        selection: TextSelection.collapsed(offset: newText.length),
+      );
+    }
   }
 
   Widget _buildBadge() {
@@ -286,14 +331,14 @@ class _DrugListItemState extends State<DrugListItem> {
                     child: drug.stock > 0
                         ? Center(
                             child: SizedBox(
-                              width: 44,
+                              width: 48,
                               height: 28,
                               child: TextField(
                                 controller: _qtyController,
                                 focusNode: _focusNode,
                                 keyboardType: TextInputType.number,
                                 inputFormatters: [
-                                  FilteringTextInputFormatter.digitsOnly,
+                                  FilteringTextInputFormatter.allow(RegExp(r'[\d/]')),
                                 ],
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(
@@ -306,7 +351,7 @@ class _DrugListItemState extends State<DrugListItem> {
                                   contentPadding: const EdgeInsets.symmetric(
                                       horizontal: 4, vertical: 5),
                                   filled: true,
-                                  fillColor: widget.cartQuantity > 0
+                                  fillColor: (widget.cartQuantity > 0 || widget.cartFractionalQty != null)
                                       ? const Color(0xFFE8F3FB)
                                       : const Color(0xFFF9FAFB),
                                   border: OutlineInputBorder(
@@ -317,7 +362,7 @@ class _DrugListItemState extends State<DrugListItem> {
                                   enabledBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(6),
                                     borderSide: BorderSide(
-                                      color: widget.cartQuantity > 0
+                                      color: (widget.cartQuantity > 0 || widget.cartFractionalQty != null)
                                           ? const Color(0xFF1E7DC8)
                                           : const Color(0xFFE5E7EB),
                                       width: 1,
@@ -330,6 +375,8 @@ class _DrugListItemState extends State<DrugListItem> {
                                   ),
                                 ),
                                 onChanged: (value) {
+                                  // Ignore programmatic "N/M" values
+                                  if (value.contains('/')) return;
                                   final qty = int.tryParse(value) ?? 0;
                                   final clamped = qty.clamp(0, drug.stock);
                                   widget.onQuantityChanged(clamped);

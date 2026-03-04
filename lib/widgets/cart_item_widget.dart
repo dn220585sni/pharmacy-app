@@ -60,7 +60,7 @@ class CartItemWidget extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${item.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴ × ${item.quantity}',
+                  '${item.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴ × ${item.displayQty}',
                   style: const TextStyle(
                     color: Color(0xFF9CA3AF),
                     fontSize: 11,
@@ -79,21 +79,26 @@ class CartItemWidget extends StatelessWidget {
                 onTap: onDecrease,
               ),
               SizedBox(
-                width: 30,
+                width: item.isFractional ? 42 : 30,
                 child: Text(
-                  '${item.quantity}',
+                  item.displayQty,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Color(0xFF1C1C2E),
-                    fontSize: 14,
+                  style: TextStyle(
+                    color: const Color(0xFF1C1C2E),
+                    fontSize: item.isFractional ? 12 : 14,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
               _ControlButton(
                 icon: Icons.add_rounded,
-                onTap:
-                    item.quantity < item.drug.stock ? onIncrease : null,
+                onTap: item.isFractional
+                    ? (item.fractionalQty! < item.drug.unitsPerPackage!
+                        ? onIncrease
+                        : null)
+                    : (item.quantity < item.drug.stock
+                        ? onIncrease
+                        : null),
               ),
             ],
           ),

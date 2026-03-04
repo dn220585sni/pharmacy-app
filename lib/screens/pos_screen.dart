@@ -1,47 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../data/mock_drugs.dart';
+import '../data/symptom_categories.dart';
 import '../models/cart_item.dart';
+import '../models/cart_offer.dart';
+import '../models/customer_loyalty.dart';
 import '../models/drug.dart';
+import '../models/edk_offer.dart';
 import '../widgets/action_sidebar.dart';
 import '../widgets/cart_panel.dart';
+import '../widgets/clear_cart_dialog.dart';
 import '../widgets/drug_detail_panel.dart';
+import '../widgets/edk_panel.dart';
+import '../widgets/customer_auth_card.dart';
+import '../widgets/top_bar.dart';
 import '../widgets/drug_list_item.dart';
 
 // Approximate item row height for scroll-to-selection
 const double _kItemHeight = 49.0;
-
-// Phone prefix formatter — always keeps "+380 ", only digits allowed after it.
-class _PhonePrefixFormatter extends TextInputFormatter {
-  static const prefix = '+380 ';
-
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    String text = newValue.text;
-    if (!text.startsWith(prefix)) {
-      final allDigits = text.replaceAll(RegExp(r'\D'), '');
-      final afterCode =
-          allDigits.startsWith('380') ? allDigits.substring(3) : allDigits;
-      final result = prefix + afterCode;
-      return TextEditingValue(
-        text: result,
-        selection: TextSelection.collapsed(offset: result.length),
-      );
-    }
-    final afterPrefix = text.substring(prefix.length);
-    final cleanAfter = afterPrefix.replaceAll(RegExp(r'\D'), '');
-    final result = prefix + cleanAfter;
-    final cursor =
-        newValue.selection.end.clamp(prefix.length, result.length).toInt();
-    return TextEditingValue(
-      text: result,
-      selection: TextSelection.collapsed(offset: cursor),
-    );
-  }
-}
 
 class PosScreen extends StatefulWidget {
   const PosScreen({super.key});
@@ -73,6 +49,10 @@ class _PosScreenState extends State<PosScreen> {
 
   /// Whether the cart panel is shown in the right column.
   bool _cartOpen = false;
+
+  // ── ЄДК (Є Дещо Краще) — pharmaceutical substitution ────────────────────
+  EdkOffer? _activeEdkOffer;
+  final Set<String> _dismissedEdkDrugIds = {};
 
   /// Key for accessing CartPanelState (enterCheckout via F5).
   final _cartPanelKey = GlobalKey<CartPanelState>();
@@ -114,62 +94,7 @@ class _PosScreenState extends State<PosScreen> {
   bool _isLoadingLoyalty = false;
   String? _previousCustomerPhone;
 
-  static const _loyaltyPhonePrefix = '+380 ';
-
-  // ── Symptom filters ───────────────────────────────────────────────────────
-
-  static const List<String> _quickSymptoms = [
-    'Всі', 'Біль', 'Нежить', 'Застуда', 'Кашель', 'Отруєння', 'Стрес', 'Безсоння',
-  ];
-
-  /// Groups of symptoms shown in the "Більше…" dropdown.
-  /// Each sub-list is visually separated by a divider.
-  static const List<List<String>> _moreSymptomsGroups = [
-    ['Головний біль', 'Біль у горлі', 'Зубний біль', 'Біль у спині'],
-    ['Кашель сухий', 'Кашель вологий'],
-    ['Важкість у шлунку', 'Печія', 'Діарея', 'Нудота'],
-    ['Алергія', 'Проблеми зі шкірою'],
-    ['Підвищений тиск', 'Понижений тиск'],
-    ['Загальна слабкість'],
-  ];
-
-  // Flat list for membership checks
-  static const List<String> _moreSymptoms = [
-    'Головний біль', 'Біль у горлі', 'Зубний біль', 'Біль у спині',
-    'Кашель сухий', 'Кашель вологий',
-    'Важкість у шлунку', 'Печія', 'Діарея', 'Нудота',
-    'Алергія', 'Проблеми зі шкірою',
-    'Підвищений тиск', 'Понижений тиск',
-    'Загальна слабкість',
-  ];
-
-  /// Maps each symptom to the drug categories it should surface.
-  /// Empty list → show all (used for 'Всі').
-  static const Map<String, List<String>> _symptomCategories = {
-    'Всі':               [],
-    'Біль':              ['Знеболюючі'],
-    'Нежить':            ['Антигістамінні', 'Пульмонологія'],
-    'Застуда':           ['Знеболюючі', 'Антибіотики', 'Пульмонологія'],
-    'Кашель':            ['Пульмонологія'],
-    'Отруєння':          ['Гастроентерологія'],
-    'Стрес':             ['Вітаміни'],
-    'Головний біль':     ['Знеболюючі'],
-    'Біль у горлі':      ['Знеболюючі', 'Антибіотики'],
-    'Зубний біль':       ['Знеболюючі'],
-    'Біль у спині':      ['Знеболюючі'],
-    'Кашель сухий':      ['Пульмонологія'],
-    'Кашель вологий':    ['Пульмонологія'],
-    'Важкість у шлунку': ['Гастроентерологія'],
-    'Печія':             ['Гастроентерологія'],
-    'Діарея':            ['Гастроентерологія'],
-    'Нудота':            ['Гастроентерологія'],
-    'Алергія':           ['Антигістамінні'],
-    'Проблеми зі шкірою': [],
-    'Підвищений тиск':   ['Кардіологія'],
-    'Понижений тиск':    ['Кардіологія'],
-    'Безсоння':          [],
-    'Загальна слабкість': ['Вітаміни'],
-  };
+  static const _loyaltyPhonePrefix = CustomerAuthCard.loyaltyPhonePrefix;
 
   @override
   void initState() {
@@ -226,9 +151,22 @@ class _PosScreenState extends State<PosScreen> {
   bool _handleGlobalKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
 
-    // Don't intercept system shortcuts (Cmd/Ctrl/Alt)
+    // ── Ctrl+digit → fractional qty (blisters) when a row is selected ──────
+    if (HardwareKeyboard.instance.isControlPressed) {
+      final digit = _ctrlDigitFromKey(event.logicalKey);
+      if (digit != null && _selectedDrug != null && _selectedDrug!.stock > 0) {
+        if (_selectedDrug!.unitsPerPackage != null) {
+          _setFractionalQuantity(_selectedDrug!, digit);
+        } else {
+          _showFractionalUnavailable();
+        }
+        return true;
+      }
+      return false; // other Ctrl combos — pass through
+    }
+
+    // Don't intercept system shortcuts (Cmd/Alt)
     if (HardwareKeyboard.instance.isMetaPressed ||
-        HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isAltPressed) {
       return false;
     }
@@ -262,6 +200,8 @@ class _PosScreenState extends State<PosScreen> {
         _cartPanelKey.currentState?.exitCheckout();
       } else if (_cartOpen) {
         setState(() => _cartOpen = false);
+      } else if (_activeEdkOffer != null) {
+        _dismissEdk();
       } else if (_cart.isNotEmpty) {
         _openClearCartConfirmDialog();
       } else if (_searchController.text.isNotEmpty) {
@@ -271,6 +211,16 @@ class _PosScreenState extends State<PosScreen> {
         setState(() => _selectedDrug = null);
       }
       return true;
+    }
+
+    // ── Enter: accept ЄДК offer ──────────────────────────────────────────────
+    if (event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+      if (_activeEdkOffer != null) {
+        _addEdkToCart();
+        return true;
+      }
+      return false;
     }
 
     final character = event.character;
@@ -329,7 +279,7 @@ class _PosScreenState extends State<PosScreen> {
 
   void _filterDrugs() {
     final query = _searchController.text.toLowerCase();
-    final targetCats = _symptomCategories[_selectedSymptom] ?? [];
+    final targetCats = symptomCategories[_selectedSymptom] ?? [];
     setState(() {
       _searchResults = mockDrugs.where((drug) {
         final matchesQuery = query.isEmpty ||
@@ -369,6 +319,7 @@ class _PosScreenState extends State<PosScreen> {
     setState(() {
       _selectedDrug = _searchResults[newIdx];
       _focusQtyOnSelect = true;
+      _activeEdkOffer = null;
     });
 
     _scrollToIndex(newIdx);
@@ -397,12 +348,13 @@ class _PosScreenState extends State<PosScreen> {
 
   // ─── Cart logic ────────────────────────────────────────────────────────────
 
-  int _getCartQuantity(String drugId) {
+  CartItem? _getCartItem(String drugId) {
     final idx = _cart.indexWhere((item) => item.drug.id == drugId);
-    return idx >= 0 ? _cart[idx].quantity : 0;
+    return idx >= 0 ? _cart[idx] : null;
   }
 
   void _setQuantity(Drug drug, int qty) {
+    final wasInCart = _cart.any((item) => item.drug.id == drug.id);
     setState(() {
       final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
       if (qty <= 0) {
@@ -411,10 +363,127 @@ class _PosScreenState extends State<PosScreen> {
         final clamped = qty.clamp(1, drug.stock);
         if (idx >= 0) {
           _cart[idx].quantity = clamped;
+          _cart[idx].fractionalQty = null; // exit fractional mode
         } else {
           _cart.add(CartItem(drug: drug, quantity: clamped));
         }
       }
+    });
+    // Show ЄДК offer when a drug is first added to cart
+    if (!wasInCart && qty > 0) _tryShowEdk(drug);
+  }
+
+  void _setFractionalQuantity(Drug drug, int blisters) {
+    if (drug.unitsPerPackage == null) return;
+    final wasInCart = _cart.any((item) => item.drug.id == drug.id);
+    setState(() {
+      final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
+      if (blisters <= 0) {
+        if (idx >= 0) _cart.removeAt(idx);
+      } else {
+        final clamped = blisters.clamp(1, drug.unitsPerPackage!);
+        if (idx >= 0) {
+          _cart[idx].fractionalQty = clamped;
+          _cart[idx].quantity = 0;
+        } else {
+          _cart.add(CartItem(drug: drug, quantity: 0, fractionalQty: clamped));
+        }
+      }
+    });
+    if (!wasInCart && blisters > 0) _tryShowEdk(drug);
+  }
+
+  /// Map a LogicalKeyboardKey to digit 0-9, or null.
+  static int? _ctrlDigitFromKey(LogicalKeyboardKey key) {
+    final id = key.keyId;
+    if (id >= 0x30 && id <= 0x39) return id - 0x30;
+    if (id >= 0x0000000100000060 && id <= 0x0000000100000069) {
+      return id - 0x0000000100000060;
+    }
+    return null;
+  }
+
+  void _showFractionalUnavailable() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Дроблення недоступне для цього препарату'),
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // ── ЄДК logic ────────────────────────────────────────────────────────────
+
+  /// Hardcoded EDK offers (simulates external service).
+  /// Key = donor drug id, value = replacement offer.
+  late final Map<String, EdkOffer> _edkOffers = {
+    // Ібупрофен 200мг №20 id:'024' (bonus 8) → Нурофен Експрес id:'009' (bonus 20)
+    '024': EdkOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '009'),
+      donorDrugId: '024',
+      description:
+          'Капсульна форма для швидшого всмоктування — '
+          'ефект настає вже через 15 хвилин.',
+      script:
+          'Зверніть увагу, є аналогічний препарат у капсулах — '
+          'діє значно швидше. Бажаєте спробувати?',
+    ),
+    // Парацетамол 500мг №20 id:'001' (bonus 5) → Панадол 500мг №12 id:'031' (bonus 12)
+    '001': EdkOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '031'),
+      donorDrugId: '001',
+      description:
+          'Європейська якість, та сама діюча речовина. '
+          'Покращена формула для швидшого всмоктування.',
+      script:
+          'Є такий самий парацетамол європейського виробництва — '
+          'діє швидше завдяки покращеній формулі. Рекомендую!',
+    ),
+    // МІГ 400 №20 id:'025' (bonus 12) → Нурофен форте 400мг id:'035' (bonus 20)
+    '025': EdkOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '035'),
+      donorDrugId: '025',
+      description:
+          'Преміальна якість від світового виробника. '
+          'Швидкодіюча формула для максимального ефекту.',
+      script:
+          'Якщо потрібен максимальний ефект — рекомендую цей варіант. '
+          'Швидкодіюча формула, перевірена якість.',
+    ),
+  };
+
+  /// Check and show EDK offer after adding a donor drug to cart.
+  void _tryShowEdk(Drug donorDrug) {
+    if (_dismissedEdkDrugIds.contains(donorDrug.id)) return;
+    final offer = _edkOffers[donorDrug.id];
+    if (offer == null) return;
+    setState(() => _activeEdkOffer = offer);
+  }
+
+  void _addEdkToCart() {
+    if (_activeEdkOffer == null) return;
+    final replacementDrug = _activeEdkOffer!.drug;
+    final donorId = _activeEdkOffer!.donorDrugId;
+    setState(() {
+      _dismissedEdkDrugIds.add(donorId);
+      _activeEdkOffer = null;
+      // Add replacement to cart (qty=1) or increment
+      final idx = _cart.indexWhere((i) => i.drug.id == replacementDrug.id);
+      if (idx >= 0) {
+        _cart[idx].quantity =
+            (_cart[idx].quantity + 1).clamp(1, replacementDrug.stock);
+      } else {
+        _cart.add(CartItem(drug: replacementDrug, quantity: 1));
+      }
+    });
+  }
+
+  void _dismissEdk() {
+    if (_activeEdkOffer == null) return;
+    setState(() {
+      _dismissedEdkDrugIds.add(_activeEdkOffer!.donorDrugId);
+      _activeEdkOffer = null;
     });
   }
 
@@ -422,29 +491,59 @@ class _PosScreenState extends State<PosScreen> {
 
   void _increaseQty(int index) {
     setState(() {
-      if (_cart[index].quantity < _cart[index].drug.stock) {
-        _cart[index].quantity++;
+      final item = _cart[index];
+      if (item.isFractional) {
+        if (item.fractionalQty! < item.drug.unitsPerPackage!) {
+          item.fractionalQty = item.fractionalQty! + 1;
+        }
+      } else {
+        if (item.quantity < item.drug.stock) item.quantity++;
       }
     });
   }
 
   void _decreaseQty(int index) {
     setState(() {
-      if (_cart[index].quantity > 1) {
-        _cart[index].quantity--;
+      final item = _cart[index];
+      if (item.isFractional) {
+        if (item.fractionalQty! > 1) {
+          item.fractionalQty = item.fractionalQty! - 1;
+        } else {
+          _cart.removeAt(index);
+        }
       } else {
-        _cart.removeAt(index);
+        if (item.quantity > 1) {
+          item.quantity--;
+        } else {
+          _cart.removeAt(index);
+        }
       }
     });
   }
 
   double get _cartTotal => _cart.fold(0, (s, i) => s + i.total);
-  int get _cartItemCount => _cart.fold(0, (s, i) => s + i.quantity);
+  int get _cartItemCount => _cart.length;
 
-  void _clearCart() => setState(() {
-    _cart.clear();
-    _resetLoyalty();
-  });
+  void _clearCart() {
+    // Reset search without triggering _filterDrugs (which would auto-select)
+    _searchController.removeListener(_filterDrugs);
+    _searchController.clear();
+    _searchController.addListener(_filterDrugs);
+
+    setState(() {
+      _cart.clear();
+      _selectedDrug = null;
+      _searchResults = mockDrugs;
+      _selectedSymptom = 'Всі';
+      _cartOpen = false;
+      _resetLoyalty();
+      _dismissedEdkDrugIds.clear();
+      _activeEdkOffer = null;
+    });
+
+    // Unfocus everything — true zero state
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
 
   // ── Loyalty phone listener ────────────────────────────────────────────────
 
@@ -522,10 +621,15 @@ class _PosScreenState extends State<PosScreen> {
     CartOffer(
       drug: mockDrugs.firstWhere((d) => d.id == '019'),
       reason: 'Підтримка імунітету при застуді',
+      promoLabel: 'Акція 1+1',
+      script:
+          'Рекомендую додати вітамін С — він підтримує імунітет і прискорює одужання при застуді.',
     ),
     CartOffer(
       drug: mockDrugs.firstWhere((d) => d.id == '017'),
       reason: 'Супутній препарат при кашлі',
+      script:
+          'Для полегшення кашлю рекомендую цей муколітик — він розріджує мокротиння.',
     ),
   ];
 
@@ -577,6 +681,7 @@ class _PosScreenState extends State<PosScreen> {
       _selectedDrug = drug;
       _focusQtyOnSelect = true;
       _cartOpen = false;
+      _activeEdkOffer = null;
     });
     final idx = _searchResults.indexWhere((d) => d.id == drug.id);
     if (idx >= 0) _scrollToIndex(idx);
@@ -584,110 +689,14 @@ class _PosScreenState extends State<PosScreen> {
 
   // ─── Cart dialog ────────────────────────────────────────────────────────────
 
-  /// Shown when the user presses Esc while the cart has items.
-  /// Asks "Ви дійсно хочете очистити кошик?" with Так / Ні buttons.
   void _openClearCartConfirmDialog() {
-    showDialog(
+    showClearCartDialog(
       context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        child: SizedBox(
-          width: 360,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEE2E2),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(Icons.shopping_cart_outlined,
-                      size: 26, color: Color(0xFFEF4444)),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Очистити кошик?',
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF1C1C2E),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Ви дійсно хочете очистити кошик?\n'
-                  '$_cartItemCount поз. на суму '
-                  '${_cartTotal.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF6B7280),
-                    height: 1.5,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.of(ctx).pop(),
-                        style: OutlinedButton.styleFrom(
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                          side: const BorderSide(
-                              color: Color(0xFFE5E7EB)),
-                        ),
-                        child: const Text(
-                          'Ні',
-                          style: TextStyle(
-                            color: Color(0xFF6B7280),
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () {
-                          _clearCart();
-                          Navigator.of(ctx).pop();
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFEF4444),
-                          foregroundColor: Colors.white,
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                          elevation: 0,
-                        ),
-                        child: const Text(
-                          'Так',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+      itemCount: _cartItemCount,
+      cartTotal: _cartTotal,
+    ).then((confirmed) {
+      if (confirmed == true) _clearCart();
+    });
   }
 
 
@@ -699,7 +708,7 @@ class _PosScreenState extends State<PosScreen> {
       backgroundColor: const Color(0xFFF4F5F8),
       body: Column(
         children: [
-          _buildTopBar(),
+          const TopBar(),
 
           // ── Main content area ──────────────────────────────────────────────
           Expanded(
@@ -727,7 +736,16 @@ class _PosScreenState extends State<PosScreen> {
                                     const SizedBox(width: 10),
                                     Expanded(
                                       flex: 3,
-                                      child: _buildCustomerAuthCard(),
+                                      child: CustomerAuthCard(
+                                        phoneController: _loyaltyPhoneController,
+                                        phoneFocusNode: _loyaltyPhoneFocusNode,
+                                        loyalty: _customerLoyalty,
+                                        isLoadingLoyalty: _isLoadingLoyalty,
+                                        previousCustomerPhone: _previousCustomerPhone,
+                                        onConfirmPhone: _confirmPhone,
+                                        onRecallPrevious: _recallPreviousCustomer,
+                                        onResetLoyalty: () => setState(() => _resetLoyalty()),
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -759,14 +777,7 @@ class _PosScreenState extends State<PosScreen> {
                                               onAddOffer: _addOfferToCart,
                                               loyalty: _customerLoyalty,
                                             )
-                                          : DrugDetailPanel(
-                                              key: const ValueKey('detail'),
-                                              drug: _selectedDrug,
-                                              analogues: _analogues,
-                                              onSelectAnalogue:
-                                                  _selectAnalogue,
-                                              earnedAmount: _totalEarned,
-                                            ),
+                                          : _buildRightPanel(),
                                     ),
                                   ],
                                 ),
@@ -790,13 +801,7 @@ class _PosScreenState extends State<PosScreen> {
                               const SizedBox(width: 10),
                               Expanded(
                                 flex: 3,
-                                child: DrugDetailPanel(
-                                  key: const ValueKey('detail'),
-                                  drug: _selectedDrug,
-                                  analogues: _analogues,
-                                  onSelectAnalogue: _selectAnalogue,
-                                  earnedAmount: _totalEarned,
-                                ),
+                                child: _buildRightPanel(),
                               ),
                             ],
                           ),
@@ -815,53 +820,50 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
-  Widget _buildTopBar() {
-    return Container(
-      height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          bottom: BorderSide(color: Color(0xFFE5E7EB), width: 1),
+  // ── Search bar (open strip, no card) ───────────────────────────────────────
+
+  /// Right panel: switches between EdkPanel and DrugDetailPanel with animation.
+  Widget _buildRightPanel() {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      // Stretch children to fill available space (prevents vertical centering
+      // of ShiftDashboard when drug == null).
+      layoutBuilder: (currentChild, previousChildren) {
+        return Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            ...previousChildren,
+            ?currentChild,
+          ],
+        );
+      },
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0.04, 0),
+            end: Offset.zero,
+          ).animate(
+              CurvedAnimation(parent: animation, curve: Curves.easeOut)),
+          child: child,
         ),
       ),
-      child: Row(
-        children: [
-          // АНЦ Каса — logo image from asset
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.asset(
-              'assets/images/Logo1.png',
-              height: 40,
-              fit: BoxFit.contain,
+      child: _activeEdkOffer != null
+          ? EdkPanel(
+              key: ValueKey('edk-${_activeEdkOffer!.drug.id}'),
+              offer: _activeEdkOffer!,
+              onAdd: _addEdkToCart,
+              onDismiss: _dismissEdk,
+            )
+          : DrugDetailPanel(
+              key: const ValueKey('detail'),
+              drug: _selectedDrug,
+              analogues: _analogues,
+              onSelectAnalogue: _selectAnalogue,
+              earnedAmount: _totalEarned,
             ),
-          ),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE8F3FB),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                  color: const Color(0xFF1E7DC8).withValues(alpha: 0.25)),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.person_outline_rounded,
-                    color: Color(0xFF1E7DC8), size: 15),
-                SizedBox(width: 5),
-                Text('Касир: Микола',
-                    style:
-                        TextStyle(color: Color(0xFF1E7DC8), fontSize: 13)),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
-
-  // ── Search bar (open strip, no card) ───────────────────────────────────────
 
   Widget _buildSearchBar() {
     return KeyedSubtree(
@@ -923,7 +925,7 @@ class _PosScreenState extends State<PosScreen> {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      ..._quickSymptoms.map((symptom) {
+                      ...quickSymptoms.map((symptom) {
                         final isActive = _selectedSymptom == symptom;
                         return GestureDetector(
                           onTap: () => setState(() {
@@ -976,264 +978,10 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
-  // ── Customer auth card (above right panel) ─────────────────────────────────
-
-  Widget _buildCustomerAuthCard() {
-    final hasLoyalty = _customerLoyalty != null;
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x0D000000),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // ── Header row ─────────────────────────────────────────────
-            Row(
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E7DC8),
-                    borderRadius: BorderRadius.circular(5),
-                  ),
-                  child: const Text(
-                    'ЛАЙК',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Номер клієнта',
-                  style: TextStyle(
-                    color: Color(0xFF6B7280),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const Spacer(),
-                if (hasLoyalty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.check_circle_rounded,
-                            color: Color(0xFF10B981), size: 12),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${_customerLoyalty!.bonusBalance.toStringAsFixed(0)} бонусів',
-                          style: const TextStyle(
-                            color: Color(0xFF10B981),
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-
-            // ── Phone input + action buttons in a row ─────────────────
-            Builder(builder: (context) {
-              final phoneDigits = _loyaltyPhoneController.text
-                  .substring(_loyaltyPhonePrefix.length)
-                  .replaceAll(RegExp(r'\D'), '');
-              final hasDigits = phoneDigits.isNotEmpty;
-              final canConfirm = phoneDigits.length >= 9 &&
-                  !hasLoyalty &&
-                  !_isLoadingLoyalty;
-
-              return SizedBox(
-                height: 34,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _loyaltyPhoneController,
-                        focusNode: _loyaltyPhoneFocusNode,
-                        keyboardType: TextInputType.phone,
-                        inputFormatters: [_PhonePrefixFormatter()],
-                        onSubmitted: (_) => _confirmPhone(),
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF1C1C2E),
-                        ),
-                        decoration: InputDecoration(
-                          hintText: '+380 __ ___ __ __',
-                          hintStyle: const TextStyle(
-                              color: Color(0xFFB0B7C3), fontSize: 13),
-                          prefixIcon: const Padding(
-                            padding: EdgeInsets.only(left: 10, right: 6),
-                            child: Icon(Icons.phone_outlined,
-                                size: 15, color: Color(0xFF9CA3AF)),
-                          ),
-                          prefixIconConstraints:
-                              const BoxConstraints(minWidth: 0, minHeight: 0),
-                          suffixIcon: _isLoadingLoyalty
-                              ? const Padding(
-                                  padding: EdgeInsets.all(8),
-                                  child: SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Color(0xFF1E7DC8),
-                                    ),
-                                  ),
-                                )
-                              : hasLoyalty
-                                  ? GestureDetector(
-                                      onTap: () {
-                                        setState(() => _resetLoyalty());
-                                      },
-                                      child: const Padding(
-                                        padding: EdgeInsets.all(8),
-                                        child: Icon(Icons.close_rounded,
-                                            size: 16,
-                                            color: Color(0xFFB0B7C3)),
-                                      ),
-                                    )
-                                  : null,
-                          filled: true,
-                          fillColor: hasLoyalty
-                              ? const Color(0xFFF0FDF4)
-                              : const Color(0xFFF9FAFB),
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 9),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide:
-                                const BorderSide(color: Color(0xFFE5E7EB)),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: hasLoyalty
-                                  ? const Color(0xFF10B981)
-                                      .withValues(alpha: 0.4)
-                                  : const Color(0xFFDDE1F5),
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide:
-                                const BorderSide(color: Color(0xFF1E7DC8)),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    _buildAuthActionButton(
-                      label: 'Ок',
-                      icon: Icons.check_rounded,
-                      enabled: canConfirm,
-                      primary: true,
-                      onTap: _confirmPhone,
-                    ),
-                    // «Попередній» — visible before user starts typing digits
-                    if (!hasDigits && !hasLoyalty) ...[
-                      const SizedBox(width: 4),
-                      _buildAuthActionButton(
-                        label: 'Попередній',
-                        icon: Icons.history_rounded,
-                        enabled: _previousCustomerPhone != null &&
-                            !_isLoadingLoyalty,
-                        primary: false,
-                        onTap: _recallPreviousCustomer,
-                      ),
-                    ],
-                  ],
-                ),
-              );
-            }),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAuthActionButton({
-    required String label,
-    required IconData icon,
-    required bool enabled,
-    required bool primary,
-    required VoidCallback onTap,
-  }) {
-    final Color bg = !enabled
-        ? const Color(0xFFF4F5F8)
-        : primary
-            ? const Color(0xFF1E7DC8)
-            : const Color(0xFFF4F5F8);
-    final Color fg = !enabled
-        ? const Color(0xFFB0B7C3)
-        : primary
-            ? Colors.white
-            : const Color(0xFF6B7280);
-    final Color borderColor = !enabled
-        ? const Color(0xFFE5E7EB)
-        : primary
-            ? const Color(0xFF1E7DC8)
-            : const Color(0xFFE5E7EB);
-
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      child: Container(
-        height: 26,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: borderColor),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 12, color: fg),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                color: fg,
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   // ── «Більше…» symptom dropdown ─────────────────────────────────────────────
 
   Widget _buildMoreSymptomButton() {
-    final isActive = _moreSymptoms.contains(_selectedSymptom);
+    final isActive = moreSymptoms.contains(_selectedSymptom);
     return PopupMenuButton<String>(
       padding: EdgeInsets.zero,
       tooltip: '',
@@ -1248,7 +996,7 @@ class _PosScreenState extends State<PosScreen> {
       itemBuilder: (context) {
         final List<PopupMenuEntry<String>> items = [];
         bool first = true;
-        for (final group in _moreSymptomsGroups) {
+        for (final group in moreSymptomsGroups) {
           if (!first) items.add(const PopupMenuDivider(height: 8));
           for (final symptom in group) {
             final sel = _selectedSymptom == symptom;
@@ -1436,20 +1184,26 @@ class _PosScreenState extends State<PosScreen> {
       itemBuilder: (context, index) {
         final drug = _searchResults[index];
         final isSelected = _selectedDrug?.id == drug.id;
+        final cartItem = _getCartItem(drug.id);
         return DrugListItem(
           key: ValueKey(drug.id),
           drug: drug,
           isSelected: isSelected,
           shouldFocusQty: isSelected && _focusQtyOnSelect,
           isEvenRow: index.isEven,
-          cartQuantity: _getCartQuantity(drug.id),
+          cartQuantity: cartItem?.quantity ?? 0,
+          cartFractionalQty: cartItem?.fractionalQty,
           pendingInput: isSelected ? _pendingQtyInput : null,
           onTap: () => setState(() {
             _selectedDrug = drug;
             _focusQtyOnSelect = true;
             _cartOpen = false;
+            _activeEdkOffer = null;
           }),
           onQuantityChanged: (qty) => _setQuantity(drug, qty),
+          onFractionalChanged: (blisters) =>
+              _setFractionalQuantity(drug, blisters),
+          onFractionalUnavailable: _showFractionalUnavailable,
           onNavigate: _moveSelection,
         );
       },

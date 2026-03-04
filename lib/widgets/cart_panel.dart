@@ -1,39 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../models/cart_item.dart';
+import '../models/cart_offer.dart';
+import '../models/customer_loyalty.dart';
 import '../models/drug.dart';
+import '../models/payment_method.dart';
 import 'cart_item_widget.dart';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Payment method enum
-// ─────────────────────────────────────────────────────────────────────────────
-
-enum PaymentMethod { cash, card }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CustomerLoyalty — result from loyalty service after phone lookup.
-// ─────────────────────────────────────────────────────────────────────────────
-
-class CustomerLoyalty {
-  final String phone;
-  final double bonusBalance; // bonus points in ₴
-  const CustomerLoyalty({required this.phone, required this.bonusBalance});
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CartOffer — public model for pharmacist offer recommendations.
-// Populated by PosScreen from a service; mock data used until service is ready.
-// ─────────────────────────────────────────────────────────────────────────────
-
-class CartOffer {
-  final Drug drug;
-  final String reason;
-  const CartOffer({required this.drug, required this.reason});
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Phone prefix formatter — always keeps "+380 ", only digits allowed after it.
-// ─────────────────────────────────────────────────────────────────────────────
+import 'checkout/bonus_discount_block.dart';
+import 'checkout/cash_change_section.dart';
+import 'checkout/payment_method_toggle.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CartPanel — inline cart shown in the right detail panel.
@@ -89,11 +63,12 @@ class CartPanelState extends State<CartPanel> {
   // Cash change
   final _cashController = TextEditingController();
   final _cashFocusNode = FocusNode();
+  bool _transferChangeToBonus = false;
 
   // ── Computed getters ──────────────────────────────────────────────────────
 
   double get _cartTotal => widget.cart.fold(0.0, (s, i) => s + i.total);
-  int get _cartItemCount => widget.cart.fold(0, (s, i) => s + i.quantity);
+  int get _cartItemCount => widget.cart.length;
 
   double get _discountAmount {
     if (_personalDiscount == null) return 0;
@@ -114,12 +89,6 @@ class CartPanelState extends State<CartPanel> {
     return raw < 0 ? 0 : raw;
   }
 
-  double? get _changeAmount {
-    final text = _cashController.text.replaceAll(',', '.').replaceAll(' ', '');
-    final cash = double.tryParse(text);
-    if (cash == null) return null;
-    return cash - _finalTotal;
-  }
 
   /// Public method — allows PosScreen to enter checkout mode via F5
   void enterCheckout() {
@@ -185,6 +154,7 @@ class CartPanelState extends State<CartPanel> {
           _bonusController.clear();
           _personalDiscount = null;
           _cashController.clear();
+          _transferChangeToBonus = false;
         });
         widget.onClose();
       }
@@ -197,6 +167,7 @@ class CartPanelState extends State<CartPanel> {
     _bonusController.clear();
     _personalDiscount = null;
     _cashController.clear();
+    _transferChangeToBonus = false;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -416,94 +387,181 @@ class CartPanelState extends State<CartPanel> {
 
   Widget _buildOfferCard(CartOffer offer) {
     final drug = offer.drug;
+    final hasScript = offer.script != null && offer.script!.isNotEmpty;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 0, 10, 5),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: const Color(0xFFFFFBEB),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: const Color(0xFFFDE68A)),
         ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── Drug thumbnail ─────────────────────────────────────────
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFFF5E6B8)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: drug.imageUrl != null
+                  ? Image.network(
+                      drug.imageUrl!,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stack) => _offerPlaceholderIcon(),
+                    )
+                  : _offerPlaceholderIcon(),
+            ),
+            const SizedBox(width: 8),
+
+            // ── Text content ───────────────────────────────────────────
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Row 1: promo badge + name + pharmacist bonus
+                  Row(
+                    children: [
+                      if (offer.promoLabel != null) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            offer.promoLabel!,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                      Expanded(
+                        child: Text(
+                          drug.name,
+                          style: const TextStyle(
+                            color: Color(0xFF1C1C2E),
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (drug.pharmacistBonus != null) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          width: 24,
+                          height: 24,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFF5F0E8),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Center(
+                            child: Text(
+                              '${drug.pharmacistBonus}',
+                              style: const TextStyle(
+                                color: Color(0xFF6B7280),
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+
+                  // Row 2: script (pharmacist phrase) or reason
+                  const SizedBox(height: 3),
                   Text(
-                    drug.name,
-                    style: const TextStyle(
-                      color: Color(0xFF1C1C2E),
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
+                    hasScript ? offer.script! : offer.reason,
+                    style: TextStyle(
+                      color: hasScript
+                          ? const Color(0xFF6B7280)
+                          : const Color(0xFF9CA3AF),
+                      fontSize: hasScript ? 11 : 10.5,
+                      fontStyle:
+                          hasScript ? FontStyle.italic : FontStyle.normal,
                     ),
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 1),
-                  Text(
-                    offer.reason,
-                    style: const TextStyle(
-                      color: Color(0xFF9CA3AF),
-                      fontSize: 10.5,
-                    ),
+
+                  // Row 3: reason (if script shown) + price + button
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      if (hasScript)
+                        Expanded(
+                          child: Text(
+                            offer.reason,
+                            style: const TextStyle(
+                              color: Color(0xFF9CA3AF),
+                              fontSize: 10,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        )
+                      else
+                        const Spacer(),
+                      Text(
+                        '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                        style: const TextStyle(
+                          color: Color(0xFF6B7280),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () => widget.onAddOffer(drug),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 9, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E7DC8),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'Додати',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            // Pharmacist bonus badge
-            if (drug.pharmacistBonus != null) ...[
-              const SizedBox(width: 6),
-              Container(
-                width: 24,
-                height: 24,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF5F0E8),
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Text(
-                    '${drug.pharmacistBonus}',
-                    style: const TextStyle(
-                      color: Color(0xFF6B7280),
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(width: 8),
-            Text(
-              '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-              style: const TextStyle(
-                color: Color(0xFF6B7280),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(width: 8),
-            GestureDetector(
-              onTap: () => widget.onAddOffer(drug),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E7DC8),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: const Text(
-                  'Додати',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _offerPlaceholderIcon() {
+    return const Center(
+      child: Icon(
+        Icons.medication_outlined,
+        size: 20,
+        color: Color(0xFFD1D5DB),
       ),
     );
   }
@@ -741,16 +799,61 @@ class CartPanelState extends State<CartPanel> {
 
           // ── Bonuses + Discount block (always visible, disabled w/o loyalty)
           const SizedBox(height: 12),
-          _buildBonusAndDiscountBlock(),
+          BonusDiscountBlock(
+            loyalty: widget.loyalty,
+            useBonuses: _useBonuses,
+            onUseBonusesChanged: (v) {
+              setState(() {
+                _useBonuses = v;
+                if (_useBonuses && widget.loyalty != null) {
+                  final max = _cartTotal - _discountAmount;
+                  final capped =
+                      widget.loyalty!.bonusBalance.clamp(0, max);
+                  _bonusController.text = capped.toStringAsFixed(0);
+                }
+              });
+            },
+            bonusController: _bonusController,
+            cartTotal: _cartTotal,
+            discountAmount: _discountAmount,
+            effectiveBonusAmount: _effectiveBonusAmount,
+            personalDiscount: _personalDiscount,
+            isLoadingDiscount: _isLoadingDiscount,
+            onRequestDiscount: _requestDiscount,
+            onClearDiscount: () =>
+                setState(() => _personalDiscount = null),
+            onBonusAmountChanged: () => setState(() {}),
+          ),
 
           const SizedBox(height: 14),
 
           // ── Payment method toggle ────────────────────────────────────────
-          _buildPaymentMethodToggle(),
+          PaymentMethodToggle(
+            selectedMethod: _paymentMethod,
+            onMethodChanged: (method) => setState(() {
+              _paymentMethod = method;
+              if (method == PaymentMethod.cash) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _cashFocusNode.requestFocus();
+                });
+              } else {
+                _cashController.clear();
+              }
+            }),
+          ),
 
           // ── Cash: amount from client + change ────────────────────────────
           if (_paymentMethod == PaymentMethod.cash && !_showPaymentSuccess)
-            _buildCashChangeSection(),
+            CashChangeSection(
+              cashController: _cashController,
+              cashFocusNode: _cashFocusNode,
+              finalTotal: _finalTotal,
+              onChanged: () => setState(() {}),
+              showBonusTransfer: widget.loyalty != null,
+              transferChangeToBonus: _transferChangeToBonus,
+              onTransferChangeToBonusChanged: (v) =>
+                  setState(() => _transferChangeToBonus = v),
+            ),
 
           const SizedBox(height: 10),
 
@@ -769,448 +872,127 @@ class CartPanelState extends State<CartPanel> {
             children: [
               Expanded(
                   child: _SmallButton(
-                      icon: Icons.print_outlined,
-                      label: 'Друк',
+                      icon: Icons.inventory_2_outlined,
+                      label: 'Резерв F6',
                       onTap: () {})),
               const SizedBox(width: 7),
               Expanded(
                   child: _SmallButton(
-                      icon: Icons.pause_outlined,
-                      label: 'Пауза',
+                      icon: Icons.smart_toy_outlined,
+                      label: 'Привезти чек',
                       onTap: () {})),
             ],
           ),
+
+          // ── Intake warnings from external service ───────────────────────
+          ..._buildIntakeWarnings(),
         ],
       ),
     );
   }
 
-  // ── Combined bonuses + discount block ─────────────────────────────────────
+  // ── Intake warnings ──────────────────────────────────────────────────────
 
-  Widget _buildBonusAndDiscountBlock() {
-    final loyalty = widget.loyalty;
-    final hasLoyalty = loyalty != null;
-    final disabledText = const Color(0xFFB0B7C3);
-
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFDDE1F5)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // ── Bonus row ────────────────────────────────────────────────────
-          Row(
-            children: [
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: Checkbox(
-                  value: _useBonuses,
-                  onChanged: hasLoyalty
-                      ? (v) {
-                          setState(() {
-                            _useBonuses = v ?? false;
-                            if (_useBonuses) {
-                              final max = _cartTotal - _discountAmount;
-                              final capped =
-                                  loyalty.bonusBalance.clamp(0, max);
-                              _bonusController.text =
-                                  capped.toStringAsFixed(0);
-                            }
-                          });
-                        }
-                      : null,
-                  activeColor: const Color(0xFF1E7DC8),
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  visualDensity: VisualDensity.compact,
-                  side: BorderSide(
-                      color: hasLoyalty
-                          ? const Color(0xFFD1D5DB)
-                          : const Color(0xFFE5E7EB)),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(
-                    text: 'Списати бонуси',
-                    style: TextStyle(
-                        color: hasLoyalty
-                            ? const Color(0xFF1C1C2E)
-                            : disabledText,
-                        fontSize: 12),
-                    children: [
-                      if (hasLoyalty)
-                        TextSpan(
-                          text: ' (доступно ${loyalty.bonusBalance.toStringAsFixed(2).replaceAll('.', ',')})',
-                          style: const TextStyle(
-                              color: Color(0xFF9CA3AF), fontSize: 11.5),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          // Bonus amount input (if checked)
-          if (_useBonuses && hasLoyalty) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const SizedBox(width: 28), // align with text above
-                SizedBox(
-                  width: 80,
-                  height: 30,
-                  child: TextField(
-                    controller: _bonusController,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.right,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                          RegExp(r'[\d,.]')),
-                    ],
-                    onChanged: (_) => setState(() {}),
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF1C1C2E),
-                    ),
-                    decoration: InputDecoration(
-                      suffixText: '₴',
-                      suffixStyle: const TextStyle(
-                        color: Color(0xFF9CA3AF),
-                        fontSize: 12,
-                      ),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 7),
-                      filled: true,
-                      fillColor: const Color(0xFFF9FAFB),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide:
-                            const BorderSide(color: Color(0xFFE5E7EB)),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide:
-                            const BorderSide(color: Color(0xFFE5E7EB)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide:
-                            const BorderSide(color: Color(0xFF1E7DC8)),
-                      ),
-                    ),
-                  ),
-                ),
-                if (_effectiveBonusAmount > 0) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    '-${_effectiveBonusAmount.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                    style: const TextStyle(
-                      color: Color(0xFF10B981),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-
-          // ── Divider ──────────────────────────────────────────────────────
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Divider(color: Color(0xFFE5E7EB), height: 1),
-          ),
-
-          // ── Personal discount row ────────────────────────────────────────
-          GestureDetector(
-            onTap: hasLoyalty
-                ? () {
-                    if (_personalDiscount != null) {
-                      setState(() => _personalDiscount = null);
-                    } else {
-                      _requestDiscount();
-                    }
-                  }
-                : null,
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: _isLoadingDiscount
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Color(0xFF1E7DC8),
-                          ),
-                        )
-                      : Checkbox(
-                          value: _personalDiscount != null,
-                          onChanged: hasLoyalty
-                              ? (_) {
-                                  if (_personalDiscount != null) {
-                                    setState(
-                                        () => _personalDiscount = null);
-                                  } else {
-                                    _requestDiscount();
-                                  }
-                                }
-                              : null,
-                          activeColor: const Color(0xFF1E7DC8),
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          visualDensity: VisualDensity.compact,
-                          side: BorderSide(
-                              color: hasLoyalty
-                                  ? const Color(0xFFD1D5DB)
-                                  : const Color(0xFFE5E7EB)),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(4)),
-                        ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text.rich(
-                    TextSpan(
-                      text: 'Застосувати персон. знижку',
-                      style: TextStyle(
-                          color: hasLoyalty
-                              ? const Color(0xFF1C1C2E)
-                              : disabledText,
-                          fontSize: 12),
-                      children: [
-                        if (_personalDiscount != null)
-                          TextSpan(
-                            text: '  -${_discountAmount.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                            style: const TextStyle(
-                              color: Color(0xFF10B981),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Payment method toggle ─────────────────────────────────────────────────
-
-  Widget _buildPaymentMethodToggle() {
-    return Container(
-      height: 38,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F5F8),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-      ),
-      child: Row(
-        children: [
-          _paymentSegment(
-            icon: Icons.payments_outlined,
-            label: 'Готівка',
-            method: PaymentMethod.cash,
-            isLeft: true,
-          ),
-          _paymentSegment(
-            icon: Icons.credit_card,
-            label: 'Картка',
-            method: PaymentMethod.card,
-            isLeft: false,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _paymentSegment({
-    required IconData icon,
-    required String label,
-    required PaymentMethod method,
-    required bool isLeft,
-  }) {
-    final isActive = _paymentMethod == method;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() {
-          _paymentMethod = method;
-          if (method != PaymentMethod.cash) {
-            _cashController.clear();
-          }
-        }),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          height: double.infinity,
-          decoration: BoxDecoration(
-            color: isActive ? const Color(0xFF1E7DC8) : Colors.transparent,
-            borderRadius: BorderRadius.horizontal(
-              left: isLeft ? const Radius.circular(7) : Radius.zero,
-              right: !isLeft ? const Radius.circular(7) : Radius.zero,
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: isActive ? Colors.white : const Color(0xFF6B7280),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: isActive ? Colors.white : const Color(0xFF6B7280),
-                  fontSize: 12.5,
-                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ── Cash change section ───────────────────────────────────────────────────
-
-  Widget _buildCashChangeSection() {
-    final change = _changeAmount;
-    final hasChange = change != null;
-    final isPositive = hasChange && change >= 0;
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: Container(
+  List<Widget> _buildIntakeWarnings() {
+    final warnings = widget.cart
+        .where((item) => item.drug.intakeWarning != null)
+        .toList();
+    if (warnings.isEmpty) return [];
+    return [
+      const SizedBox(height: 10),
+      Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: const Color(0xFFFFFBEB),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          border: Border.all(
+            color: const Color(0xFFF59E0B).withValues(alpha: 0.3),
+          ),
         ),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            const Row(
               children: [
-                const Text(
-                  'Сума від клієнта:',
-                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
-                ),
-                const Spacer(),
-                SizedBox(
-                  width: 100,
-                  height: 32,
-                  child: TextField(
-                    controller: _cashController,
-                    focusNode: _cashFocusNode,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.right,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[\d,.]')),
-                    ],
-                    onChanged: (_) => setState(() {}),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF1C1C2E),
-                    ),
-                    decoration: InputDecoration(
-                      suffixText: '₴',
-                      suffixStyle: const TextStyle(
-                        color: Color(0xFF9CA3AF),
-                        fontSize: 13,
-                      ),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 8),
-                      filled: true,
-                      fillColor: const Color(0xFFF9FAFB),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide:
-                            const BorderSide(color: Color(0xFFE5E7EB)),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide:
-                            const BorderSide(color: Color(0xFFE5E7EB)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide:
-                            const BorderSide(color: Color(0xFF1E7DC8)),
-                      ),
-                    ),
+                Icon(Icons.info_outline_rounded,
+                    size: 14, color: Color(0xFFF59E0B)),
+                SizedBox(width: 5),
+                Text(
+                  'Особливості прийому',
+                  style: TextStyle(
+                    color: Color(0xFF92400E),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
             ),
-            // ── Change row — always visible, empty until amount entered ───
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Row(
-                children: [
-                  Icon(
-                    hasChange
-                        ? (isPositive
-                            ? Icons.check_circle_outline_rounded
-                            : Icons.warning_amber_rounded)
-                        : Icons.swap_horiz_rounded,
-                    size: 15,
-                    color: hasChange
-                        ? (isPositive
-                            ? const Color(0xFF10B981)
-                            : const Color(0xFFEF4444))
-                        : const Color(0xFFB0B7C3),
+            const SizedBox(height: 8),
+            ...warnings.map((item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Drug image / placeholder
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: const Color(0xFFF59E0B).withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: item.drug.imageUrl != null
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(5),
+                                child: Image.network(
+                                  item.drug.imageUrl!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stack) =>
+                                      const Icon(Icons.medication_rounded,
+                                          size: 16,
+                                          color: Color(0xFFF59E0B)),
+                                ),
+                              )
+                            : const Icon(Icons.medication_rounded,
+                                size: 16, color: Color(0xFFF59E0B)),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.drug.name,
+                              style: const TextStyle(
+                                color: Color(0xFF92400E),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              item.drug.intakeWarning!,
+                              style: const TextStyle(
+                                color: Color(0xFFB45309),
+                                fontSize: 11,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 5),
-                  const Text(
-                    'Решта:',
-                    style: TextStyle(
-                        color: Color(0xFF6B7280), fontSize: 12),
-                  ),
-                  const Spacer(),
-                  Text(
-                    hasChange
-                        ? '${change.toStringAsFixed(2).replaceAll('.', ',')} ₴'
-                        : '— ₴',
-                    style: TextStyle(
-                      color: hasChange
-                          ? (isPositive
-                              ? const Color(0xFF10B981)
-                              : const Color(0xFFEF4444))
-                          : const Color(0xFFB0B7C3),
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                )),
           ],
         ),
       ),
-    );
+    ];
   }
 
   // ── Shared helpers ────────────────────────────────────────────────────────

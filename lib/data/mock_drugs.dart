@@ -593,6 +593,7 @@ final List<Drug> mockDrugs = [
     dosageForm: 'Капсули',
     inn: 'Колекальциферол',
     dosage: '2000 МО',
+    unitsPerPackage: 6,
     storageConditions: _storage25,
     locationType: StorageLocationType.showcase,
     locationCode: 'A4/03',

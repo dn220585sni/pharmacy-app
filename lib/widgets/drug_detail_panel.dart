@@ -246,85 +246,72 @@ class DrugDetailPanel extends StatelessWidget {
   Widget _buildHeader(Drug drug) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Drug photo — height matches the text column automatically
-                _DrugPhoto(imageUrl: drug.imageUrl),
-                const SizedBox(width: 12),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Drug photo
+            _DrugPhoto(imageUrl: drug.imageUrl),
+            const SizedBox(width: 12),
 
-                // Name + meta
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
+            // Name + meta
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Row(
                     children: [
-                      Text(
-                        drug.name,
-                        style: const TextStyle(
-                          color: Color(0xFF1C1C2E),
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
-                          height: 1.3,
+                      Expanded(
+                        child: Text(
+                          drug.name,
+                          style: const TextStyle(
+                            color: Color(0xFF1C1C2E),
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            height: 1.3,
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${drug.category}  ·  ${drug.manufacturer}',
-                        style: const TextStyle(
-                          color: Color(0xFF9CA3AF),
-                          fontSize: 11.5,
+                      const SizedBox(width: 6),
+                      GestureDetector(
+                        onTap: () {
+                          // TODO: open instruction URL
+                        },
+                        child: Tooltip(
+                          message: 'Переглянути інструкцію',
+                          child: Container(
+                            width: 26,
+                            height: 26,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF0F4FF),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Icon(
+                              Icons.menu_book_rounded,
+                              size: 14,
+                              color: Color(0xFF1E7DC8),
+                            ),
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      _buildBatchInfo(drug),
                     ],
                   ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 10),
-
-          // Instruction link button
-          GestureDetector(
-            onTap: () {
-              // TODO: open instruction URL when url_launcher is added
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF4F5F8),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFE5E7EB)),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.description_outlined,
-                      size: 14, color: Color(0xFF1E7DC8)),
-                  SizedBox(width: 6),
+                  const SizedBox(height: 4),
                   Text(
-                    'Переглянути інструкцію',
-                    style: TextStyle(
-                      color: Color(0xFF1E7DC8),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
+                    '${drug.category}  ·  ${drug.manufacturer}',
+                    style: const TextStyle(
+                      color: Color(0xFF9CA3AF),
+                      fontSize: 11.5,
                     ),
                   ),
-                  SizedBox(width: 4),
-                  Icon(Icons.open_in_new_rounded,
-                      size: 12, color: Color(0xFF9CA3AF)),
+                  const SizedBox(height: 6),
+                  _buildBatchInfo(drug),
                 ],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -417,16 +404,16 @@ class DrugDetailPanel extends StatelessWidget {
       children: [
         _buildSectionHeader('Основні властивості'),
         Padding(
-          padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
           child: Column(
             children: [
               for (int i = 0; i < cells.length; i += 2)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.only(bottom: 4),
                   child: Row(
                     children: [
                       Expanded(child: _UsagePropCell(data: cells[i])),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 5),
                       Expanded(child: _UsagePropCell(data: cells[i + 1])),
                     ],
                   ),
@@ -456,6 +443,7 @@ class DrugDetailPanel extends StatelessWidget {
   Widget _buildStorageSection(Drug drug) {
     final hasLocation =
         drug.locationType != null && drug.locationCode != null;
+    if (!hasLocation) return const SizedBox.shrink();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -463,39 +451,9 @@ class DrugDetailPanel extends StatelessWidget {
         _buildSectionHeader('Місце зберігання'),
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Physical location row
-              if (hasLocation)
-                _LocationChip(
-                  type: drug.locationType!,
-                  code: drug.locationCode!,
-                ),
-
-              // Temperature conditions row
-              if (drug.storageConditions != null) ...[
-                if (hasLocation) const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.thermostat_outlined,
-                        size: 14, color: Color(0xFF9CA3AF)),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        drug.storageConditions!,
-                        style: const TextStyle(
-                          color: Color(0xFF9CA3AF),
-                          fontSize: 11.5,
-                          height: 1.4,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ],
+          child: _LocationChip(
+            type: drug.locationType!,
+            code: drug.locationCode!,
           ),
         ),
       ],
@@ -593,7 +551,7 @@ class _UsagePropCell extends StatelessWidget {
     final (textColor, badgeIcon, badgeColor) = _statusStyle(data.status);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
@@ -604,38 +562,38 @@ class _UsagePropCell extends StatelessWidget {
         children: [
           // Icon circle with status badge overlay
           SizedBox(
-            width: 36,
-            height: 36,
+            width: 28,
+            height: 28,
             child: Stack(
               clipBehavior: Clip.none,
               children: [
                 Container(
-                  width: 36,
-                  height: 36,
+                  width: 28,
+                  height: 28,
                   decoration: const BoxDecoration(
                     color: Color(0xFFF0F2F5),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(data.icon, size: 18, color: const Color(0xFF6B7280)),
+                  child: Icon(data.icon, size: 14, color: const Color(0xFF6B7280)),
                 ),
                 Positioned(
                   top: -2,
                   right: -2,
                   child: Container(
-                    width: 14,
-                    height: 14,
+                    width: 12,
+                    height: 12,
                     decoration: BoxDecoration(
                       color: badgeColor,
                       shape: BoxShape.circle,
                       border: Border.all(color: Colors.white, width: 1.5),
                     ),
-                    child: Icon(badgeIcon, size: 8, color: Colors.white),
+                    child: Icon(badgeIcon, size: 7, color: Colors.white),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 7),
 
           // Label + status text
           Expanded(
@@ -649,18 +607,17 @@ class _UsagePropCell extends StatelessWidget {
                     color: Color(0xFF1C1C2E),
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    height: 1.2,
+                    height: 1.15,
                   ),
                 ),
-                const SizedBox(height: 2),
                 Text(
                   data.value,
                   style: TextStyle(
                     color: textColor,
                     fontSize: 10.5,
-                    height: 1.3,
+                    height: 1.2,
                   ),
-                  maxLines: 2,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ],

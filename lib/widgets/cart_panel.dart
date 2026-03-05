@@ -24,6 +24,7 @@ class CartPanel extends StatefulWidget {
   final VoidCallback onPay;
   final VoidCallback onClose;
   final void Function(Drug drug) onAddOffer;
+  final void Function(Drug drug) onAddOfferBlister;
   final CustomerLoyalty? loyalty;
 
   const CartPanel({
@@ -37,6 +38,7 @@ class CartPanel extends StatefulWidget {
     required this.onPay,
     required this.onClose,
     required this.onAddOffer,
+    required this.onAddOfferBlister,
     this.loyalty,
   });
 
@@ -526,17 +528,39 @@ class CartPanelState extends State<CartPanel> {
                         ),
                       ),
                       const SizedBox(width: 8),
+                      if (drug.unitsPerPackage != null) ...[
+                        GestureDetector(
+                          onTap: () => widget.onAddOfferBlister(drug),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF4F5F8),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              'Блістер',
+                              style: TextStyle(
+                                color: Color(0xFF9CA3AF),
+                                fontSize: 10,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
                       GestureDetector(
                         onTap: () => widget.onAddOffer(drug),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 9, vertical: 4),
+                              horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
                             color: const Color(0xFF1E7DC8),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: const Text(
-                            'Додати',
+                            'Упаковку',
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: 10.5,

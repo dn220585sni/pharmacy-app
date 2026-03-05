@@ -15,6 +15,7 @@ import '../widgets/edk_panel.dart';
 import '../widgets/customer_auth_card.dart';
 import '../widgets/top_bar.dart';
 import '../widgets/drug_list_item.dart';
+import '../utils/fuzzy_search.dart';
 
 // Approximate item row height for scroll-to-selection
 const double _kItemHeight = 49.0;
@@ -278,17 +279,28 @@ class _PosScreenState extends State<PosScreen> {
   // ─── Drug list logic ───────────────────────────────────────────────────────
 
   void _filterDrugs() {
-    final query = _searchController.text.toLowerCase();
+    final query = _searchController.text.trim();
     final targetCats = symptomCategories[_selectedSymptom] ?? [];
     setState(() {
-      _searchResults = mockDrugs.where((drug) {
-        final matchesQuery = query.isEmpty ||
-            drug.name.toLowerCase().contains(query) ||
-            drug.manufacturer.toLowerCase().contains(query);
-        final matchesSymptom = _selectedSymptom == 'Всі' ||
-            targetCats.contains(drug.category);
-        return matchesQuery && matchesSymptom;
-      }).toList();
+      if (query.isEmpty) {
+        // No query — show all (filtered by symptom only).
+        _searchResults = mockDrugs.where((drug) {
+          return _selectedSymptom == 'Всі' ||
+              targetCats.contains(drug.category);
+        }).toList();
+      } else {
+        // Score every drug with fuzzy matching, filter & sort.
+        final scored = <MapEntry<Drug, double>>[];
+        for (final drug in mockDrugs) {
+          final matchesSymptom = _selectedSymptom == 'Всі' ||
+              targetCats.contains(drug.category);
+          if (!matchesSymptom) continue;
+          final score = drugMatchScore(query, drug);
+          if (score > 0) scored.add(MapEntry(drug, score));
+        }
+        scored.sort((a, b) => b.value.compareTo(a.value));
+        _searchResults = scored.map((e) => e.key).toList();
+      }
 
       // Keep current selection if it's still in results;
       // otherwise fall back to the first result.
@@ -465,16 +477,40 @@ class _PosScreenState extends State<PosScreen> {
     if (_activeEdkOffer == null) return;
     final replacementDrug = _activeEdkOffer!.drug;
     final donorId = _activeEdkOffer!.donorDrugId;
+
+    // Copy quantity / fractional from the donor item in cart.
+    final donorItem = _cart.cast<CartItem?>().firstWhere(
+        (i) => i!.drug.id == donorId,
+        orElse: () => null);
+    final donorQty = donorItem?.quantity ?? 1;
+    final donorFrac = donorItem?.fractionalQty;
+
     setState(() {
       _dismissedEdkDrugIds.add(donorId);
       _activeEdkOffer = null;
-      // Add replacement to cart (qty=1) or increment
       final idx = _cart.indexWhere((i) => i.drug.id == replacementDrug.id);
       if (idx >= 0) {
-        _cart[idx].quantity =
-            (_cart[idx].quantity + 1).clamp(1, replacementDrug.stock);
+        if (donorFrac != null && replacementDrug.unitsPerPackage != null) {
+          _cart[idx].fractionalQty =
+              donorFrac.clamp(1, replacementDrug.unitsPerPackage!);
+          _cart[idx].quantity = 0;
+        } else {
+          _cart[idx].quantity =
+              (_cart[idx].quantity + donorQty).clamp(1, replacementDrug.stock);
+        }
       } else {
-        _cart.add(CartItem(drug: replacementDrug, quantity: 1));
+        if (donorFrac != null && replacementDrug.unitsPerPackage != null) {
+          _cart.add(CartItem(
+            drug: replacementDrug,
+            quantity: 0,
+            fractionalQty: donorFrac.clamp(1, replacementDrug.unitsPerPackage!),
+          ));
+        } else {
+          _cart.add(CartItem(
+            drug: replacementDrug,
+            quantity: donorQty.clamp(1, replacementDrug.stock),
+          ));
+        }
       }
     });
   }
@@ -617,7 +653,7 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   // TODO: offers will come from recommendations service based on cart contents
-  List<CartOffer> get _recommendedOffers => [
+  static final List<CartOffer> _allOffers = [
     CartOffer(
       drug: mockDrugs.firstWhere((d) => d.id == '019'),
       reason: 'Підтримка імунітету при застуді',
@@ -633,6 +669,11 @@ class _PosScreenState extends State<PosScreen> {
     ),
   ];
 
+  List<CartOffer> get _recommendedOffers {
+    final cartIds = _cart.map((item) => item.drug.id).toSet();
+    return _allOffers.where((o) => !cartIds.contains(o.drug.id)).toList();
+  }
+
   void _addOfferToCart(Drug drug) {
     setState(() {
       final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
@@ -640,6 +681,21 @@ class _PosScreenState extends State<PosScreen> {
         if (_cart[idx].quantity < drug.stock) _cart[idx].quantity++;
       } else {
         _cart.add(CartItem(drug: drug, quantity: 1));
+      }
+    });
+  }
+
+  void _addOfferBlisterToCart(Drug drug) {
+    if (drug.unitsPerPackage == null) return;
+    setState(() {
+      final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
+      if (idx >= 0) {
+        final current = _cart[idx].fractionalQty ?? 0;
+        _cart[idx].fractionalQty =
+            (current + 1).clamp(1, drug.unitsPerPackage!);
+        _cart[idx].quantity = 0;
+      } else {
+        _cart.add(CartItem(drug: drug, quantity: 0, fractionalQty: 1));
       }
     });
   }
@@ -775,6 +831,7 @@ class _PosScreenState extends State<PosScreen> {
                                               onPay: _processPayment,
                                               onClose: _toggleCart,
                                               onAddOffer: _addOfferToCart,
+                                              onAddOfferBlister: _addOfferBlisterToCart,
                                               loyalty: _customerLoyalty,
                                             )
                                           : _buildRightPanel(),

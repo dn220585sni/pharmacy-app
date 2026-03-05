@@ -7,37 +7,52 @@ class CartItemWidget extends StatelessWidget {
   final VoidCallback onDecrease;
   final VoidCallback onRemove;
 
+  /// Whether this item has been scanned (barcode confirmed).
+  final bool isScanned;
+
+  /// Callback when the pharmacist taps the price (simulates barcode scan).
+  final VoidCallback? onScan;
+
   const CartItemWidget({
     super.key,
     required this.item,
     required this.onIncrease,
     required this.onDecrease,
     required this.onRemove,
+    this.isScanned = false,
+    this.onScan,
   });
 
   @override
   Widget build(BuildContext context) {
+    final canScan = onScan != null && !isScanned;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        color: isScanned ? const Color(0xFFEFF6FF) : const Color(0xFFF9FAFB),
+        border: Border.all(
+          color:
+              isScanned ? const Color(0xFFBFDBFE) : const Color(0xFFE5E7EB),
+        ),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
         children: [
-          // Drug icon
+          // Drug icon — blue checkbox when scanned
           Container(
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: const Color(0xFFE8F3FB),
+              color: isScanned
+                  ? const Color(0xFFDBEAFE)
+                  : const Color(0xFFE8F3FB),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(
-              Icons.medication_rounded,
-              color: Color(0xFF1E7DC8),
+            child: Icon(
+              isScanned ? Icons.check_box_rounded : Icons.medication_rounded,
+              color: const Color(0xFF1E7DC8),
               size: 17,
             ),
           ),
@@ -50,8 +65,10 @@ class CartItemWidget extends StatelessWidget {
               children: [
                 Text(
                   item.drug.name,
-                  style: const TextStyle(
-                    color: Color(0xFF1C1C2E),
+                  style: TextStyle(
+                    color: isScanned
+                        ? const Color(0xFF1E7DC8)
+                        : const Color(0xFF1C1C2E),
                     fontSize: 12.5,
                     fontWeight: FontWeight.w500,
                   ),
@@ -61,8 +78,10 @@ class CartItemWidget extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   '${item.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴ × ${item.displayQty}',
-                  style: const TextStyle(
-                    color: Color(0xFF9CA3AF),
+                  style: TextStyle(
+                    color: isScanned
+                        ? const Color(0xFF93C5FD)
+                        : const Color(0xFF9CA3AF),
                     fontSize: 11,
                   ),
                 ),
@@ -104,16 +123,38 @@ class CartItemWidget extends StatelessWidget {
           ),
           const SizedBox(width: 10),
 
-          // Total price
-          SizedBox(
-            width: 68,
-            child: Text(
-              '${item.total.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                color: Color(0xFF1C1C2E),
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
+          // Total price — tappable to simulate scan
+          GestureDetector(
+            onTap: canScan ? onScan : null,
+            child: MouseRegion(
+              cursor: canScan
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.basic,
+              child: Container(
+                width: 68,
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                decoration: canScan
+                    ? BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            color: const Color(0xFF1E7DC8)
+                                .withValues(alpha: 0.3),
+                            style: BorderStyle.solid,
+                          ),
+                        ),
+                      )
+                    : null,
+                child: Text(
+                  '${item.total.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: isScanned
+                        ? const Color(0xFF1E7DC8)
+                        : const Color(0xFF1C1C2E),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ),
           ),

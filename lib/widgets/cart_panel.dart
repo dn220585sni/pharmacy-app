@@ -51,6 +51,9 @@ class CartPanelState extends State<CartPanel> {
   bool _checkoutMode = false;
   bool _showPaymentSuccess = false;
 
+  // Scanned drug IDs (simulated barcode scan by tapping price)
+  final Set<String> _scannedDrugIds = {};
+
   // Bonuses
   bool _useBonuses = false;
   final _bonusController = TextEditingController();
@@ -91,10 +94,19 @@ class CartPanelState extends State<CartPanel> {
     return raw < 0 ? 0 : raw;
   }
 
+  /// Whether all cart items have been scanned (barcode confirmed).
+  bool get _allCartScanned {
+    if (widget.cart.isEmpty) return false;
+    return widget.cart.every((i) => _scannedDrugIds.contains(i.drug.id));
+  }
+
+  void _scanCartItem(CartItem item) {
+    setState(() => _scannedDrugIds.add(item.drug.id));
+  }
 
   /// Public method — allows PosScreen to enter checkout mode via F5
   void enterCheckout() {
-    if (widget.cart.isEmpty) return;
+    if (widget.cart.isEmpty || !_allCartScanned) return;
     setState(() => _checkoutMode = true);
   }
 
@@ -157,6 +169,7 @@ class CartPanelState extends State<CartPanel> {
           _personalDiscount = null;
           _cashController.clear();
           _transferChangeToBonus = false;
+          _scannedDrugIds.clear();
         });
         widget.onClose();
       }
@@ -170,6 +183,7 @@ class CartPanelState extends State<CartPanel> {
     _personalDiscount = null;
     _cashController.clear();
     _transferChangeToBonus = false;
+    _scannedDrugIds.clear();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -342,6 +356,8 @@ class CartPanelState extends State<CartPanel> {
             onIncrease: () => setState(() => widget.onIncrease(i)),
             onDecrease: () => setState(() => widget.onDecrease(i)),
             onRemove: () => setState(() => widget.onRemove(i)),
+            isScanned: _scannedDrugIds.contains(widget.cart[i].drug.id),
+            onScan: () => _scanCartItem(widget.cart[i]),
           ),
         // Offers sit right under items
         if (widget.offers.isNotEmpty) _buildOffersSection(),
@@ -596,6 +612,7 @@ class CartPanelState extends State<CartPanel> {
     final formattedTotal =
         _cartTotal.toStringAsFixed(2).replaceAll('.', ',');
     final hasItems = widget.cart.isNotEmpty;
+    final canCheckout = hasItems && _allCartScanned;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
@@ -629,15 +646,15 @@ class CartPanelState extends State<CartPanel> {
           ),
           const SizedBox(height: 12),
 
-          // "Розрахувати" button
+          // "Розрахувати" button — disabled until all items scanned
           GestureDetector(
-            onTap: hasItems ? enterCheckout : null,
+            onTap: canCheckout ? enterCheckout : null,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               width: double.infinity,
               height: 46,
               decoration: BoxDecoration(
-                color: hasItems
+                color: canCheckout
                     ? const Color(0xFF1E7DC8)
                     : const Color(0xFFE5E7EB),
                 borderRadius: BorderRadius.circular(10),
@@ -647,20 +664,22 @@ class CartPanelState extends State<CartPanel> {
                 children: [
                   Icon(
                     Icons.calculate_outlined,
-                    color: hasItems ? Colors.white : const Color(0xFFB0B7C3),
+                    color:
+                        canCheckout ? Colors.white : const Color(0xFFB0B7C3),
                     size: 18,
                   ),
                   const SizedBox(width: 7),
                   Text(
                     'Розрахувати',
                     style: TextStyle(
-                      color:
-                          hasItems ? Colors.white : const Color(0xFFB0B7C3),
+                      color: canCheckout
+                          ? Colors.white
+                          : const Color(0xFFB0B7C3),
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  if (hasItems) ...[
+                  if (canCheckout) ...[
                     const SizedBox(width: 10),
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -684,6 +703,19 @@ class CartPanelState extends State<CartPanel> {
               ),
             ),
           ),
+
+          // Hint text — shown until all items are scanned
+          if (hasItems && !_allCartScanned) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Зберіть і відскануйте весь товар, будь ласка',
+              style: TextStyle(
+                color: Color(0xFF9CA3AF),
+                fontSize: 11,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ],
       ),
     );

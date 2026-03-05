@@ -13,6 +13,9 @@ import '../widgets/clear_cart_dialog.dart';
 import '../widgets/drug_detail_panel.dart';
 import '../widgets/edk_panel.dart';
 import '../widgets/customer_auth_card.dart';
+import '../data/mock_orders.dart';
+import '../models/internet_order.dart';
+import '../widgets/orders_panel.dart';
 import '../widgets/top_bar.dart';
 import '../widgets/drug_list_item.dart';
 import '../utils/fuzzy_search.dart';
@@ -51,6 +54,12 @@ class _PosScreenState extends State<PosScreen> {
   /// Whether the cart panel is shown in the right column.
   bool _cartOpen = false;
 
+  /// Whether the internet orders panel is shown in the right column.
+  bool _ordersOpen = false;
+
+  /// Key for accessing OrdersPanelState (for Esc cascade).
+  final _ordersPanelKey = GlobalKey<OrdersPanelState>();
+
   // ── ЄДК (Є Дещо Краще) — pharmaceutical substitution ────────────────────
   EdkOffer? _activeEdkOffer;
   final Set<String> _dismissedEdkDrugIds = {};
@@ -59,8 +68,23 @@ class _PosScreenState extends State<PosScreen> {
   final _cartPanelKey = GlobalKey<CartPanelState>();
 
   void _toggleCart() {
-    setState(() => _cartOpen = !_cartOpen);
+    setState(() {
+      _cartOpen = !_cartOpen;
+      if (_cartOpen) _ordersOpen = false; // mutually exclusive
+    });
     if (_cartOpen) _focusPhoneField();
+  }
+
+  void _toggleOrders() {
+    setState(() {
+      _ordersOpen = !_ordersOpen;
+      if (_ordersOpen) _cartOpen = false; // mutually exclusive
+    });
+    if (_ordersOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _ordersPanelKey.currentState?.focusSearch();
+      });
+    }
   }
 
   /// Focus the loyalty phone field with the cursor after the prefix.
@@ -86,7 +110,7 @@ class _PosScreenState extends State<PosScreen> {
 
   /// Auth card is visible when a drug row is selected OR cart is open.
   /// Hidden only on the dashboard view (no drug selected, cart closed).
-  bool get _showAuthCard => _cartOpen || _selectedDrug != null;
+  bool get _showAuthCard => _cartOpen || _ordersOpen || _selectedDrug != null;
 
   // ── Customer loyalty (phone auth) ─────────────────────────────────────────
   final _loyaltyPhoneController = TextEditingController();
@@ -163,6 +187,11 @@ class _PosScreenState extends State<PosScreen> {
         }
         return true;
       }
+      // ── Ctrl+I: toggle internet orders panel ─────────────────────────────
+      if (event.logicalKey == LogicalKeyboardKey.keyI) {
+        _toggleOrders();
+        return true;
+      }
       return false; // other Ctrl combos — pass through
     }
 
@@ -195,12 +224,16 @@ class _PosScreenState extends State<PosScreen> {
       return true;
     }
 
-    // ── Esc: exit checkout → close cart → clear cart confirm → clear search → deselect
+    // ── Esc: exit checkout → close cart → close orders → clear cart confirm → clear search → deselect
     if (event.logicalKey == LogicalKeyboardKey.escape) {
       if (_cartOpen && _cartPanelKey.currentState?.isInCheckout == true) {
         _cartPanelKey.currentState?.exitCheckout();
       } else if (_cartOpen) {
         setState(() => _cartOpen = false);
+      } else if (_ordersOpen && _ordersPanelKey.currentState?.isDetailOpen == true) {
+        _ordersPanelKey.currentState?.closeDetail();
+      } else if (_ordersOpen) {
+        setState(() => _ordersOpen = false);
       } else if (_activeEdkOffer != null) {
         _dismissEdk();
       } else if (_cart.isNotEmpty) {
@@ -834,7 +867,12 @@ class _PosScreenState extends State<PosScreen> {
                                               onAddOfferBlister: _addOfferBlisterToCart,
                                               loyalty: _customerLoyalty,
                                             )
-                                          : _buildRightPanel(),
+                                          : _ordersOpen
+                                              ? OrdersPanel(
+                                                  key: _ordersPanelKey,
+                                                  onClose: _toggleOrders,
+                                                )
+                                              : _buildRightPanel(),
                                     ),
                                   ],
                                 ),
@@ -867,7 +905,16 @@ class _PosScreenState extends State<PosScreen> {
                   const SizedBox(width: 8),
 
                   // Quick-action sidebar
-                  const ActionSidebar(),
+                  ActionSidebar(
+                    onOrdersTap: _toggleOrders,
+                    ordersActive: _ordersOpen,
+                    urgentCount: mockOrders
+                        .where((o) =>
+                            o.isUrgent &&
+                            o.status != OrderStatus.collected &&
+                            o.status != OrderStatus.dispensed)
+                        .length,
+                  ),
                 ],
               ),
             ),

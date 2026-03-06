@@ -53,6 +53,10 @@ class InternetOrder {
   /// Marked by external service — urgent orders (Glovo, locker deadline, etc.)
   final bool isUrgent;
 
+  /// Whether this order can be placed into a locker (parameter from service).
+  /// Locker-eligible orders are automatically urgent.
+  final bool isLockerEligible;
+
   const InternetOrder({
     required this.id,
     required this.reserveNumber,
@@ -64,6 +68,7 @@ class InternetOrder {
     required this.items,
     this.customerPhone,
     this.isUrgent = false,
+    this.isLockerEligible = false,
   });
 
   String get statusLabel {
@@ -88,5 +93,24 @@ class InternetOrder {
       case OrderType.glovo:
         return 'Glovo';
     }
+  }
+
+  InternetOrder copyWith({
+    OrderStatus? status,
+    int? lockerCell,
+  }) {
+    return InternetOrder(
+      id: id,
+      reserveNumber: reserveNumber,
+      dateTime: dateTime,
+      total: total,
+      status: status ?? this.status,
+      lockerCell: lockerCell ?? this.lockerCell,
+      type: type,
+      items: items,
+      customerPhone: customerPhone,
+      isUrgent: isUrgent,
+      isLockerEligible: isLockerEligible,
+    );
   }
 }

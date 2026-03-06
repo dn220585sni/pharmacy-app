@@ -230,6 +230,8 @@ class _PosScreenState extends State<PosScreen> {
         _cartPanelKey.currentState?.exitCheckout();
       } else if (_cartOpen) {
         setState(() => _cartOpen = false);
+      } else if (_ordersOpen && _ordersPanelKey.currentState?.isInCheckout == true) {
+        _ordersPanelKey.currentState?.exitOrderCheckout();
       } else if (_ordersOpen && _ordersPanelKey.currentState?.isDetailOpen == true) {
         _ordersPanelKey.currentState?.closeDetail();
       } else if (_ordersOpen) {
@@ -871,6 +873,7 @@ class _PosScreenState extends State<PosScreen> {
                                               ? OrdersPanel(
                                                   key: _ordersPanelKey,
                                                   onClose: _toggleOrders,
+                                                  loyalty: _customerLoyalty,
                                                 )
                                               : _buildRightPanel(),
                                     ),

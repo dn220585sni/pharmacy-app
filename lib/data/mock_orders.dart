@@ -108,6 +108,7 @@ final List<InternetOrder> mockOrders = [
     total: 310.46,
     status: OrderStatus.newOrder,
     isUrgent: true,
+    isLockerEligible: true,
     type: OrderType.tabletkiUA,
     items: [
       const OrderItem(
@@ -186,6 +187,7 @@ final List<InternetOrder> mockOrders = [
     total: 200.30,
     status: OrderStatus.newOrder,
     isUrgent: true,
+    isLockerEligible: true,
     type: OrderType.tabletkiUA,
     items: [
       const OrderItem(

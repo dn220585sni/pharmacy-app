@@ -1,18 +1,25 @@
 import 'package:flutter/material.dart';
 import '../models/internet_order.dart';
+import '../models/customer_loyalty.dart';
+import '../models/payment_method.dart';
 import '../data/mock_orders.dart';
+import 'checkout/bonus_discount_block.dart';
+import 'checkout/cash_change_section.dart';
+import 'checkout/payment_method_toggle.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OrdersPanel — Internet orders panel shown in the right detail column.
-// Two-screen flow: Order List → Order Details (similar to CartPanel pattern).
+// Three-screen flow: Order List → Order Details → Checkout.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class OrdersPanel extends StatefulWidget {
   final VoidCallback onClose;
+  final CustomerLoyalty? loyalty;
 
   const OrdersPanel({
     super.key,
     required this.onClose,
+    this.loyalty,
   });
 
   @override
@@ -25,6 +32,9 @@ class OrdersPanelState extends State<OrdersPanel> {
   InternetOrder? _selectedOrder;
   late List<InternetOrder> _filteredOrders;
 
+  /// Mutable copy of mock orders (allows status changes).
+  late List<InternetOrder> _orders;
+
   /// Index of the highlighted order in _filteredOrders (auto-selects first match).
   int _highlightedIndex = -1;
 
@@ -34,12 +44,56 @@ class OrdersPanelState extends State<OrdersPanel> {
   /// Whether the search field has non-empty text (drives highlight).
   bool get _hasQuery => _searchController.text.trim().isNotEmpty;
 
+  // ── Checkout state (mirrors CartPanel) ─────────────────────────────────────
+  bool _orderCheckoutMode = false;
+  bool _showPaymentSuccess = false;
+  PaymentMethod _paymentMethod = PaymentMethod.card;
+  final _cashController = TextEditingController();
+  final _cashFocusNode = FocusNode();
+  bool _transferChangeToBonus = false;
+  bool _useBonuses = false;
+  final _bonusController = TextEditingController();
+  double? _personalDiscount;
+  bool _isLoadingDiscount = false;
+
+  double get _orderTotal => _selectedOrder?.total ?? 0;
+
+  double get _discountAmount {
+    if (_personalDiscount == null) return 0;
+    return _orderTotal * _personalDiscount! / 100;
+  }
+
+  double get _effectiveBonusAmount {
+    if (!_useBonuses || widget.loyalty == null) return 0;
+    final text = _bonusController.text.replaceAll(',', '.');
+    final entered = double.tryParse(text) ?? 0;
+    final maxByBalance = widget.loyalty!.bonusBalance;
+    final maxByTotal = _orderTotal - _discountAmount;
+    return entered.clamp(0, maxByBalance).clamp(0, maxByTotal).toDouble();
+  }
+
+  double get _finalTotal {
+    final raw = _orderTotal - _discountAmount - _effectiveBonusAmount;
+    return raw < 0 ? 0 : raw;
+  }
+
   /// Public — allows PosScreen to check if detail is open (for Esc cascade).
-  bool get isDetailOpen => _selectedOrder != null;
+  bool get isDetailOpen => _selectedOrder != null && !_orderCheckoutMode;
+
+  /// Public — allows PosScreen to check if checkout is open.
+  bool get isInCheckout => _orderCheckoutMode;
 
   /// Public — allows PosScreen to close detail via Esc.
   void closeDetail() {
-    setState(() => _selectedOrder = null);
+    setState(() {
+      _selectedOrder = null;
+      _scannedSkus.clear();
+    });
+  }
+
+  /// Public — allows PosScreen to exit checkout via Esc.
+  void exitOrderCheckout() {
+    setState(() => _orderCheckoutMode = false);
   }
 
   /// Public — focuses the search field (called after panel opens).
@@ -52,7 +106,8 @@ class OrdersPanelState extends State<OrdersPanel> {
   @override
   void initState() {
     super.initState();
-    _filteredOrders = _sorted(mockOrders);
+    _orders = List<InternetOrder>.from(mockOrders);
+    _filteredOrders = _sorted(_orders);
     _searchController.addListener(_filterOrders);
   }
 
@@ -60,6 +115,9 @@ class OrdersPanelState extends State<OrdersPanel> {
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _cashController.dispose();
+    _cashFocusNode.dispose();
+    _bonusController.dispose();
     super.dispose();
   }
 
@@ -80,11 +138,11 @@ class OrdersPanelState extends State<OrdersPanel> {
     final query = _searchController.text.trim().toLowerCase();
     setState(() {
       if (query.isEmpty) {
-        _filteredOrders = _sorted(mockOrders);
+        _filteredOrders = _sorted(_orders);
         _highlightedIndex = -1;
       } else {
         _filteredOrders = _sorted(
-          mockOrders
+          _orders
               .where((o) => o.reserveNumber.toLowerCase().contains(query))
               .toList(),
         );
@@ -122,6 +180,89 @@ class OrdersPanelState extends State<OrdersPanel> {
     return realItems.every((i) => _scannedSkus.contains(i.sku));
   }
 
+  /// Enter checkout mode for the current order.
+  void _enterOrderCheckout() {
+    final order = _selectedOrder;
+    if (order == null) return;
+    // Collected orders skip scan check (already collected).
+    // Non-collected orders require all items to be scanned first.
+    if (order.status != OrderStatus.collected && !_allScanned) return;
+    setState(() => _orderCheckoutMode = true);
+  }
+
+  /// Place order into locker → change status to collected.
+  void _placeInLocker() {
+    final order = _selectedOrder;
+    if (order == null || !_allScanned) return;
+    final idx = _orders.indexWhere((o) => o.id == order.id);
+    if (idx < 0) return;
+    // Assign a mock locker cell number
+    final updated = order.copyWith(
+      status: OrderStatus.collected,
+      lockerCell: 10 + idx,
+    );
+    setState(() {
+      _orders[idx] = updated;
+      _selectedOrder = null;
+      _scannedSkus.clear();
+      _filterOrders();
+    });
+  }
+
+  void _resetOrderCheckoutState() {
+    _orderCheckoutMode = false;
+    _showPaymentSuccess = false;
+    _paymentMethod = PaymentMethod.card;
+    _useBonuses = false;
+    _bonusController.clear();
+    _personalDiscount = null;
+    _cashController.clear();
+    _transferChangeToBonus = false;
+  }
+
+  void _processOrderPayment() {
+    final order = _selectedOrder;
+    if (order == null) return;
+    setState(() => _showPaymentSuccess = true);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      // Mark order as dispensed
+      final idx = _orders.indexWhere((o) => o.id == order.id);
+      if (idx >= 0) {
+        _orders[idx] = order.copyWith(status: OrderStatus.dispensed);
+      }
+      setState(() {
+        _resetOrderCheckoutState();
+        _selectedOrder = null;
+        _scannedSkus.clear();
+        _filterOrders();
+      });
+    });
+  }
+
+  Future<void> _requestOrderDiscount() async {
+    if (widget.loyalty == null || _isLoadingDiscount) return;
+    setState(() => _isLoadingDiscount = true);
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    final lastDigit = widget.loyalty!.phone.characters.last;
+    final d = int.tryParse(lastDigit) ?? 0;
+    final discount = d >= 5 ? (d.toDouble()) : null;
+    setState(() {
+      _personalDiscount = discount;
+      _isLoadingDiscount = false;
+    });
+    if (discount == null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Знижка для цього клієнта не передбачена'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // BUILD
   // ═══════════════════════════════════════════════════════════════════════════
@@ -154,9 +295,11 @@ class OrdersPanelState extends State<OrdersPanel> {
             child: child,
           ),
         ),
-        child: _selectedOrder != null
-            ? _buildDetailScreen(_selectedOrder!)
-            : _buildListScreen(),
+        child: _orderCheckoutMode && _selectedOrder != null
+            ? _buildCheckoutScreen(_selectedOrder!)
+            : _selectedOrder != null
+                ? _buildDetailScreen(_selectedOrder!)
+                : _buildListScreen(),
       ),
     );
   }
@@ -419,7 +562,27 @@ class OrdersPanelState extends State<OrdersPanel> {
                       fontSize: 11, color: Color(0xFF9CA3AF)),
                 ),
                 const SizedBox(width: 8),
-                _OrderTypeBadge(type: order.type),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: order.type == OrderType.glovo
+                        ? const Color(0xFFFEF3C7)
+                        : const Color(0xFFF4F5F8),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    order.typeLabel,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: order.type == OrderType.glovo
+                          ? const Color(0xFFB45309)
+                          : const Color(0xFF6B7280),
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                ),
                 if (order.lockerCell != null) ...[
                   const SizedBox(width: 8),
                   Container(
@@ -463,9 +626,7 @@ class OrdersPanelState extends State<OrdersPanel> {
       width: double.infinity,
       height: 42,
       child: ElevatedButton(
-        onPressed: () {
-          // TODO: wire up checkout
-        },
+        onPressed: _enterOrderCheckout,
         style: ElevatedButton.styleFrom(
           foregroundColor: Colors.white,
           backgroundColor: const Color(0xFF1E7DC8),
@@ -503,37 +664,144 @@ class OrdersPanelState extends State<OrdersPanel> {
     );
   }
 
-  // ── Not-collected order actions: Зібрано + Відмовити + Відсутність ────────
+  // ── Not-collected order actions: Розрахувати + Лікомат + Відмовити + Відсутність
 
   Widget _buildNotCollectedActions() {
     final allDone = _allScanned;
+    final order = _selectedOrder;
+    final showLocker = order != null && order.isLockerEligible;
 
     return Column(
       children: [
-        // Primary: Зібрано (disabled until all scanned)
-        SizedBox(
-          width: double.infinity,
-          height: 42,
-          child: ElevatedButton.icon(
-            onPressed: allDone
-                ? () {
-                    // TODO: wire up collect
-                  }
-                : null,
-            icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
-            label: const Text('Зібрано',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            style: ElevatedButton.styleFrom(
-              foregroundColor: Colors.white,
-              backgroundColor: const Color(0xFF1E7DC8),
-              disabledForegroundColor: const Color(0xFFD1D5DB),
-              disabledBackgroundColor: const Color(0xFFF4F5F8),
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+        // Primary row: Розрахувати + Покласти в лікомат (both disabled until scanned)
+        if (showLocker)
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 42,
+                  child: ElevatedButton(
+                    onPressed: allDone ? _enterOrderCheckout : null,
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: const Color(0xFF1E7DC8),
+                      disabledForegroundColor: const Color(0xFFD1D5DB),
+                      disabledBackgroundColor: const Color(0xFFF4F5F8),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.point_of_sale_rounded, size: 15),
+                        const SizedBox(width: 4),
+                        const Flexible(
+                          child: Text('Розрахувати',
+                              style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        if (allDone) ...[
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: const Color(0x33FFFFFF),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                            child: const Text(
+                              'F5',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.3,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SizedBox(
+                  height: 42,
+                  child: ElevatedButton.icon(
+                    onPressed: allDone ? _placeInLocker : null,
+                    icon: const Icon(Icons.lock_outline_rounded, size: 16),
+                    label: const Text('В лікомат',
+                        style: TextStyle(
+                            fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: const Color(0xFF1E7DC8),
+                      disabledForegroundColor: const Color(0xFFD1D5DB),
+                      disabledBackgroundColor: const Color(0xFFF4F5F8),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          )
+        else
+          // Only "Розрахувати" full-width for non-locker orders
+          SizedBox(
+            width: double.infinity,
+            height: 42,
+            child: ElevatedButton(
+              onPressed: allDone ? _enterOrderCheckout : null,
+              style: ElevatedButton.styleFrom(
+                foregroundColor: Colors.white,
+                backgroundColor: const Color(0xFF1E7DC8),
+                disabledForegroundColor: const Color(0xFFD1D5DB),
+                disabledBackgroundColor: const Color(0xFFF4F5F8),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.point_of_sale_rounded, size: 16),
+                  const SizedBox(width: 8),
+                  const Text('Розрахувати',
+                      style: TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600)),
+                  if (allDone) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: const Color(0x33FFFFFF),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: const Text(
+                        'F5',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
-        ),
         const SizedBox(height: 8),
         // Secondary row: Відмовити + Повідомити
         Row(
@@ -584,19 +852,6 @@ class OrdersPanelState extends State<OrdersPanel> {
             ),
           ],
         ),
-        // Hint: scan reminder
-        if (!allDone) ...[
-          const SizedBox(height: 10),
-          const Text(
-            'Зберіть і відскануйте весь товар\nв замовленні, будь ласка',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 11,
-              color: Color(0xFF9CA3AF),
-              height: 1.4,
-            ),
-          ),
-        ],
       ],
     );
   }
@@ -637,6 +892,76 @@ class OrdersPanelState extends State<OrdersPanel> {
               ),
             ],
           ),
+          // Locker hint for collected orders awaiting pickup
+          if (order.lockerCell != null &&
+              order.status == OrderStatus.collected) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F7FF),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFBFDBFE)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.info_outline_rounded,
+                    size: 16,
+                    color: Color(0xFF1E7DC8),
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Запропонуйте клієнту забрати замовлення '
+                      'самостійно в лікоматі, будь ласка',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: Color(0xFF1E7DC8),
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          // Scan hint for not-yet-collected orders
+          if (order.status != OrderStatus.collected &&
+              !_allScanned) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F7FF),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFBFDBFE)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 16,
+                    color: Color(0xFF1E7DC8),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Зберіть і відскануйте весь товар '
+                      'в замовленні, будь ласка',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: Color(0xFF1E7DC8),
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           // Action buttons — depend on order status
           if (order.status == OrderStatus.collected)
@@ -644,6 +969,332 @@ class OrdersPanelState extends State<OrdersPanel> {
           else
             _buildNotCollectedActions(),
         ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SCREEN 3 — CHECKOUT (identical to CartPanel checkout)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildCheckoutScreen(InternetOrder order) {
+    return Column(
+      key: const ValueKey('order_checkout'),
+      children: [
+        _buildCheckoutHeader(order),
+        const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
+        Expanded(
+          child: SingleChildScrollView(
+            child: _buildCheckoutBody(order),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCheckoutHeader(InternetOrder order) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      child: Row(
+        children: [
+          // Back button
+          GestureDetector(
+            onTap: () {
+              _resetOrderCheckoutState();
+              setState(() => _orderCheckoutMode = false);
+            },
+            child: Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF4F5F8),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: const Icon(Icons.arrow_back_rounded,
+                  color: Color(0xFF6B7280), size: 16),
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Icon(Icons.point_of_sale_rounded,
+              color: Color(0xFF1E7DC8), size: 17),
+          const SizedBox(width: 8),
+          const Text(
+            'Розрахунок',
+            style: TextStyle(
+              color: Color(0xFF1C1C2E),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          // Order number badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F3FB),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '#${order.reserveNumber}',
+              style: const TextStyle(
+                color: Color(0xFF1E7DC8),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 7),
+          GestureDetector(
+            onTap: widget.onClose,
+            child: Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF4F5F8),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: const Icon(Icons.close_rounded,
+                  color: Color(0xFF9CA3AF), size: 15),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCheckoutBody(InternetOrder order) {
+    final formattedTotal =
+        _finalTotal.toStringAsFixed(2).replaceAll('.', ',');
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF9FAFB),
+        border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── "До сплати" — big total ──────────────────────────────────────
+          Row(
+            children: [
+              const Text(
+                'До сплати:',
+                style: TextStyle(
+                  color: Color(0xFF1C1C2E),
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '$formattedTotal ₴',
+                style: const TextStyle(
+                  color: Color(0xFF1E7DC8),
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+
+          // ── Bonuses + Discount block ───────────────────────────────────────
+          const SizedBox(height: 12),
+          BonusDiscountBlock(
+            loyalty: widget.loyalty,
+            useBonuses: _useBonuses,
+            onUseBonusesChanged: (v) {
+              setState(() {
+                _useBonuses = v;
+                if (_useBonuses && widget.loyalty != null) {
+                  final max = _orderTotal - _discountAmount;
+                  final capped =
+                      widget.loyalty!.bonusBalance.clamp(0, max);
+                  _bonusController.text = capped.toStringAsFixed(0);
+                }
+              });
+            },
+            bonusController: _bonusController,
+            cartTotal: _orderTotal,
+            discountAmount: _discountAmount,
+            effectiveBonusAmount: _effectiveBonusAmount,
+            personalDiscount: _personalDiscount,
+            isLoadingDiscount: _isLoadingDiscount,
+            onRequestDiscount: _requestOrderDiscount,
+            onClearDiscount: () =>
+                setState(() => _personalDiscount = null),
+            onBonusAmountChanged: () => setState(() {}),
+          ),
+
+          const SizedBox(height: 14),
+
+          // ── Payment method toggle ──────────────────────────────────────────
+          PaymentMethodToggle(
+            selectedMethod: _paymentMethod,
+            onMethodChanged: (method) => setState(() {
+              _paymentMethod = method;
+              if (method == PaymentMethod.cash) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _cashFocusNode.requestFocus();
+                });
+              } else {
+                _cashController.clear();
+              }
+            }),
+          ),
+
+          // ── Cash section ───────────────────────────────────────────────────
+          if (_paymentMethod == PaymentMethod.cash && !_showPaymentSuccess)
+            CashChangeSection(
+              cashController: _cashController,
+              cashFocusNode: _cashFocusNode,
+              finalTotal: _finalTotal,
+              onChanged: () => setState(() {}),
+              showBonusTransfer: widget.loyalty != null,
+              transferChangeToBonus: _transferChangeToBonus,
+              onTransferChangeToBonusChanged: (v) =>
+                  setState(() => _transferChangeToBonus = v),
+            ),
+
+          const SizedBox(height: 10),
+
+          // ── Pay / success button ───────────────────────────────────────────
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 280),
+            child: _showPaymentSuccess
+                ? _orderPaySuccessWidget()
+                : _orderPayButtonWidget(),
+          ),
+
+          const SizedBox(height: 8),
+
+          // ── Secondary actions ──────────────────────────────────────────────
+          Row(
+            children: [
+              Expanded(
+                child: _OrderSmallButton(
+                    icon: Icons.inventory_2_outlined,
+                    label: 'Резерв F6',
+                    onTap: () {}),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: _OrderSmallButton(
+                    icon: Icons.smart_toy_outlined,
+                    label: 'Привезти чек',
+                    onTap: () {}),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _orderPaySuccessWidget() => Container(
+        key: const ValueKey('order_pay_success'),
+        width: double.infinity,
+        height: 46,
+        decoration: BoxDecoration(
+          color: const Color(0xFFECFDF5),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: const Color(0xFF10B981).withValues(alpha: 0.4)),
+        ),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.check_circle_rounded,
+                color: Color(0xFF10B981), size: 19),
+            SizedBox(width: 7),
+            Text(
+              'Оплата проведена!',
+              style: TextStyle(
+                color: Color(0xFF10B981),
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _orderPayButtonWidget() => GestureDetector(
+        key: const ValueKey('order_pay_btn'),
+        onTap: _processOrderPayment,
+        child: Container(
+          width: double.infinity,
+          height: 46,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E7DC8),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.payment_rounded, color: Colors.white, size: 18),
+              SizedBox(width: 7),
+              Text(
+                'Провести оплату',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _OrderSmallButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  const _OrderSmallButton({
+    required this.icon,
+    required this.label,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isEnabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: isEnabled
+              ? const Color(0xFFE8F3FB)
+              : const Color(0xFFF4F5F8),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isEnabled
+                ? const Color(0xFF1E7DC8).withValues(alpha: 0.2)
+                : const Color(0xFFE5E7EB),
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(icon,
+                color: isEnabled
+                    ? const Color(0xFF1E7DC8)
+                    : const Color(0xFFD1D5DB),
+                size: 16),
+            const SizedBox(height: 3),
+            Text(label,
+                style: TextStyle(
+                  color: isEnabled
+                      ? const Color(0xFF1E7DC8)
+                      : const Color(0xFFD1D5DB),
+                  fontSize: 11,
+                )),
+          ],
+        ),
       ),
     );
   }
@@ -730,7 +1381,60 @@ class _OrderListTileState extends State<_OrderListTile> {
                         if (order.isUrgent &&
                             order.status != OrderStatus.collected &&
                             order.status != OrderStatus.dispensed) ...[
-                          const SizedBox(width: 6),
+                          // Reason badge: Лікомат or Glovo
+                          if (order.isLockerEligible) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF0F7FF),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                    color: const Color(0xFFBFDBFE)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.lock_outline_rounded,
+                                      size: 9, color: Color(0xFF1E7DC8)),
+                                  SizedBox(width: 3),
+                                  Text(
+                                    'Лікомат',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF1E7DC8),
+                                      letterSpacing: 0.2,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ] else if (order.type == OrderType.glovo) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFF7ED),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                    color: const Color(0xFFFED7AA)),
+                              ),
+                              child: const Text(
+                                'Glovo',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFEA580C),
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ),
+                          ],
+                          // Термінове badge
+                          const SizedBox(width: 4),
                           Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 5, vertical: 1),
@@ -795,18 +1499,15 @@ class _OrderListTileState extends State<_OrderListTile> {
                   ],
                 ),
               ),
-              // Type chip + arrow
-              if (order.type == OrderType.glovo)
-                _OrderTypeBadge(type: order.type)
-              else
-                Text(
-                  '${order.total.toStringAsFixed(0)} ₴',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF6B7280),
-                  ),
+              // Price
+              Text(
+                '${order.total.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF6B7280),
                 ),
+              ),
               const SizedBox(width: 6),
               if (isHighlighted)
                 Container(
@@ -942,35 +1643,6 @@ class _OrderStatusBadge extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ── Order type badge ────────────────────────────────────────────────────────
-
-class _OrderTypeBadge extends StatelessWidget {
-  final OrderType type;
-  const _OrderTypeBadge({required this.type});
-
-  @override
-  Widget build(BuildContext context) {
-    final isGlovo = type == OrderType.glovo;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: isGlovo ? const Color(0xFFFEF3C7) : const Color(0xFFF4F5F8),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        isGlovo ? 'Glovo' : 'TabletUA',
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          color: isGlovo ? const Color(0xFFB45309) : const Color(0xFF6B7280),
-          letterSpacing: 0.2,
-        ),
       ),
     );
   }

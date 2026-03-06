@@ -644,6 +644,39 @@ class CartPanelState extends State<CartPanel> {
               ),
             ],
           ),
+          // Scan hint — above the button when not all scanned
+          if (hasItems && !_allCartScanned) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F7FF),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFBFDBFE)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 16,
+                    color: Color(0xFF1E7DC8),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Відскануйте весь товар, будь ласка',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: Color(0xFF1E7DC8),
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
 
           // "Розрахувати" button — disabled until all items scanned
@@ -703,19 +736,6 @@ class CartPanelState extends State<CartPanel> {
               ),
             ),
           ),
-
-          // Hint text — shown until all items are scanned
-          if (hasItems && !_allCartScanned) ...[
-            const SizedBox(height: 8),
-            const Text(
-              'Зберіть і відскануйте весь товар, будь ласка',
-              style: TextStyle(
-                color: Color(0xFF9CA3AF),
-                fontSize: 11,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
         ],
       ),
     );

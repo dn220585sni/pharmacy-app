@@ -365,135 +365,166 @@ class CartPanelState extends State<CartPanel> {
     );
   }
 
-  // ── Offers section ────────────────────────────────────────────────────────
+  // ── Offers section (single ТПК card, EdkPanel-like style) ────────────────
 
   Widget _buildOffersSection() {
     if (widget.offers.isEmpty) return const SizedBox.shrink();
-    return Container(
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 9, 14, 7),
-            child: Row(
-              children: [
-                const Icon(Icons.lightbulb_outline_rounded,
-                    color: Color(0xFFF59E0B), size: 14),
-                const SizedBox(width: 6),
-                const Text(
-                  'Турбота про клієнта',
-                  style: TextStyle(
-                    color: Color(0xFF6B7280),
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const Spacer(),
-              ],
-            ),
-          ),
-          for (final offer in widget.offers) _buildOfferCard(offer),
-          const SizedBox(height: 6),
-        ],
-      ),
-    );
+    final offer = widget.offers.first;
+    return _buildOfferCard(offer);
   }
 
   Widget _buildOfferCard(CartOffer offer) {
     final drug = offer.drug;
+    final bonus = drug.pharmacistBonus;
     final hasScript = offer.script != null && offer.script!.isNotEmpty;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 0, 10, 5),
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          color: const Color(0xFFFFFBEB),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFFDE68A)),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: const Color(0xFF1E7DC8).withValues(alpha: 0.18)),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // ── Drug thumbnail ─────────────────────────────────────────
+            // ── Header ───────────────────────────────────────────────
             Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0xFFF5E6B8)),
+              padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+              decoration: const BoxDecoration(
+                color: Color(0xFFF0F7FF),
               ),
-              clipBehavior: Clip.antiAlias,
-              child: drug.imageUrl != null
-                  ? Image.network(
-                      drug.imageUrl!,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stack) => _offerPlaceholderIcon(),
-                    )
-                  : _offerPlaceholderIcon(),
-            ),
-            const SizedBox(width: 8),
-
-            // ── Text content ───────────────────────────────────────────
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  // Row 1: promo badge + name + pharmacist bonus
-                  Row(
-                    children: [
-                      if (offer.promoLabel != null) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF10B981),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            offer.promoLabel!,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.3,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                      ],
-                      Expanded(
-                        child: Text(
-                          drug.name,
-                          style: const TextStyle(
-                            color: Color(0xFF1C1C2E),
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          overflow: TextOverflow.ellipsis,
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B5CF6),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(
+                      Icons.favorite_rounded,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Турбота Про Клієнта',
+                      style: TextStyle(
+                        color: Color(0xFF1E7DC8),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  if (offer.promoLabel != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF8B5CF6),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        offer.promoLabel!,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
                         ),
                       ),
-                      if (drug.pharmacistBonus != null) ...[
-                        const SizedBox(width: 6),
+                    ),
+                ],
+              ),
+            ),
+
+            // ── Body ─────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Column(
+                children: [
+                  // Image
+                  Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF9FAFB),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE5E7EB)),
+                    ),
+                    child: drug.imageUrl != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(11),
+                            child: Image.network(
+                              drug.imageUrl!,
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stack) =>
+                                  _offerPlaceholderIcon(),
+                            ),
+                          )
+                        : _offerPlaceholderIcon(),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Name
+                  Text(
+                    drug.name,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF1C1C2E),
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+
+                  // Manufacturer + category
+                  Text(
+                    '${drug.manufacturer} · ${drug.category}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF9CA3AF),
+                      fontSize: 11,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Price + bonus
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                        style: const TextStyle(
+                          color: Color(0xFF1C1C2E),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      if (bonus != null) ...[
+                        const SizedBox(width: 8),
                         Container(
-                          width: 24,
-                          height: 24,
+                          width: 28,
+                          height: 28,
                           decoration: const BoxDecoration(
-                            color: Color(0xFFF5F0E8),
+                            color: Color(0xFFFEF3C7),
                             shape: BoxShape.circle,
                           ),
                           child: Center(
                             child: Text(
-                              '${drug.pharmacistBonus}',
+                              '$bonus',
                               style: const TextStyle(
-                                color: Color(0xFF6B7280),
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w600,
+                                color: Color(0xFFB45309),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                           ),
@@ -502,90 +533,123 @@ class CartPanelState extends State<CartPanel> {
                     ],
                   ),
 
-                  // Row 2: script (pharmacist phrase) or reason
-                  const SizedBox(height: 3),
-                  Text(
-                    hasScript ? offer.script! : offer.reason,
-                    style: TextStyle(
-                      color: hasScript
-                          ? const Color(0xFF6B7280)
-                          : const Color(0xFF9CA3AF),
-                      fontSize: hasScript ? 11 : 10.5,
-                      fontStyle:
-                          hasScript ? FontStyle.italic : FontStyle.normal,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-
-                  // Row 3: reason (if script shown) + price + button
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      if (hasScript)
-                        Expanded(
-                          child: Text(
-                            offer.reason,
-                            style: const TextStyle(
-                              color: Color(0xFF9CA3AF),
-                              fontSize: 10,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        )
-                      else
-                        const Spacer(),
-                      Text(
-                        '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                        style: const TextStyle(
-                          color: Color(0xFF6B7280),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                  // Script block
+                  if (hasScript) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0F7FF),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: const Color(0xFF1E7DC8)
+                              .withValues(alpha: 0.15),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      if (drug.unitsPerPackage != null) ...[
-                        GestureDetector(
-                          onTap: () => widget.onAddOfferBlister(drug),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF4F5F8),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text(
-                              'Блістер',
-                              style: TextStyle(
-                                color: Color(0xFF9CA3AF),
-                                fontSize: 10,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.chat_bubble_outline_rounded,
+                            size: 14,
+                            color: Color(0xFF1E7DC8),
+                          ),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: Text(
+                              offer.script!,
+                              style: const TextStyle(
+                                color: Color(0xFF1E5A8A),
+                                fontSize: 11.5,
                                 fontWeight: FontWeight.w500,
+                                height: 1.45,
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                      GestureDetector(
-                        onTap: () => widget.onAddOffer(drug),
+                        ],
+                      ),
+                    ),
+                  ] else ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      offer.reason,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFF9CA3AF),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            // ── Buttons ──────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Row(
+                children: [
+                  if (drug.unitsPerPackage != null) ...[
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => widget.onAddOfferBlister(drug),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
+                          height: 38,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1E7DC8),
-                            borderRadius: BorderRadius.circular(6),
+                            color: const Color(0xFFF4F5F8),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                                color: const Color(0xFFE5E7EB)),
                           ),
-                          child: const Text(
-                            'Упаковку',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.grid_view_rounded,
+                                  size: 13, color: Color(0xFF6B7280)),
+                              SizedBox(width: 5),
+                              Text(
+                                'Блістер',
+                                style: TextStyle(
+                                  color: Color(0xFF6B7280),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                    ],
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => widget.onAddOffer(drug),
+                      child: Container(
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E7DC8),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add_shopping_cart_rounded,
+                                color: Colors.white, size: 14),
+                            SizedBox(width: 5),
+                            Text(
+                              'Упаковку',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -599,8 +663,8 @@ class CartPanelState extends State<CartPanel> {
   Widget _offerPlaceholderIcon() {
     return const Center(
       child: Icon(
-        Icons.medication_outlined,
-        size: 20,
+        Icons.medication_rounded,
+        size: 32,
         color: Color(0xFFD1D5DB),
       ),
     );

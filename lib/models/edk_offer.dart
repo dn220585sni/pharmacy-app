@@ -7,11 +7,13 @@ class EdkOffer {
   final String donorDrugId; // id of the drug being replaced
   final String description; // short benefit description
   final String script; // pharmacist speech module text
+  final String? promoLabel; // optional promo badge (e.g. "Потрійний кешбек")
 
   const EdkOffer({
     required this.drug,
     required this.donorDrugId,
     required this.description,
     required this.script,
+    this.promoLabel,
   });
 }

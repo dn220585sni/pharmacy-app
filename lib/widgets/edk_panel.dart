@@ -48,7 +48,7 @@ class EdkPanel extends StatelessWidget {
                   width: 28,
                   height: 28,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1E7DC8),
+                    color: const Color(0xFF10B981),
                     borderRadius: BorderRadius.circular(7),
                   ),
                   child: const Icon(
@@ -68,6 +68,26 @@ class EdkPanel extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (offer.promoLabel != null) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text(
+                      offer.promoLabel!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 GestureDetector(
                   onTap: onDismiss,
                   child: Container(

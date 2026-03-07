@@ -326,7 +326,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                       width: 24,
                       height: 24,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1E7DC8),
+                        color: const Color(0xFF10B981),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Icon(
@@ -336,14 +336,34 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    const Text(
-                      'Є Дещо Краще',
-                      style: TextStyle(
-                        color: Color(0xFF1E7DC8),
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
+                    const Expanded(
+                      child: Text(
+                        'Є Дещо Краще',
+                        style: TextStyle(
+                          color: Color(0xFF1E7DC8),
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
+                    if (widget.edkOffer?.promoLabel != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          widget.edkOffer!.promoLabel!,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 14),

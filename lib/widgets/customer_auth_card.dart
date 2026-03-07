@@ -204,6 +204,7 @@ class CustomerAuthCard extends StatelessWidget {
                       enabled: canConfirm,
                       primary: true,
                       onTap: onConfirmPhone,
+                      hotkey: 'Enter',
                     ),
                     // «Попередній» — visible before user starts typing digits
                     if (!hasDigits && !hasLoyalty) ...[
@@ -233,6 +234,7 @@ class CustomerAuthCard extends StatelessWidget {
     required bool enabled,
     required bool primary,
     required VoidCallback onTap,
+    String? hotkey,
   }) {
     final Color bg = !enabled
         ? const Color(0xFFF4F5F8)
@@ -273,6 +275,28 @@ class CustomerAuthCard extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            if (hotkey != null && enabled) ...[
+              const SizedBox(width: 5),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: primary
+                      ? const Color(0x33FFFFFF)
+                      : const Color(0x0F000000),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  hotkey,
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),

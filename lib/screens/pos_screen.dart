@@ -494,6 +494,7 @@ class _PosScreenState extends State<PosScreen> {
       script:
           'Зверніть увагу, є аналогічний препарат у капсулах — '
           'діє значно швидше. Бажаєте спробувати?',
+      promoLabel: 'Потрійний кешбек',
     ),
     // Парацетамол 500мг №20 id:'001' (bonus 5) → Панадол 500мг №12 id:'031' (bonus 12)
     '001': EdkOffer(
@@ -516,6 +517,7 @@ class _PosScreenState extends State<PosScreen> {
       script:
           'Якщо потрібен максимальний ефект — рекомендую цей варіант. '
           'Швидкодіюча формула, перевірена якість.',
+      promoLabel: 'Знижка −10%',
     ),
     // ── Out-of-stock EDK offers ──────────────────────────────────────────
     // Диклофенак 50мг id:'050' → Нурофен Експрес id:'009' (bonus 20)
@@ -985,7 +987,7 @@ class _PosScreenState extends State<PosScreen> {
                                           ? CartPanel(
                                               key: _cartPanelKey,
                                               cart: List.unmodifiable(_cart),
-                                              offers: _recommendedOffers,
+                                              offers: _isCustomerAuthorized ? _recommendedOffers : const [],
                                               onClear: _clearCart,
                                               onIncrease: _increaseQty,
                                               onDecrease: _decreaseQty,

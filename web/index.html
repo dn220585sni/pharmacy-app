@@ -1,46 +1,109 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="$FLUTTER_BASE_HREF">
-
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
-
-  <!-- iOS meta tags & icons -->
+  <meta name="description" content="Pharmacy POS Demo">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="pharmacy_app">
+  <meta name="apple-mobile-web-app-title" content="Pharmacy POS">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
-
-  <title>pharmacy_app</title>
+  <title>Pharmacy POS</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    #auth-gate {
+      position: fixed; inset: 0; z-index: 99999;
+      display: flex; align-items: center; justify-content: center;
+      background: #F4F5F8;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    #auth-gate.hidden { display: none; }
+    .auth-card {
+      background: #fff; border-radius: 16px; padding: 40px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      text-align: center; max-width: 360px; width: 90%;
+    }
+    .auth-card h2 { margin: 0 0 8px; color: #1C1C2E; font-size: 22px; }
+    .auth-card p { margin: 0 0 24px; color: #6B7280; font-size: 14px; }
+    .auth-input {
+      width: 100%; padding: 12px 16px; border: 2px solid #E5E7EB;
+      border-radius: 10px; font-size: 16px; outline: none;
+      box-sizing: border-box; transition: border-color 0.2s;
+    }
+    .auth-input:focus { border-color: #1E7DC8; }
+    .auth-input.error { border-color: #EF4444; animation: shake 0.3s; }
+    .auth-btn {
+      width: 100%; margin-top: 16px; padding: 12px;
+      background: #1E7DC8; color: #fff; border: none;
+      border-radius: 10px; font-size: 16px; font-weight: 600;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .auth-btn:hover { background: #1565a0; }
+    .auth-error { color: #EF4444; font-size: 13px; margin-top: 8px; min-height: 20px; }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-6px); }
+      75% { transform: translateX(6px); }
+    }
+  </style>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
+  <div id="auth-gate">
+    <div class="auth-card">
+      <h2>Pharmacy POS</h2>
+      <p>Введіть пароль для доступу до демо</p>
+      <input class="auth-input" id="auth-pwd" type="password"
+             placeholder="Пароль" autofocus>
+      <button class="auth-btn" id="auth-btn">Увійти</button>
+      <div class="auth-error" id="auth-err"></div>
+    </div>
+  </div>
 
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    const HASH = '07e0bd310d426530e0879cb6293b294acd890820eb4073e6fe681d9e6fe3cf16';
+
+    async function sha256(text) {
+      const data = new TextEncoder().encode(text);
+      const buf = await crypto.subtle.digest('SHA-256', data);
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function checkAuth() {
+      if (sessionStorage.getItem('pharmacy_auth') === 'ok') {
+        unlock();
+        return;
+      }
+      document.getElementById('auth-btn').addEventListener('click', tryLogin);
+      document.getElementById('auth-pwd').addEventListener('keydown', e => {
+        if (e.key === 'Enter') tryLogin();
+      });
+    }
+
+    async function tryLogin() {
+      const pwd = document.getElementById('auth-pwd').value;
+      const hash = await sha256(pwd);
+      if (hash === HASH) {
+        sessionStorage.setItem('pharmacy_auth', 'ok');
+        unlock();
+      } else {
+        const inp = document.getElementById('auth-pwd');
+        inp.classList.add('error');
+        document.getElementById('auth-err').textContent = 'Невірний пароль';
+        setTimeout(() => inp.classList.remove('error'), 300);
+      }
+    }
+
+    function unlock() {
+      document.getElementById('auth-gate').classList.add('hidden');
+      const s = document.createElement('script');
+      s.src = 'flutter_bootstrap.js';
+      s.async = true;
+      document.body.appendChild(s);
+    }
+
+    checkAuth();
+  </script>
 </body>
 </html>

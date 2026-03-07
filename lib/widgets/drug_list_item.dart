@@ -176,19 +176,12 @@ class _DrugListItemState extends State<DrugListItem> {
   Widget _buildBadge() {
     final drug = widget.drug;
 
-    // 1. In transit
-    if (drug.isInTransit) {
-      return _BadgeContainer(
-        color: const Color(0xFFEEEFF2),
-        child: const Icon(
-          Icons.local_shipping_outlined,
-          size: 17,
-          color: Color(0xFF94A3B8),
-        ),
-      );
+    // 0. Out-of-stock: gray status badge (overrides bonus/transit)
+    if (drug.isOutOfStock) {
+      return _buildAvailabilityBadge(drug);
     }
 
-    // 2. Expired / expiring soon
+    // 1. Expired / expiring soon
     if (drug.isExpired || drug.isExpiringSoon) {
       return _BadgeContainer(
         color: const Color(0xFFF5EDED),
@@ -200,7 +193,7 @@ class _DrugListItemState extends State<DrugListItem> {
       );
     }
 
-    // 3. Own brand — blue tint, secondary gray text
+    // 2. Own brand — blue tint, secondary gray text
     if (drug.isOwnBrand) {
       return _BadgeContainer(
         color: const Color(0xFFECEEF6),
@@ -225,7 +218,7 @@ class _DrugListItemState extends State<DrugListItem> {
       );
     }
 
-    // 4. Pharmacist bonus — warm tint, secondary gray text
+    // 3. Pharmacist bonus — warm tint, secondary gray text
     if (drug.pharmacistBonus != null) {
       return _BadgeContainer(
         color: const Color(0xFFF5F0E8),
@@ -243,11 +236,28 @@ class _DrugListItemState extends State<DrugListItem> {
     return const SizedBox(width: kColBadge, height: 32);
   }
 
+  Widget _buildAvailabilityBadge(Drug drug) {
+    final status =
+        drug.availabilityStatus ?? DrugAvailabilityStatus.notOrdered;
+    final IconData icon = switch (status) {
+      DrugAvailabilityStatus.marketShortage =>
+        Icons.remove_shopping_cart_outlined,
+      DrugAvailabilityStatus.quarantined => Icons.gpp_bad_outlined,
+      DrugAvailabilityStatus.inTransit => Icons.local_shipping_outlined,
+      DrugAvailabilityStatus.awaitingReceiving =>
+        Icons.inventory_2_outlined,
+      DrugAvailabilityStatus.notOrdered => Icons.remove_circle_outline,
+    };
+    return _BadgeContainer(
+      color: const Color(0xFFEEEFF2),
+      child: Icon(icon, size: 16, color: const Color(0xFF94A3B8)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final drug = widget.drug;
-    final bool isDimmed =
-        (drug.stock == 0 && !drug.isInTransit) || drug.isExpired;
+    final bool isDimmed = drug.isOutOfStock || drug.isExpired;
 
     final Color textPrimary =
         isDimmed ? const Color(0xFFB0B7C3) : const Color(0xFF1C1C2E);

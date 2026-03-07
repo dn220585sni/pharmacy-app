@@ -16,6 +16,9 @@ import '../widgets/customer_auth_card.dart';
 import '../data/mock_orders.dart';
 import '../models/internet_order.dart';
 import '../widgets/orders_panel.dart';
+import '../widgets/out_of_stock_panel.dart';
+import '../data/mock_nearby_pharmacies.dart';
+import '../models/nearby_pharmacy.dart';
 import '../widgets/top_bar.dart';
 import '../widgets/drug_list_item.dart';
 import '../utils/fuzzy_search.dart';
@@ -66,6 +69,9 @@ class _PosScreenState extends State<PosScreen> {
 
   /// Key for accessing CartPanelState (enterCheckout via F5).
   final _cartPanelKey = GlobalKey<CartPanelState>();
+
+  /// Key for accessing OutOfStockPanelState (keyboard handling).
+  final _outOfStockPanelKey = GlobalKey<OutOfStockPanelState>();
 
   void _toggleCart() {
     setState(() {
@@ -120,6 +126,9 @@ class _PosScreenState extends State<PosScreen> {
   String? _previousCustomerPhone;
 
   static const _loyaltyPhonePrefix = CustomerAuthCard.loyaltyPhonePrefix;
+
+  /// Whether the customer has been authorized via loyalty phone.
+  bool get _isCustomerAuthorized => _customerLoyalty != null;
 
   @override
   void initState() {
@@ -236,6 +245,8 @@ class _PosScreenState extends State<PosScreen> {
         _ordersPanelKey.currentState?.closeDetail();
       } else if (_ordersOpen) {
         setState(() => _ordersOpen = false);
+      } else if (_outOfStockPanelKey.currentState?.isEdkActive == true) {
+        _outOfStockPanelKey.currentState?.dismissEdk();
       } else if (_activeEdkOffer != null) {
         _dismissEdk();
       } else if (_cart.isNotEmpty) {
@@ -252,6 +263,14 @@ class _PosScreenState extends State<PosScreen> {
     // ── Enter: accept ЄДК offer ──────────────────────────────────────────────
     if (event.logicalKey == LogicalKeyboardKey.enter ||
         event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+      // Out-of-stock EDK: Enter adds whole package
+      if (_outOfStockPanelKey.currentState?.isEdkActive == true &&
+          _selectedDrug != null &&
+          _selectedDrug!.isOutOfStock) {
+        _addOosEdkPackage(_selectedDrug!);
+        return true;
+      }
+      // Standard EDK
       if (_activeEdkOffer != null) {
         _addEdkToCart();
         return true;
@@ -498,6 +517,40 @@ class _PosScreenState extends State<PosScreen> {
           'Якщо потрібен максимальний ефект — рекомендую цей варіант. '
           'Швидкодіюча формула, перевірена якість.',
     ),
+    // ── Out-of-stock EDK offers ──────────────────────────────────────────
+    // Диклофенак 50мг id:'050' → Нурофен Експрес id:'009' (bonus 20)
+    '050': EdkOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '009'),
+      donorDrugId: '050',
+      description:
+          'Відмінна заміна — капсульна форма діє швидше '
+          'та ефективніше знімає біль.',
+      script:
+          'На жаль, Диклофенак зараз відсутній на ринку. '
+          'Рекомендую Нурофен Експрес — капсули для швидкого ефекту.',
+    ),
+    // Цефтріаксон 1г id:'051' (quarantined) → Флемоксин Солютаб id:'042' (bonus 12)
+    '051': EdkOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '042'),
+      donorDrugId: '051',
+      description:
+          'Пероральний антибіотик широкого спектру — '
+          'зручна форма прийому без ін\'єкцій.',
+      script:
+          'Цефтріаксон зараз у карантині. Рекомендую Флемоксин Солютаб — '
+          'потужний антибіотик у зручній формі таблеток.',
+    ),
+    // Кларитін 10мг id:'053' → Цетрин 10мг id:'036'
+    '053': EdkOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '036'),
+      donorDrugId: '053',
+      description:
+          'Цетрин — сучасний антигістамінний засіб '
+          'з тією ж ефективністю та м\'якою дією.',
+      script:
+          'Кларитін наразі не замовлений. Рекомендую Цетрин — '
+          'така ж діюча речовина, перевірена якість.',
+    ),
   };
 
   /// Check and show EDK offer after adding a donor drug to cart.
@@ -508,46 +561,52 @@ class _PosScreenState extends State<PosScreen> {
     setState(() => _activeEdkOffer = offer);
   }
 
+  /// Accept EDK: add 1 package of replacement, remove donor from cart.
   void _addEdkToCart() {
     if (_activeEdkOffer == null) return;
-    final replacementDrug = _activeEdkOffer!.drug;
+    final replacement = _activeEdkOffer!.drug;
     final donorId = _activeEdkOffer!.donorDrugId;
-
-    // Copy quantity / fractional from the donor item in cart.
-    final donorItem = _cart.cast<CartItem?>().firstWhere(
-        (i) => i!.drug.id == donorId,
-        orElse: () => null);
-    final donorQty = donorItem?.quantity ?? 1;
-    final donorFrac = donorItem?.fractionalQty;
-
     setState(() {
       _dismissedEdkDrugIds.add(donorId);
       _activeEdkOffer = null;
-      final idx = _cart.indexWhere((i) => i.drug.id == replacementDrug.id);
+      // Remove the donor — replacement substitutes it.
+      _cart.removeWhere((i) => i.drug.id == donorId);
+      final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
-        if (donorFrac != null && replacementDrug.unitsPerPackage != null) {
-          _cart[idx].fractionalQty =
-              donorFrac.clamp(1, replacementDrug.unitsPerPackage!);
-          _cart[idx].quantity = 0;
-        } else {
-          _cart[idx].quantity =
-              (_cart[idx].quantity + donorQty).clamp(1, replacementDrug.stock);
-        }
+        if (_cart[idx].quantity < replacement.stock) _cart[idx].quantity++;
       } else {
-        if (donorFrac != null && replacementDrug.unitsPerPackage != null) {
-          _cart.add(CartItem(
-            drug: replacementDrug,
-            quantity: 0,
-            fractionalQty: donorFrac.clamp(1, replacementDrug.unitsPerPackage!),
-          ));
-        } else {
-          _cart.add(CartItem(
-            drug: replacementDrug,
-            quantity: donorQty.clamp(1, replacementDrug.stock),
-          ));
-        }
+        _cart.add(CartItem(drug: replacement, quantity: 1));
       }
+      _selectedDrug = replacement;
     });
+    final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
+    if (ri >= 0) _scrollToIndex(ri);
+  }
+
+  /// Accept EDK as blister: add 1 blister of replacement, remove donor.
+  void _addEdkBlisterToCart() {
+    if (_activeEdkOffer == null) return;
+    final replacement = _activeEdkOffer!.drug;
+    final donorId = _activeEdkOffer!.donorDrugId;
+    if (replacement.unitsPerPackage == null) return;
+    setState(() {
+      _dismissedEdkDrugIds.add(donorId);
+      _activeEdkOffer = null;
+      _cart.removeWhere((i) => i.drug.id == donorId);
+      final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
+      if (idx >= 0) {
+        final current = _cart[idx].fractionalQty ?? 0;
+        _cart[idx].fractionalQty =
+            (current + 1).clamp(1, replacement.unitsPerPackage!);
+        _cart[idx].quantity = 0;
+      } else {
+        _cart.add(
+            CartItem(drug: replacement, quantity: 0, fractionalQty: 1));
+      }
+      _selectedDrug = replacement;
+    });
+    final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
+    if (ri >= 0) _scrollToIndex(ri);
   }
 
   void _dismissEdk() {
@@ -556,6 +615,49 @@ class _PosScreenState extends State<PosScreen> {
       _dismissedEdkDrugIds.add(_activeEdkOffer!.donorDrugId);
       _activeEdkOffer = null;
     });
+  }
+
+  // ── OOS (Out-of-Stock) EDK actions ──────────────────────────────────────
+
+  /// Add EDK replacement for an out-of-stock drug (whole package).
+  void _addOosEdkPackage(Drug oosDrug) {
+    final offer = _edkOffers[oosDrug.id];
+    if (offer == null) return;
+    final replacement = offer.drug;
+    setState(() {
+      final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
+      if (idx >= 0) {
+        if (_cart[idx].quantity < replacement.stock) _cart[idx].quantity++;
+      } else {
+        _cart.add(CartItem(drug: replacement, quantity: 1));
+      }
+      _selectedDrug = replacement;
+    });
+    final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
+    if (ri >= 0) _scrollToIndex(ri);
+  }
+
+  /// Add EDK replacement for an out-of-stock drug (1 blister).
+  void _addOosEdkBlister(Drug oosDrug) {
+    final offer = _edkOffers[oosDrug.id];
+    if (offer == null) return;
+    final replacement = offer.drug;
+    if (replacement.unitsPerPackage == null) return;
+    setState(() {
+      final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
+      if (idx >= 0) {
+        final current = _cart[idx].fractionalQty ?? 0;
+        _cart[idx].fractionalQty =
+            (current + 1).clamp(1, replacement.unitsPerPackage!);
+        _cart[idx].quantity = 0;
+      } else {
+        _cart.add(
+            CartItem(drug: replacement, quantity: 0, fractionalQty: 1));
+      }
+      _selectedDrug = replacement;
+    });
+    final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
+    if (ri >= 0) _scrollToIndex(ri);
   }
 
   void _removeFromCart(int index) => setState(() => _cart.removeAt(index));
@@ -594,6 +696,31 @@ class _PosScreenState extends State<PosScreen> {
 
   double get _cartTotal => _cart.fold(0, (s, i) => s + i.total);
   int get _cartItemCount => _cart.length;
+
+  void _reserveAtPharmacy(NearbyPharmacy pharmacy) {
+    final drugName = _selectedDrug?.name ?? '';
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _ReservationSuccessDialog(
+        drugName: drugName,
+        pharmacyAddress: pharmacy.displayAddress,
+      ),
+    ).then((_) {
+      _clearCart();
+    });
+  }
+
+  void _orderForClient() {
+    final drugName = _selectedDrug?.name ?? '';
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _OrderSuccessDialog(drugName: drugName),
+    ).then((_) {
+      _clearCart();
+    });
+  }
 
   void _clearCart() {
     // Reset search without triggering _filterDrugs (which would auto-select)
@@ -959,16 +1086,40 @@ class _PosScreenState extends State<PosScreen> {
           ? EdkPanel(
               key: ValueKey('edk-${_activeEdkOffer!.drug.id}'),
               offer: _activeEdkOffer!,
-              onAdd: _addEdkToCart,
+              onAddPackage: _addEdkToCart,
+              onAddBlister: _activeEdkOffer!.drug.unitsPerPackage != null
+                  ? _addEdkBlisterToCart
+                  : null,
               onDismiss: _dismissEdk,
             )
-          : DrugDetailPanel(
-              key: const ValueKey('detail'),
-              drug: _selectedDrug,
-              analogues: _analogues,
-              onSelectAnalogue: _selectAnalogue,
-              earnedAmount: _totalEarned,
-            ),
+          : (_selectedDrug != null && _selectedDrug!.isOutOfStock)
+              ? OutOfStockPanel(
+                  key: _outOfStockPanelKey,
+                  drug: _selectedDrug!,
+                  edkOffer: _edkOffers[_selectedDrug!.id],
+                  onAddPackage: () =>
+                      _addOosEdkPackage(_selectedDrug!),
+                  onAddBlister:
+                      _edkOffers[_selectedDrug!.id]
+                                  ?.drug
+                                  .unitsPerPackage !=
+                              null
+                          ? () => _addOosEdkBlister(_selectedDrug!)
+                          : null,
+                  onDismissEdk: () {},
+                  nearbyPharmacies: mockNearbyPharmacies,
+                  hasPhone: _isCustomerAuthorized,
+                  onFocusPhone: _focusPhoneField,
+                  onReserve: _reserveAtPharmacy,
+                  onOrderForClient: _orderForClient,
+                )
+              : DrugDetailPanel(
+                  key: const ValueKey('detail'),
+                  drug: _selectedDrug,
+                  analogues: _analogues,
+                  onSelectAnalogue: _selectAnalogue,
+                  earnedAmount: _totalEarned,
+                ),
     );
   }
 
@@ -1371,5 +1522,335 @@ class _PosScreenState extends State<PosScreen> {
       ),
     );
   }
+}
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Reservation success dialog
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class _ReservationSuccessDialog extends StatefulWidget {
+  final String drugName;
+  final String pharmacyAddress;
+
+  const _ReservationSuccessDialog({
+    required this.drugName,
+    required this.pharmacyAddress,
+  });
+
+  @override
+  State<_ReservationSuccessDialog> createState() =>
+      _ReservationSuccessDialogState();
+}
+
+class _ReservationSuccessDialogState extends State<_ReservationSuccessDialog>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ScaleTransition(
+        scale: CurvedAnimation(parent: _anim, curve: Curves.easeOutBack),
+        child: FadeTransition(
+          opacity: CurvedAnimation(parent: _anim, curve: Curves.easeOut),
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: 380,
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x1A000000),
+                    blurRadius: 32,
+                    offset: Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ── Check icon ─────────────────────────────────────────
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEF6FF),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xFF1E7DC8).withValues(alpha: 0.2),
+                        width: 2,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      size: 34,
+                      color: Color(0xFF1E7DC8),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── Title ──────────────────────────────────────────────
+                  const Text(
+                    'Препарат успішно заброньовано',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFF1C1C2E),
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // ── Pharmacy address ───────────────────────────────────
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF4F5F8),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.store_outlined,
+                            size: 18, color: Color(0xFF1E7DC8)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            widget.pharmacyAddress,
+                            style: const TextStyle(
+                              color: Color(0xFF4B5563),
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+
+                  // ── Drug name ──────────────────────────────────────────
+                  Text(
+                    widget.drugName,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF9CA3AF),
+                      fontSize: 12.5,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // ── OK button ──────────────────────────────────────────
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      width: double.infinity,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E7DC8),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        'Готово',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Order-for-client success dialog
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class _OrderSuccessDialog extends StatefulWidget {
+  final String drugName;
+
+  const _OrderSuccessDialog({required this.drugName});
+
+  @override
+  State<_OrderSuccessDialog> createState() => _OrderSuccessDialogState();
+}
+
+class _OrderSuccessDialogState extends State<_OrderSuccessDialog>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ScaleTransition(
+        scale: CurvedAnimation(parent: _anim, curve: Curves.easeOutBack),
+        child: FadeTransition(
+          opacity: CurvedAnimation(parent: _anim, curve: Curves.easeOut),
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: 380,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x1A000000),
+                    blurRadius: 32,
+                    offset: Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ── Check icon ─────────────────────────────────────
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEF6FF),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color:
+                            const Color(0xFF1E7DC8).withValues(alpha: 0.2),
+                        width: 2,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      size: 34,
+                      color: Color(0xFF1E7DC8),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── Title ──────────────────────────────────────────
+                  const Text(
+                    'Замовлення оформлено',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFF1C1C2E),
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // ── Drug name ──────────────────────────────────────
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF4F5F8),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.inventory_2_outlined,
+                            size: 18, color: Color(0xFF1E7DC8)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            widget.drugName,
+                            style: const TextStyle(
+                              color: Color(0xFF4B5563),
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+
+                  // ── Delivery info ──────────────────────────────────
+                  const Text(
+                    'Клієнта буде повідомлено про надходження',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFF9CA3AF),
+                      fontSize: 12.5,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // ── OK button ──────────────────────────────────────
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      width: double.infinity,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E7DC8),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        'Готово',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

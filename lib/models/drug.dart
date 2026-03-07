@@ -6,6 +6,16 @@ enum StorageLocationType { shelf, showcase }
 
 enum UsageStatus { ok, caution, contraindicated, unknown }
 
+// ── Drug availability status (for out-of-stock drugs) ─────────────────────────
+
+enum DrugAvailabilityStatus {
+  marketShortage,    // Відсутній на ринку
+  quarantined,       // В карантині
+  inTransit,         // В дорозі
+  awaitingReceiving, // В аптеці, очікує приходування
+  notOrdered,        // Не замовлений
+}
+
 // ── Per-drug usage profile (populated from mock; future: loaded from API) ─────
 
 class DrugUsageInfo {
@@ -66,6 +76,9 @@ class Drug {
   final String? serialNumber;  // e.g. "1234734678"
   final String? barcode;       // e.g. "712467853"
 
+  // ── Availability (for out-of-stock drugs) ───────────────────────────────
+  final DrugAvailabilityStatus? availabilityStatus;
+
   const Drug({
     required this.id,
     required this.name,
@@ -93,7 +106,10 @@ class Drug {
     this.series,
     this.serialNumber,
     this.barcode,
+    this.availabilityStatus,
   });
+
+  bool get isOutOfStock => stock == 0;
 
   bool get isExpired {
     if (expiryDate == null) return false;

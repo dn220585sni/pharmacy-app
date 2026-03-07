@@ -4,13 +4,15 @@ import '../models/edk_offer.dart';
 /// Right-panel card proposing a pharmaceutical substitution (ЄДК).
 class EdkPanel extends StatelessWidget {
   final EdkOffer offer;
-  final VoidCallback onAdd;
+  final VoidCallback onAddPackage;
+  final VoidCallback? onAddBlister;
   final VoidCallback onDismiss;
 
   const EdkPanel({
     super.key,
     required this.offer,
-    required this.onAdd,
+    required this.onAddPackage,
+    this.onAddBlister,
     required this.onDismiss,
   });
 
@@ -58,7 +60,7 @@ class EdkPanel extends StatelessWidget {
                 const SizedBox(width: 10),
                 const Expanded(
                   child: Text(
-                    'Є дещо краще',
+                    'Є Дещо Краще',
                     style: TextStyle(
                       color: Color(0xFF1E7DC8),
                       fontSize: 15,
@@ -176,19 +178,7 @@ class EdkPanel extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
 
-                  // Description
-                  Text(
-                    offer.description,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFF6B7280),
-                      fontSize: 13,
-                      height: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Script block
+                  // Script block (speech module)
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
@@ -213,9 +203,9 @@ class EdkPanel extends StatelessWidget {
                             offer.script,
                             style: const TextStyle(
                               color: Color(0xFF1E5A8A),
-                              fontSize: 12.5,
-                              fontStyle: FontStyle.italic,
-                              height: 1.45,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              height: 1.5,
                             ),
                           ),
                         ),
@@ -232,52 +222,89 @@ class EdkPanel extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Column(
               children: [
-                // Add to cart
-                GestureDetector(
-                  onTap: onAdd,
-                  child: Container(
-                    width: double.infinity,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E7DC8),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.add_shopping_cart_rounded,
-                            color: Colors.white, size: 17),
-                        SizedBox(width: 7),
-                        Text(
-                          'Додати в кошик',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        SizedBox(width: 8),
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Color(0x33FFFFFF),
-                            borderRadius: BorderRadius.all(Radius.circular(3)),
-                          ),
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                            child: Text(
-                              'Enter',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.3,
-                              ),
+                // Primary row: Блістер (optional) + Упаковку
+                Row(
+                  children: [
+                    if (onAddBlister != null) ...[
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: onAddBlister,
+                          child: Container(
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF4F5F8),
+                              borderRadius: BorderRadius.circular(10),
+                              border:
+                                  Border.all(color: const Color(0xFFE5E7EB)),
+                            ),
+                            child: const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.grid_view_rounded,
+                                    size: 15, color: Color(0xFF6B7280)),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Блістер',
+                                  style: TextStyle(
+                                    color: Color(0xFF6B7280),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      ],
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: onAddPackage,
+                        child: Container(
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E7DC8),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.add_shopping_cart_rounded,
+                                  color: Colors.white, size: 15),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'Упаковку',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: const Color(0x33FFFFFF),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: const Text(
+                                  'Enter',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
                 const SizedBox(height: 8),
 
@@ -306,7 +333,8 @@ class EdkPanel extends StatelessWidget {
                             borderRadius: BorderRadius.all(Radius.circular(3)),
                           ),
                           child: Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
                             child: Text(
                               'Esc',
                               style: TextStyle(

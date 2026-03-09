@@ -70,6 +70,9 @@ class CartPanelState extends State<CartPanel> {
   final _cashFocusNode = FocusNode();
   bool _transferChangeToBonus = false;
 
+  // Social projects
+  String? _selectedSocialProject;
+
   // ── Computed getters ──────────────────────────────────────────────────────
 
   double get _cartTotal => widget.cart.fold(0.0, (s, i) => s + i.total);
@@ -445,100 +448,112 @@ class CartPanelState extends State<CartPanel> {
               ),
             ),
 
-            // ── Body ─────────────────────────────────────────────────
+            // ── Body (horizontal: photo left, info right) ────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Image
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE5E7EB)),
-                    ),
-                    child: drug.imageUrl != null
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(11),
-                            child: Image.network(
-                              drug.imageUrl!,
-                              fit: BoxFit.contain,
-                              errorBuilder: (context, error, stack) =>
-                                  _offerPlaceholderIcon(),
-                            ),
-                          )
-                        : _offerPlaceholderIcon(),
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Name
-                  Text(
-                    drug.name,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFF1C1C2E),
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      height: 1.3,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-
-                  // Manufacturer + category
-                  Text(
-                    '${drug.manufacturer} · ${drug.category}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFF9CA3AF),
-                      fontSize: 11,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Price + bonus
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
+                      // Photo
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF9FAFB),
+                          borderRadius: BorderRadius.circular(10),
+                          border:
+                              Border.all(color: const Color(0xFFE5E7EB)),
+                        ),
+                        child: drug.imageUrl != null
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(9),
+                                child: Image.network(
+                                  drug.imageUrl!,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (context, error, stack) =>
+                                      _offerPlaceholderIcon(),
+                                ),
+                              )
+                            : _offerPlaceholderIcon(),
+                      ),
+                      const SizedBox(width: 10),
+                      // Bonus badge + name + manufacturer (left)
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                if (bonus != null) ...[
+                                  Container(
+                                    width: 22,
+                                    height: 22,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFFEF3C7),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        '$bonus',
+                                        style: const TextStyle(
+                                          color: Color(0xFFB45309),
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                ],
+                                Expanded(
+                                  child: Text(
+                                    drug.name,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Color(0xFF1C1C2E),
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.25,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              drug.manufacturer,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFF9CA3AF),
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Price (right)
                       Text(
                         '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
                         style: const TextStyle(
                           color: Color(0xFF1C1C2E),
-                          fontSize: 18,
+                          fontSize: 15,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      if (bonus != null) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          width: 28,
-                          height: 28,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFFEF3C7),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
-                            child: Text(
-                              '$bonus',
-                              style: const TextStyle(
-                                color: Color(0xFFB45309),
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
                     ],
                   ),
-
                   // Script block
                   if (hasScript) ...[
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                         color: const Color(0xFFF0F7FF),
                         borderRadius: BorderRadius.circular(8),
@@ -552,18 +567,18 @@ class CartPanelState extends State<CartPanel> {
                         children: [
                           const Icon(
                             Icons.chat_bubble_outline_rounded,
-                            size: 14,
+                            size: 13,
                             color: Color(0xFF1E7DC8),
                           ),
-                          const SizedBox(width: 7),
+                          const SizedBox(width: 6),
                           Expanded(
                             child: Text(
                               offer.script!,
                               style: const TextStyle(
                                 color: Color(0xFF1E5A8A),
-                                fontSize: 11.5,
+                                fontSize: 11,
                                 fontWeight: FontWeight.w500,
-                                height: 1.45,
+                                height: 1.4,
                               ),
                             ),
                           ),
@@ -571,13 +586,18 @@ class CartPanelState extends State<CartPanel> {
                       ),
                     ),
                   ] else ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      offer.reason,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Color(0xFF9CA3AF),
-                        fontSize: 11,
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 66),
+                        child: Text(
+                          offer.reason,
+                          style: const TextStyle(
+                            color: Color(0xFF9CA3AF),
+                            fontSize: 11,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -897,7 +917,139 @@ class CartPanelState extends State<CartPanel> {
     );
   }
 
-  // ── Checkout body ──────────────────────────────────────────────────────
+  // ── Social projects section ─────────────────────────────────────────────
+
+  static const _socialProjects = [
+    'Care365',
+    'EPRUF',
+    'ІОЦ «За Рівні Права»',
+    'Алерговакцини',
+    'БО Асістанс',
+    'БФ Карітас',
+    'ГО «Азов Супровід»',
+    'Ебот кард',
+    'Знижка для УБД',
+    'МП Налбуфін',
+    'Медікард',
+    'Паперові 1303',
+    'Реімбурсація',
+    'Рецептурний відпуск',
+    'Сантен',
+    'Серце Азовсталі',
+    'Серце Азовсталі Ліки',
+    'Сонафарм',
+    'Центр прав. рішень',
+  ];
+
+  Widget _buildSocialProjectsSection() {
+    final isSelected = _selectedSocialProject != null;
+
+    return GestureDetector(
+      onTap: () => _showSocialProjectPicker(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected
+                ? const Color(0xFF1E7DC8)
+                : const Color(0xFFDDE1F5),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.volunteer_activism_rounded,
+              size: 18,
+              color: isSelected
+                  ? const Color(0xFF1E7DC8)
+                  : const Color(0xFF9CA3AF),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                isSelected ? _selectedSocialProject! : 'Соціальні проекти',
+                style: TextStyle(
+                  color: isSelected
+                      ? const Color(0xFF1C1C2E)
+                      : const Color(0xFF6B7280),
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (isSelected) ...[
+              GestureDetector(
+                onTap: () => setState(() => _selectedSocialProject = null),
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 4),
+                  child: Icon(Icons.close_rounded,
+                      size: 15, color: Color(0xFF9CA3AF)),
+                ),
+              ),
+            ] else
+              const Icon(Icons.unfold_more_rounded,
+                  size: 16, color: Color(0xFF9CA3AF)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSocialProjectPicker() {
+    final RenderBox box = context.findRenderObject() as RenderBox;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final position = box.localToGlobal(Offset.zero, ancestor: overlay);
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx + 14,
+        position.dy,
+        position.dx + box.size.width - 14,
+        position.dy + box.size.height,
+      ),
+      constraints: const BoxConstraints(maxHeight: 320, maxWidth: 260),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      color: Colors.white,
+      elevation: 6,
+      items: _socialProjects.map((name) {
+        final isActive = _selectedSocialProject == name;
+        return PopupMenuItem<String>(
+          value: name,
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  name,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight:
+                        isActive ? FontWeight.w600 : FontWeight.w400,
+                    color: isActive
+                        ? const Color(0xFF1E7DC8)
+                        : const Color(0xFF1C1C2E),
+                  ),
+                ),
+              ),
+              if (isActive)
+                const Icon(Icons.check_rounded,
+                    size: 15, color: Color(0xFF1E7DC8)),
+            ],
+          ),
+        );
+      }).toList(),
+    ).then((value) {
+      if (value != null) {
+        setState(() => _selectedSocialProject = value);
+      }
+    });
+  }
 
   // ── Checkout body: total → bonuses/discount → payment → pay → change ────
 
@@ -964,6 +1116,11 @@ class CartPanelState extends State<CartPanel> {
                 setState(() => _personalDiscount = null),
             onBonusAmountChanged: () => setState(() {}),
           ),
+
+          const SizedBox(height: 10),
+
+          // ── Social projects ────────────────────────────────────────────
+          _buildSocialProjectsSection(),
 
           const SizedBox(height: 14),
 

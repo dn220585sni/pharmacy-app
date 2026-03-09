@@ -40,10 +40,32 @@ class TopBar extends StatelessWidget {
                 Icon(Icons.person_outline_rounded,
                     color: Color(0xFF1E7DC8), size: 15),
                 SizedBox(width: 5),
-                Text('Касир: Микола',
+                Text('Микола',
                     style:
                         TextStyle(color: Color(0xFF1E7DC8), fontSize: 13)),
               ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Help button
+          GestureDetector(
+            onTap: () {
+              // TODO: open help / knowledge base
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEF4444),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Help',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ),
         ],

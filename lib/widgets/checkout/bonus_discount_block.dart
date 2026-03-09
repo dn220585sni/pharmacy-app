@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/customer_loyalty.dart';
 
-/// Combined bonuses + personal discount block in the checkout screen.
-class BonusDiscountBlock extends StatelessWidget {
+/// Combined bonuses + personal discount + promo code block in the checkout screen.
+class BonusDiscountBlock extends StatefulWidget {
   const BonusDiscountBlock({
     super.key,
     required this.loyalty,
@@ -34,8 +34,24 @@ class BonusDiscountBlock extends StatelessWidget {
   final VoidCallback onBonusAmountChanged;
 
   @override
+  State<BonusDiscountBlock> createState() => _BonusDiscountBlockState();
+}
+
+class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
+  bool _usePromoCode = false;
+  final _promoController = TextEditingController();
+  final _promoFocusNode = FocusNode();
+
+  @override
+  void dispose() {
+    _promoController.dispose();
+    _promoFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final hasLoyalty = loyalty != null;
+    final hasLoyalty = widget.loyalty != null;
     const disabledText = Color(0xFFB0B7C3);
 
     return Container(
@@ -55,9 +71,9 @@ class BonusDiscountBlock extends StatelessWidget {
                 width: 20,
                 height: 20,
                 child: Checkbox(
-                  value: useBonuses,
+                  value: widget.useBonuses,
                   onChanged: hasLoyalty
-                      ? (v) => onUseBonusesChanged(v ?? false)
+                      ? (v) => widget.onUseBonusesChanged(v ?? false)
                       : null,
                   activeColor: const Color(0xFF1E7DC8),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -84,7 +100,7 @@ class BonusDiscountBlock extends StatelessWidget {
                       if (hasLoyalty)
                         TextSpan(
                           text:
-                              ' (доступно ${loyalty!.bonusBalance.toStringAsFixed(2).replaceAll('.', ',')})',
+                              ' (доступно ${widget.loyalty!.bonusBalance.toStringAsFixed(2).replaceAll('.', ',')})',
                           style: const TextStyle(
                               color: Color(0xFF9CA3AF), fontSize: 11.5),
                         ),
@@ -96,7 +112,7 @@ class BonusDiscountBlock extends StatelessWidget {
           ),
 
           // Bonus amount input (if checked)
-          if (useBonuses && hasLoyalty) ...[
+          if (widget.useBonuses && hasLoyalty) ...[
             const SizedBox(height: 8),
             Row(
               children: [
@@ -105,13 +121,13 @@ class BonusDiscountBlock extends StatelessWidget {
                   width: 80,
                   height: 30,
                   child: TextField(
-                    controller: bonusController,
+                    controller: widget.bonusController,
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.right,
                     inputFormatters: [
                       FilteringTextInputFormatter.allow(RegExp(r'[\d,.]')),
                     ],
-                    onChanged: (_) => onBonusAmountChanged(),
+                    onChanged: (_) => widget.onBonusAmountChanged(),
                     style: const TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
@@ -146,10 +162,10 @@ class BonusDiscountBlock extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (effectiveBonusAmount > 0) ...[
+                if (widget.effectiveBonusAmount > 0) ...[
                   const SizedBox(width: 8),
                   Text(
-                    '-${effectiveBonusAmount.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                    '-${widget.effectiveBonusAmount.toStringAsFixed(2).replaceAll('.', ',')} ₴',
                     style: const TextStyle(
                       color: Color(0xFF10B981),
                       fontSize: 12,
@@ -171,10 +187,10 @@ class BonusDiscountBlock extends StatelessWidget {
           GestureDetector(
             onTap: hasLoyalty
                 ? () {
-                    if (personalDiscount != null) {
-                      onClearDiscount();
+                    if (widget.personalDiscount != null) {
+                      widget.onClearDiscount();
                     } else {
-                      onRequestDiscount();
+                      widget.onRequestDiscount();
                     }
                   }
                 : null,
@@ -183,7 +199,7 @@ class BonusDiscountBlock extends StatelessWidget {
                 SizedBox(
                   width: 20,
                   height: 20,
-                  child: isLoadingDiscount
+                  child: widget.isLoadingDiscount
                       ? const SizedBox(
                           width: 16,
                           height: 16,
@@ -193,13 +209,13 @@ class BonusDiscountBlock extends StatelessWidget {
                           ),
                         )
                       : Checkbox(
-                          value: personalDiscount != null,
+                          value: widget.personalDiscount != null,
                           onChanged: hasLoyalty
                               ? (_) {
-                                  if (personalDiscount != null) {
-                                    onClearDiscount();
+                                  if (widget.personalDiscount != null) {
+                                    widget.onClearDiscount();
                                   } else {
-                                    onRequestDiscount();
+                                    widget.onRequestDiscount();
                                   }
                                 }
                               : null,
@@ -226,10 +242,10 @@ class BonusDiscountBlock extends StatelessWidget {
                               : disabledText,
                           fontSize: 12),
                       children: [
-                        if (personalDiscount != null)
+                        if (widget.personalDiscount != null)
                           TextSpan(
                             text:
-                                '  -${discountAmount.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                                '  -${widget.discountAmount.toStringAsFixed(2).replaceAll('.', ',')} ₴',
                             style: const TextStyle(
                               color: Color(0xFF10B981),
                               fontSize: 12,
@@ -242,6 +258,99 @@ class BonusDiscountBlock extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+
+          // ── Divider ──────────────────────────────────────────────────────
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Divider(color: Color(0xFFE5E7EB), height: 1),
+          ),
+
+          // ── Promo code row (checkbox + inline text field) ────────────
+          Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: Checkbox(
+                  value: _usePromoCode,
+                  onChanged: (v) {
+                    setState(() {
+                      _usePromoCode = v ?? false;
+                      if (_usePromoCode) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          _promoFocusNode.requestFocus();
+                        });
+                      } else {
+                        _promoController.clear();
+                        _promoFocusNode.unfocus();
+                      }
+                    });
+                  },
+                  activeColor: const Color(0xFF1E7DC8),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  side: const BorderSide(color: Color(0xFFD1D5DB)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(4)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SizedBox(
+                  height: 28,
+                  child: TextField(
+                    controller: _promoController,
+                    focusNode: _promoFocusNode,
+                    enabled: _usePromoCode,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1C1C2E),
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'Застосувати промокод',
+                      hintStyle: TextStyle(
+                        color: _usePromoCode
+                            ? const Color(0xFFB0B7C3)
+                            : const Color(0xFF1C1C2E),
+                        fontSize: 12,
+                        fontWeight: _usePromoCode
+                            ? FontWeight.w400
+                            : FontWeight.w400,
+                      ),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 7),
+                      filled: true,
+                      fillColor: _usePromoCode
+                          ? const Color(0xFFF9FAFB)
+                          : const Color(0xFFFAFAFA),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide:
+                            const BorderSide(color: Color(0xFFE5E7EB)),
+                      ),
+                      disabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide:
+                            const BorderSide(color: Color(0xFFEEEEEE)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide:
+                            const BorderSide(color: Color(0xFFE5E7EB)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide:
+                            const BorderSide(color: Color(0xFF1E7DC8)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

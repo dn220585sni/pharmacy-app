@@ -159,11 +159,6 @@ class _PosScreenState extends State<PosScreen> {
     _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
     _loyaltyPhoneController.addListener(_guardPhoneCursor);
 
-    // Auto-select first row on startup
-    if (_searchResults.isNotEmpty) {
-      _selectedDrug = _searchResults.first;
-    }
-
     // Global key handler: redirect printable chars to search field
     HardwareKeyboard.instance.addHandler(_handleGlobalKey);
   }
@@ -260,9 +255,12 @@ class _PosScreenState extends State<PosScreen> {
       return true;
     }
 
-    // ── Enter: accept ЄДК offer ──────────────────────────────────────────────
+    // ── Enter: accept ЄДК offer (but not when phone field is focused) ────────
     if (event.logicalKey == LogicalKeyboardKey.enter ||
         event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+      // Phone field has priority — let Enter confirm the phone number
+      if (_loyaltyPhoneFocusNode.hasFocus) return false;
+
       // Out-of-stock EDK: Enter adds whole package
       if (_outOfStockPanelKey.currentState?.isEdkActive == true &&
           _selectedDrug != null &&

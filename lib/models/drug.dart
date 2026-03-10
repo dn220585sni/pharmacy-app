@@ -1,6 +1,13 @@
 // ── Storage location ──────────────────────────────────────────────────────────
 
-enum StorageLocationType { shelf, showcase }
+enum StorageLocationType { shelf, showcase, robot }
+
+class StorageLocation {
+  final StorageLocationType type;
+  final String code;
+  final int qty;
+  const StorageLocation({required this.type, required this.code, required this.qty});
+}
 
 // ── Usage status enum ─────────────────────────────────────────────────────────
 
@@ -64,8 +71,9 @@ class Drug {
   final String? inn;               // МНН: "Ібупрофен", "Парацетамол"
   final String? dosage;            // "400 мг", "500 мг/5 мл"
   final String? storageConditions; // "При t° не вище 25°C..."
-  final StorageLocationType? locationType; // стелаж або вітрина
-  final String? locationCode;             // "C3/02", "А4/07"
+  final StorageLocationType? locationType; // стелаж або вітрина (legacy single)
+  final String? locationCode;             // "C3/02", "А4/07" (legacy single)
+  final List<StorageLocation>? storageLocations; // multi-location with quantities
   final DrugUsageInfo? usageInfo;
   final String? imageUrl;          // product photo; future: provided by API
   final int? unitsPerPackage;      // blisters/units per package (null = not splittable)
@@ -99,6 +107,7 @@ class Drug {
     this.storageConditions,
     this.locationType,
     this.locationCode,
+    this.storageLocations,
     this.usageInfo,
     this.imageUrl,
     this.unitsPerPackage,

@@ -14,6 +14,7 @@ class BonusDiscountBlock extends StatefulWidget {
     required this.discountAmount,
     required this.effectiveBonusAmount,
     required this.personalDiscount,
+    this.availableDiscountAmount,
     required this.isLoadingDiscount,
     required this.onRequestDiscount,
     required this.onClearDiscount,
@@ -28,6 +29,8 @@ class BonusDiscountBlock extends StatefulWidget {
   final double discountAmount;
   final double effectiveBonusAmount;
   final double? personalDiscount;
+  /// Available discount amount (shown even when checkbox is unchecked).
+  final double? availableDiscountAmount;
   final bool isLoadingDiscount;
   final VoidCallback onRequestDiscount;
   final VoidCallback onClearDiscount;
@@ -251,6 +254,15 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                             ),
+                          )
+                        else if (hasLoyalty && widget.availableDiscountAmount != null && widget.availableDiscountAmount! > 0)
+                          TextSpan(
+                            text:
+                                ' (${widget.availableDiscountAmount!.toStringAsFixed(2).replaceAll('.', ',')} ₴)',
+                            style: const TextStyle(
+                              color: Color(0xFF9CA3AF),
+                              fontSize: 11.5,
+                            ),
                           ),
                       ],
                     ),
@@ -266,7 +278,7 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
             child: Divider(color: Color(0xFFE5E7EB), height: 1),
           ),
 
-          // ── Promo code row (checkbox + inline text field) ────────────
+          // ── Promo code row (checkbox + label + inline input) ────────────
           Row(
             children: [
               SizedBox(
@@ -296,6 +308,14 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                 ),
               ),
               const SizedBox(width: 8),
+              const Text(
+                'Промокод',
+                style: TextStyle(
+                  color: Color(0xFF1C1C2E),
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: SizedBox(
                   height: 28,
@@ -309,15 +329,11 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                       color: Color(0xFF1C1C2E),
                     ),
                     decoration: InputDecoration(
-                      hintText: 'Застосувати промокод',
-                      hintStyle: TextStyle(
-                        color: _usePromoCode
-                            ? const Color(0xFFB0B7C3)
-                            : const Color(0xFF1C1C2E),
+                      hintText: _usePromoCode ? 'Введіть код' : '',
+                      hintStyle: const TextStyle(
+                        color: Color(0xFFB0B7C3),
                         fontSize: 12,
-                        fontWeight: _usePromoCode
-                            ? FontWeight.w400
-                            : FontWeight.w400,
+                        fontWeight: FontWeight.w400,
                       ),
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
@@ -325,7 +341,7 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                       filled: true,
                       fillColor: _usePromoCode
                           ? const Color(0xFFF9FAFB)
-                          : const Color(0xFFFAFAFA),
+                          : const Color(0xFFF4F5F8),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(6),
                         borderSide:
@@ -334,7 +350,7 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                       disabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(6),
                         borderSide:
-                            const BorderSide(color: Color(0xFFEEEEEE)),
+                            const BorderSide(color: Color(0xFFE5E7EB)),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(6),

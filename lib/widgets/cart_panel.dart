@@ -60,6 +60,7 @@ class CartPanelState extends State<CartPanel> {
 
   // Personal discount
   double? _personalDiscount;
+  double? _availableDiscount; // fetched on loyalty auth, before checkbox
   bool _isLoadingDiscount = false;
 
   // Payment method
@@ -120,7 +121,36 @@ class CartPanelState extends State<CartPanel> {
 
   bool get isInCheckout => _checkoutMode;
 
+  /// Public method — allows PosScreen to trigger card payment via F10
+  void payByCard() {
+    if (widget.cart.isEmpty) return;
+    if (!_checkoutMode) {
+      if (!_allCartScanned) return;
+      setState(() {
+        _checkoutMode = true;
+        _paymentMethod = PaymentMethod.card;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _processPayment());
+    } else {
+      setState(() => _paymentMethod = PaymentMethod.card);
+      _processPayment();
+    }
+  }
+
   // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+  @override
+  void didUpdateWidget(covariant oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Auto-fetch available discount when loyalty card is first linked
+    if (oldWidget.loyalty == null && widget.loyalty != null && _availableDiscount == null) {
+      _fetchAvailableDiscount();
+    }
+    // Reset when loyalty removed
+    if (widget.loyalty == null && _availableDiscount != null) {
+      _availableDiscount = null;
+    }
+  }
 
   @override
   void dispose() {
@@ -132,8 +162,25 @@ class CartPanelState extends State<CartPanel> {
 
   // ── Mock discount service ─────────────────────────────────────────────────
 
+  /// Pre-fetch discount % as soon as loyalty is linked (without activating it).
+  Future<void> _fetchAvailableDiscount() async {
+    if (widget.loyalty == null) return;
+    final lastDigit = widget.loyalty!.phone.characters.last;
+    final d = int.tryParse(lastDigit) ?? 0;
+    final discount = d >= 5 ? d.toDouble() : null;
+    // Simulate short network delay
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
+    setState(() => _availableDiscount = discount);
+  }
+
   Future<void> _requestDiscount() async {
     if (widget.loyalty == null || _isLoadingDiscount) return;
+    if (_availableDiscount != null) {
+      // Already fetched — just activate
+      setState(() => _personalDiscount = _availableDiscount);
+      return;
+    }
     setState(() => _isLoadingDiscount = true);
     await Future.delayed(const Duration(milliseconds: 500));
     if (!mounted) return;
@@ -141,6 +188,7 @@ class CartPanelState extends State<CartPanel> {
     final d = int.tryParse(lastDigit) ?? 0;
     final discount = d >= 5 ? (d.toDouble()) : null;
     setState(() {
+      _availableDiscount = discount;
       _personalDiscount = discount;
       _isLoadingDiscount = false;
     });
@@ -184,6 +232,7 @@ class CartPanelState extends State<CartPanel> {
     _useBonuses = false;
     _bonusController.clear();
     _personalDiscount = null;
+    _availableDiscount = null;
     _cashController.clear();
     _transferChangeToBonus = false;
     _scannedDrugIds.clear();
@@ -1110,6 +1159,9 @@ class CartPanelState extends State<CartPanel> {
             discountAmount: _discountAmount,
             effectiveBonusAmount: _effectiveBonusAmount,
             personalDiscount: _personalDiscount,
+            availableDiscountAmount: _availableDiscount != null
+                ? _cartTotal * _availableDiscount! / 100
+                : null,
             isLoadingDiscount: _isLoadingDiscount,
             onRequestDiscount: _requestDiscount,
             onClearDiscount: () =>
@@ -1356,6 +1408,26 @@ class CartPanelState extends State<CartPanel> {
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              if (widget.cart.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: const Color(0x33FFFFFF),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: const Text(
+                    'F10',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

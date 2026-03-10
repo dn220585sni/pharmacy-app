@@ -10,13 +10,68 @@ import 'shift_dashboard.dart';
 class _LocationChip extends StatelessWidget {
   final StorageLocationType type;
   final String code;
-  const _LocationChip({required this.type, required this.code});
+  final int? qty;
+  const _LocationChip({required this.type, required this.code, this.qty});
 
   @override
   Widget build(BuildContext context) {
+    final isRobot = type == StorageLocationType.robot;
+
+    if (isRobot) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFECFDF5),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.smart_toy_rounded, size: 16, color: Color(0xFF10B981)),
+            const SizedBox(width: 8),
+            const Text(
+              'Робот',
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10B981),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text(
+                code,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+            if (qty != null) ...[
+              const SizedBox(width: 6),
+              Text(
+                '$qty уп.',
+                style: const TextStyle(
+                  color: Color(0xFF6B7280),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
     final isShowcase = type == StorageLocationType.showcase;
-    final label =
-        isShowcase ? 'Розташування на вітрині' : 'Розташування на стелажу';
+    final label = isShowcase ? 'Вітрина' : 'Стелаж';
     final icon =
         isShowcase ? Icons.storefront_outlined : Icons.view_agenda_outlined;
 
@@ -56,6 +111,17 @@ class _LocationChip extends StatelessWidget {
               ),
             ),
           ),
+          if (qty != null) ...[
+            const SizedBox(width: 6),
+            Text(
+              '$qty уп.',
+              style: const TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -110,6 +176,7 @@ class DrugDetailPanel extends StatelessWidget {
 
   Widget _buildContent(Drug drug) {
     final hasStorage = drug.storageConditions != null ||
+        drug.storageLocations != null ||
         (drug.locationType != null && drug.locationCode != null);
 
     return Column(
@@ -145,6 +212,7 @@ class DrugDetailPanel extends StatelessWidget {
               ],
             ),
           ),
+          const Spacer(),
         ] else ...[
           // Fixed column headers
           Padding(
@@ -281,15 +349,19 @@ class DrugDetailPanel extends StatelessWidget {
                         child: Tooltip(
                           message: 'Переглянути інструкцію',
                           child: Container(
-                            width: 26,
-                            height: 26,
+                            width: 32,
+                            height: 32,
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF0F4FF),
-                              borderRadius: BorderRadius.circular(6),
+                              color: const Color(0xFFEEF2FF),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: const Color(0xFFD6DEFF),
+                                width: 1,
+                              ),
                             ),
                             child: const Icon(
-                              Icons.menu_book_rounded,
-                              size: 14,
+                              Icons.description_rounded,
+                              size: 18,
                               color: Color(0xFF1E7DC8),
                             ),
                           ),
@@ -441,9 +513,26 @@ class DrugDetailPanel extends StatelessWidget {
   // ── Storage location section ────────────────────────────────────────────────
 
   Widget _buildStorageSection(Drug drug) {
-    final hasLocation =
-        drug.locationType != null && drug.locationCode != null;
-    if (!hasLocation) return const SizedBox.shrink();
+    // Prefer new multi-location field; fall back to legacy single location
+    final locations = drug.storageLocations;
+    final hasLegacy = drug.locationType != null && drug.locationCode != null;
+    if (locations == null && !hasLegacy) return const SizedBox.shrink();
+
+    // Sort: robot first
+    final sorted = locations != null
+        ? (List<StorageLocation>.from(locations)
+            ..sort((a, b) {
+              if (a.type == StorageLocationType.robot &&
+                  b.type != StorageLocationType.robot) {
+                return -1;
+              }
+              if (a.type != StorageLocationType.robot &&
+                  b.type == StorageLocationType.robot) {
+                return 1;
+              }
+              return 0;
+            }))
+        : <StorageLocation>[];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -451,10 +540,23 @@ class DrugDetailPanel extends StatelessWidget {
         _buildSectionHeader('Місце зберігання'),
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-          child: _LocationChip(
-            type: drug.locationType!,
-            code: drug.locationCode!,
-          ),
+          child: sorted.isNotEmpty
+              ? Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: sorted
+                      .map((loc) => _LocationChip(
+                            type: loc.type,
+                            code: loc.code,
+                            qty: loc.qty,
+                          ))
+                      .toList(),
+                )
+              : _LocationChip(
+                  type: drug.locationType!,
+                  code: drug.locationCode!,
+                  qty: drug.stock,
+                ),
         ),
       ],
     );

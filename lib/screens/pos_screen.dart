@@ -228,6 +228,22 @@ class _PosScreenState extends State<PosScreen> {
       return true;
     }
 
+    // ── F10: pay by card (shortcut for pharmacists who avoid the mouse) ──────
+    if (event.logicalKey == LogicalKeyboardKey.f10) {
+      if (_cart.isNotEmpty) {
+        _loyaltyPhoneFocusNode.unfocus();
+        if (!_cartOpen) {
+          setState(() => _cartOpen = true);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _cartPanelKey.currentState?.payByCard();
+          });
+        } else {
+          _cartPanelKey.currentState?.payByCard();
+        }
+      }
+      return true;
+    }
+
     // ── Esc: exit checkout → close cart → close orders → clear cart confirm → clear search → deselect
     if (event.logicalKey == LogicalKeyboardKey.escape) {
       if (_cartOpen && _cartPanelKey.currentState?.isInCheckout == true) {
@@ -767,6 +783,14 @@ class _PosScreenState extends State<PosScreen> {
     if (!mounted) return;
     final lastDigit = int.tryParse(digits[digits.length - 1]) ?? 0;
     final balance = (lastDigit + 1) * 25.0;
+    // Mask the phone number: +38050***9993
+    final masked = _maskPhone(digits);
+    _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.removeListener(_guardPhoneCursor);
+    _loyaltyPhoneController.text = masked;
+    _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.addListener(_guardPhoneCursor);
+
     setState(() {
       _customerLoyalty = CustomerLoyalty(
         phone: '+380$digits',
@@ -776,9 +800,20 @@ class _PosScreenState extends State<PosScreen> {
     });
   }
 
+  /// Format: +38050***9993 — show operator code + last 4 digits, mask the middle.
+  static String _maskPhone(String digits) {
+    // digits = "501234567" (9 digits after 380)
+    if (digits.length < 9) return '+380$digits';
+    final operator = digits.substring(0, 2);  // e.g. "50"
+    final last4 = digits.substring(digits.length - 4); // e.g. "4567"
+    final maskedMiddle = '*' * (digits.length - 2 - 4); // e.g. "***"
+    return '+380$operator$maskedMiddle$last4';
+  }
+
   void _resetLoyalty() {
     if (_customerLoyalty != null) {
-      _previousCustomerPhone = _loyaltyPhoneController.text;
+      // Store full phone (e.g. "+380 501234567"), not masked
+      _previousCustomerPhone = '$_loyaltyPhonePrefix${_customerLoyalty!.phone.substring(4)}';
     }
     _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
     _loyaltyPhoneController.removeListener(_guardPhoneCursor);

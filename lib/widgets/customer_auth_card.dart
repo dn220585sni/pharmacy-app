@@ -127,12 +127,17 @@ class CustomerAuthCard extends StatelessWidget {
                       child: TextField(
                         controller: phoneController,
                         focusNode: phoneFocusNode,
+                        readOnly: hasLoyalty,
                         keyboardType: TextInputType.phone,
-                        inputFormatters: [PhonePrefixFormatter()],
+                        inputFormatters:
+                            hasLoyalty ? [] : [PhonePrefixFormatter()],
                         onSubmitted: (_) => onConfirmPhone(),
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
-                          color: Color(0xFF1C1C2E),
+                          color: hasLoyalty
+                              ? const Color(0xFF1C1C2E)
+                              : const Color(0xFF1C1C2E),
+                          letterSpacing: hasLoyalty ? 0.5 : 0,
                         ),
                         decoration: InputDecoration(
                           hintText: '+380 __ ___ __ __',

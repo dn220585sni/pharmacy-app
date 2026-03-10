@@ -54,6 +54,7 @@ class OrdersPanelState extends State<OrdersPanel> {
   bool _useBonuses = false;
   final _bonusController = TextEditingController();
   double? _personalDiscount;
+  double? _availableDiscount;
   bool _isLoadingDiscount = false;
 
   double get _orderTotal => _selectedOrder?.total ?? 0;
@@ -109,6 +110,17 @@ class OrdersPanelState extends State<OrdersPanel> {
     _orders = List<InternetOrder>.from(mockOrders);
     _filteredOrders = _sorted(_orders);
     _searchController.addListener(_filterOrders);
+  }
+
+  @override
+  void didUpdateWidget(covariant OrdersPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.loyalty == null && widget.loyalty != null && _availableDiscount == null) {
+      _fetchAvailableOrderDiscount();
+    }
+    if (widget.loyalty == null && _availableDiscount != null) {
+      _availableDiscount = null;
+    }
   }
 
   @override
@@ -216,6 +228,7 @@ class OrdersPanelState extends State<OrdersPanel> {
     _useBonuses = false;
     _bonusController.clear();
     _personalDiscount = null;
+    _availableDiscount = null;
     _cashController.clear();
     _transferChangeToBonus = false;
   }
@@ -240,8 +253,22 @@ class OrdersPanelState extends State<OrdersPanel> {
     });
   }
 
+  Future<void> _fetchAvailableOrderDiscount() async {
+    if (widget.loyalty == null) return;
+    final lastDigit = widget.loyalty!.phone.characters.last;
+    final d = int.tryParse(lastDigit) ?? 0;
+    final discount = d >= 5 ? d.toDouble() : null;
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
+    setState(() => _availableDiscount = discount);
+  }
+
   Future<void> _requestOrderDiscount() async {
     if (widget.loyalty == null || _isLoadingDiscount) return;
+    if (_availableDiscount != null) {
+      setState(() => _personalDiscount = _availableDiscount);
+      return;
+    }
     setState(() => _isLoadingDiscount = true);
     await Future.delayed(const Duration(milliseconds: 500));
     if (!mounted) return;
@@ -249,6 +276,7 @@ class OrdersPanelState extends State<OrdersPanel> {
     final d = int.tryParse(lastDigit) ?? 0;
     final discount = d >= 5 ? (d.toDouble()) : null;
     setState(() {
+      _availableDiscount = discount;
       _personalDiscount = discount;
       _isLoadingDiscount = false;
     });
@@ -1119,6 +1147,9 @@ class OrdersPanelState extends State<OrdersPanel> {
             discountAmount: _discountAmount,
             effectiveBonusAmount: _effectiveBonusAmount,
             personalDiscount: _personalDiscount,
+            availableDiscountAmount: _availableDiscount != null
+                ? _orderTotal * _availableDiscount! / 100
+                : null,
             isLoadingDiscount: _isLoadingDiscount,
             onRequestDiscount: _requestOrderDiscount,
             onClearDiscount: () =>

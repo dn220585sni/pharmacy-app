@@ -113,12 +113,14 @@ class _ShiftDashboardState extends State<ShiftDashboard>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Alert is shown first — most important info for the pharmacist
-          _buildSectionLabel('Зверніть увагу', Icons.info_outline_rounded),
-          const SizedBox(height: 10),
-          _buildAlert(_ShiftData.alert),
-          const SizedBox(height: 16),
-          _buildSectionLabel('Показники зміни', Icons.bar_chart_rounded),
+          // Alert appears only after the first payment has been made
+          if (widget.earnedAmount > 0) ...[
+            _buildSectionLabel('Зверніть увагу', Icons.info_outline_rounded),
+            const SizedBox(height: 10),
+            _buildAlert(_ShiftData.alert),
+            const SizedBox(height: 16),
+          ],
+          _buildSectionLabel('Показники за зміну', Icons.bar_chart_rounded),
           const SizedBox(height: 14),
 
           // ── Earned counter (no goal — just current result) ──────────────
@@ -430,7 +432,7 @@ class _ShiftDashboardState extends State<ShiftDashboard>
             child: Row(
               children: [
                 const Text(
-                  'Всі показники зміни',
+                  'Всі показники за зміну',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,

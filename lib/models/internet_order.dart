@@ -13,6 +13,7 @@ enum OrderStatus {
 enum OrderType {
   tabletkiUA,
   glovo,
+  novaPoshta,
 }
 
 class OrderItem {
@@ -92,6 +93,8 @@ class InternetOrder {
         return 'TabletkiUA';
       case OrderType.glovo:
         return 'Glovo';
+      case OrderType.novaPoshta:
+        return 'Нова Пошта';
     }
   }
 

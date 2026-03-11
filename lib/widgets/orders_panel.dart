@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import '../models/internet_order.dart';
 import '../models/customer_loyalty.dart';
 import '../models/payment_method.dart';
+import '../models/edk_offer.dart';
+import '../models/drug.dart';
 import '../data/mock_orders.dart';
+import '../data/mock_drugs.dart';
 import 'checkout/bonus_discount_block.dart';
 import 'checkout/cash_change_section.dart';
 import 'checkout/payment_method_toggle.dart';
@@ -15,11 +18,15 @@ import 'checkout/payment_method_toggle.dart';
 class OrdersPanel extends StatefulWidget {
   final VoidCallback onClose;
   final CustomerLoyalty? loyalty;
+  final void Function(Drug drug)? onAddEdkPackage;
+  final void Function(Drug drug)? onAddEdkBlister;
 
   const OrdersPanel({
     super.key,
     required this.onClose,
     this.loyalty,
+    this.onAddEdkPackage,
+    this.onAddEdkBlister,
   });
 
   @override
@@ -44,10 +51,66 @@ class OrdersPanelState extends State<OrdersPanel> {
   /// Whether the search field has non-empty text (drives highlight).
   bool get _hasQuery => _searchController.text.trim().isNotEmpty;
 
+  // ── ЄДК (pharmaceutical substitution for order items) ─────────────────────
+  EdkOffer? _activeEdkOffer;
+  final Set<String> _dismissedEdkSkus = {};
+
+  /// EDK offers mapped by order item SKU → replacement drug.
+  /// In production this comes from the server; here we hardcode a few.
+  late final Map<String, EdkOffer> _orderEdkOffers = {
+    // МЕЛОКСИКАМ-ТЕВА (ord-07) → Нурофен Експрес
+    '26771903': EdkOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '009'),
+      donorDrugId: '26771903',
+      description: 'Капсульна форма — швидше всмоктування.',
+      script:
+          'У клієнта Мелоксикам. Пропоную Нурофен Експрес — '
+          'капсули для швидкого знеболення.',
+      promoLabel: 'Потрійний кешбек',
+    ),
+    // ЕНТЕРОСГЕЛЬ (ord-14, Glovo) → Атоксіл (mock id '032')
+    '26883210': EdkOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '032'),
+      donorDrugId: '26883210',
+      description: 'Потужний сорбент нового покоління.',
+      script:
+          'До Ентеросгелю рекомендую розглянути Атоксіл — '
+          'сильніший сорбент за нижчою ціною.',
+    ),
+    // СІОФОР ХР (ord-09) → Метформін (mock id '010')
+    '26890213': EdkOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '010'),
+      donorDrugId: '26890213',
+      description: 'Та ж діюча речовина, вигідніша ціна.',
+      script:
+          'Замість Сіофору пропоную Метформін — ідентичний склад, '
+          'значно вигідніша ціна для клієнта.',
+    ),
+    // ДОППЕЛЬГЕРЦ АКТ (ord-11) → Вітамін D3 (mock id '019')
+    '26345670': EdkOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '019'),
+      donorDrugId: '26345670',
+      description: 'Преміальна якість від Солгар.',
+      script:
+          'До Доппельгерц рекомендую Вітамін D3 від Солгар — '
+          'вищий вміст діючої речовини, перевірена якість.',
+      promoLabel: 'Кешбек ×2',
+    ),
+    // ЦИПРОФЛОКСАЦИН (ord-03) → Флемоксин Солютаб (mock id '042')
+    '25487201': EdkOffer(
+      drug: mockDrugs.firstWhere((d) => d.id == '042'),
+      donorDrugId: '25487201',
+      description: 'Зручна форма прийому без ін\'єкцій.',
+      script:
+          'Рекомендую розглянути Флемоксин Солютаб — '
+          'потужний антибіотик у зручній формі таблеток.',
+    ),
+  };
+
   // ── Checkout state (mirrors CartPanel) ─────────────────────────────────────
   bool _orderCheckoutMode = false;
   bool _showPaymentSuccess = false;
-  PaymentMethod _paymentMethod = PaymentMethod.card;
+  PaymentMethod _paymentMethod = PaymentMethod.cash;
   final _cashController = TextEditingController();
   final _cashFocusNode = FocusNode();
   bool _transferChangeToBonus = false;
@@ -176,13 +239,85 @@ class OrdersPanelState extends State<OrdersPanel> {
     setState(() {
       _selectedOrder = order;
       _scannedSkus.clear();
+      _activeEdkOffer = null;
     });
+    // Show EDK immediately when opening an eligible order
+    _triggerEdkForOrder(order);
+  }
+
+  /// Find the first EDK offer for an order's items and activate it.
+  void _triggerEdkForOrder(InternetOrder order) {
+    if (order.isLockerEligible) return;
+    if (order.type == OrderType.glovo) return;
+    if (order.type == OrderType.novaPoshta) return;
+    if (order.status == OrderStatus.dispensed) return;
+    for (final item in order.items) {
+      if (_dismissedEdkSkus.contains(item.sku)) continue;
+      final offer = _orderEdkOffers[item.sku];
+      if (offer != null) {
+        setState(() => _activeEdkOffer = offer);
+        return;
+      }
+    }
+  }
+
+  /// Whether EDK is allowed for the current order.
+  /// Disabled for Glovo, Nova Poshta, and locker-eligible orders.
+  bool get _edkAllowed {
+    final order = _selectedOrder;
+    if (order == null) return false;
+    if (order.isLockerEligible) return false;
+    if (order.type == OrderType.glovo) return false;
+    if (order.type == OrderType.novaPoshta) return false;
+    return true;
   }
 
   /// Simulate barcode scan (triggered by tapping item price).
   void _scanItem(OrderItem item) {
+    final wasScanned = _scannedSkus.contains(item.sku);
     setState(() => _scannedSkus.add(item.sku));
+    // Trigger EDK if this item has an offer and wasn't already scanned
+    if (_edkAllowed &&
+        !wasScanned &&
+        !_dismissedEdkSkus.contains(item.sku)) {
+      final offer = _orderEdkOffers[item.sku];
+      if (offer != null) {
+        setState(() => _activeEdkOffer = offer);
+      }
+    }
   }
+
+  void _acceptEdkPackage() {
+    final offer = _activeEdkOffer;
+    if (offer == null) return;
+    widget.onAddEdkPackage?.call(offer.drug);
+    setState(() => _activeEdkOffer = null);
+  }
+
+  void _acceptEdkBlister() {
+    final offer = _activeEdkOffer;
+    if (offer == null) return;
+    widget.onAddEdkBlister?.call(offer.drug);
+    setState(() => _activeEdkOffer = null);
+  }
+
+  void _dismissOrderEdk() {
+    final offer = _activeEdkOffer;
+    if (offer == null) return;
+    setState(() {
+      _dismissedEdkSkus.add(offer.donorDrugId);
+      _activeEdkOffer = null;
+    });
+  }
+
+  /// Public — for Esc cascade from PosScreen
+  bool get isEdkActive => _activeEdkOffer != null;
+
+  /// Public — dismiss EDK from PosScreen (Esc)
+  void dismissEdk() => _dismissOrderEdk();
+
+  /// Public — accept EDK package from PosScreen (Enter)
+  void acceptEdkPackage() => _acceptEdkPackage();
 
   /// Whether all real items (total >= 0) in the current order have been scanned.
   bool get _allScanned {
@@ -224,7 +359,7 @@ class OrdersPanelState extends State<OrdersPanel> {
   void _resetOrderCheckoutState() {
     _orderCheckoutMode = false;
     _showPaymentSuccess = false;
-    _paymentMethod = PaymentMethod.card;
+    _paymentMethod = PaymentMethod.cash;
     _useBonuses = false;
     _bonusController.clear();
     _personalDiscount = null;
@@ -515,12 +650,15 @@ class OrdersPanelState extends State<OrdersPanel> {
   // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildDetailScreen(InternetOrder order) {
+    final showEdk = _activeEdkOffer != null &&
+        order.status != OrderStatus.dispensed;
+
     return Column(
       key: ValueKey('order_detail_${order.id}'),
       children: [
         _buildDetailHeader(order),
         const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
-        // Items scroll (like CartPanel's _buildItemsAndOffers)
+        // Items + EDK card scroll together
         Expanded(
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 6),
@@ -533,11 +671,366 @@ class OrdersPanelState extends State<OrdersPanel> {
                       order.status != OrderStatus.dispensed,
                   onScan: () => _scanItem(item),
                 ),
+              // ── EDK offer card (inline after items) ────────────────
+              if (showEdk)
+                _buildOrderEdkCard(_activeEdkOffer!),
             ],
           ),
         ),
         _buildDetailFooter(order),
       ],
+    );
+  }
+
+  // ── EDK card (inline, matching retail EdkPanel style) ─────────────────────
+
+  Widget _buildOrderEdkCard(EdkOffer offer) {
+    final drug = offer.drug;
+    final bonus = drug.pharmacistBonus;
+    final hasBlister = drug.unitsPerPackage != null;
+
+    return Container(
+      key: ValueKey('order_edk_${offer.donorDrugId}'),
+      margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F7FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF1E7DC8).withValues(alpha: 0.2),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 0),
+            child: Row(
+              children: [
+                Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Colors.white,
+                    size: 13,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Є Дещо Краще',
+                  style: TextStyle(
+                    color: Color(0xFF1E7DC8),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (offer.promoLabel != null) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      offer.promoLabel!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                GestureDetector(
+                  onTap: _dismissOrderEdk,
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.close_rounded,
+                        size: 16, color: Color(0xFF9CA3AF)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Drug info row
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                // Image
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                  ),
+                  child: drug.imageUrl != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(7),
+                          child: Image.network(
+                            drug.imageUrl!,
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stack) => const Icon(
+                              Icons.medication_rounded,
+                              size: 24,
+                              color: Color(0xFFD1D5DB),
+                            ),
+                          ),
+                        )
+                      : const Icon(
+                          Icons.medication_rounded,
+                          size: 24,
+                          color: Color(0xFFD1D5DB),
+                        ),
+                ),
+                const SizedBox(width: 10),
+                // Name + manufacturer + price
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        drug.name,
+                        style: const TextStyle(
+                          color: Color(0xFF1C1C2E),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        drug.manufacturer,
+                        style: const TextStyle(
+                          color: Color(0xFF9CA3AF),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Price + bonus badge
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                      style: const TextStyle(
+                        color: Color(0xFF1C1C2E),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (bonus != null) ...[
+                      const SizedBox(height: 2),
+                      Container(
+                        width: 22,
+                        height: 22,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFEF3C7),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Text(
+                            '$bonus',
+                            style: const TextStyle(
+                              color: Color(0xFFB45309),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Script block
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: const Color(0xFF1E7DC8).withValues(alpha: 0.12),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.chat_bubble_outline_rounded,
+                    size: 14,
+                    color: Color(0xFF1E7DC8),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      offer.script,
+                      style: const TextStyle(
+                        color: Color(0xFF1E5A8A),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Action buttons
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: Row(
+              children: [
+                if (hasBlister) ...[
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: _acceptEdkBlister,
+                      child: Container(
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF4F5F8),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFE5E7EB)),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.grid_view_rounded,
+                                size: 13, color: Color(0xFF6B7280)),
+                            SizedBox(width: 5),
+                            Text(
+                              'Блістер',
+                              style: TextStyle(
+                                color: Color(0xFF6B7280),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: GestureDetector(
+                    onTap: _acceptEdkPackage,
+                    child: Container(
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E7DC8),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.add_shopping_cart_rounded,
+                              color: Colors.white, size: 13),
+                          const SizedBox(width: 5),
+                          const Text(
+                            'Упаковку',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: const Color(0x33FFFFFF),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                            child: const Text(
+                              'Enter',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Dismiss button
+                GestureDetector(
+                  onTap: _dismissOrderEdk,
+                  child: Container(
+                    height: 36,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF4F5F8),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Ні',
+                          style: TextStyle(
+                            color: Color(0xFF9CA3AF),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: const Color(0x0F000000),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: const Text(
+                            'Esc',
+                            style: TextStyle(
+                              color: Color(0xFF9CA3AF),
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

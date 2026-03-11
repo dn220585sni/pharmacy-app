@@ -34,6 +34,7 @@ class PaymentMethodToggle extends StatelessWidget {
             label: 'Картка',
             method: PaymentMethod.card,
             isLeft: false,
+            hotkey: 'F10',
           ),
         ],
       ),
@@ -45,6 +46,7 @@ class PaymentMethodToggle extends StatelessWidget {
     required String label,
     required PaymentMethod method,
     required bool isLeft,
+    String? hotkey,
   }) {
     final isActive = selectedMethod == method;
     return Expanded(
@@ -77,6 +79,30 @@ class PaymentMethodToggle extends StatelessWidget {
                   fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
+              if (hotkey != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? const Color(0x33FFFFFF)
+                        : const Color(0x0F000000),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Text(
+                    hotkey,
+                    style: TextStyle(
+                      color: isActive
+                          ? Colors.white
+                          : const Color(0xFF9CA3AF),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

@@ -262,6 +262,8 @@ class DrugDetailPanel extends StatelessWidget {
     );
   }
 
+  // ── ЄДК inline card (same style as orders panel) ───────────────────────────
+
   // ── Section divider ─────────────────────────────────────────────────────────
 
   Widget _buildDivider() => const Divider(

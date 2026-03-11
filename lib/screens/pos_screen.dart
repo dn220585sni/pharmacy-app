@@ -211,34 +211,39 @@ class _PosScreenState extends State<PosScreen> {
       return true;
     }
 
-    // ── F5: enter checkout mode (cart must be open with items) ──────────────
+    // ── F5: enter checkout / process payment ───────────────────────────────
     if (event.logicalKey == LogicalKeyboardKey.f5) {
       if (_cart.isNotEmpty) {
         _loyaltyPhoneFocusNode.unfocus();
         if (!_cartOpen) {
+          // Cart closed → open cart + enter checkout
           setState(() => _cartOpen = true);
-          // Wait for CartPanel to build, then enter checkout
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _cartPanelKey.currentState?.enterCheckout();
           });
-        } else {
+        } else if (_cartPanelKey.currentState?.isInCheckout != true) {
+          // Cart open, not in checkout → enter checkout
           _cartPanelKey.currentState?.enterCheckout();
+        } else {
+          // Already in checkout → process payment
+          _cartPanelKey.currentState?.processPayment();
         }
       }
       return true;
     }
 
-    // ── F10: pay by card (shortcut for pharmacists who avoid the mouse) ──────
+    // ── F10: switch payment method to card ───────────────────────────────────
     if (event.logicalKey == LogicalKeyboardKey.f10) {
-      if (_cart.isNotEmpty) {
+      if (_cart.isNotEmpty && _cartOpen) {
         _loyaltyPhoneFocusNode.unfocus();
-        if (!_cartOpen) {
-          setState(() => _cartOpen = true);
+        if (_cartPanelKey.currentState?.isInCheckout != true) {
+          // Not in checkout yet → enter checkout first, then switch to card
+          _cartPanelKey.currentState?.enterCheckout();
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            _cartPanelKey.currentState?.payByCard();
+            _cartPanelKey.currentState?.switchToCard();
           });
         } else {
-          _cartPanelKey.currentState?.payByCard();
+          _cartPanelKey.currentState?.switchToCard();
         }
       }
       return true;
@@ -252,6 +257,8 @@ class _PosScreenState extends State<PosScreen> {
         setState(() => _cartOpen = false);
       } else if (_ordersOpen && _ordersPanelKey.currentState?.isInCheckout == true) {
         _ordersPanelKey.currentState?.exitOrderCheckout();
+      } else if (_ordersOpen && _ordersPanelKey.currentState?.isEdkActive == true) {
+        _ordersPanelKey.currentState?.dismissEdk();
       } else if (_ordersOpen && _ordersPanelKey.currentState?.isDetailOpen == true) {
         _ordersPanelKey.currentState?.closeDetail();
       } else if (_ordersOpen) {
@@ -277,6 +284,12 @@ class _PosScreenState extends State<PosScreen> {
       // Phone field has priority — let Enter confirm the phone number
       if (_loyaltyPhoneFocusNode.hasFocus) return false;
 
+      // Orders EDK: Enter adds whole package
+      if (_ordersOpen &&
+          _ordersPanelKey.currentState?.isEdkActive == true) {
+        _ordersPanelKey.currentState?.acceptEdkPackage();
+        return true;
+      }
       // Out-of-stock EDK: Enter adds whole package
       if (_outOfStockPanelKey.currentState?.isEdkActive == true &&
           _selectedDrug != null &&
@@ -1036,6 +1049,11 @@ class _PosScreenState extends State<PosScreen> {
                                                   key: _ordersPanelKey,
                                                   onClose: _toggleOrders,
                                                   loyalty: _customerLoyalty,
+                                                  onAddEdkPackage: (drug) =>
+                                                      _setQuantity(drug, 1),
+                                                  onAddEdkBlister: (drug) =>
+                                                      _setFractionalQuantity(
+                                                          drug, 1),
                                                 )
                                               : _buildRightPanel(),
                                     ),
@@ -1106,55 +1124,72 @@ class _PosScreenState extends State<PosScreen> {
           ],
         );
       },
-      transitionBuilder: (child, animation) => FadeTransition(
-        opacity: animation,
-        child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0.04, 0),
-            end: Offset.zero,
-          ).animate(
-              CurvedAnimation(parent: animation, curve: Curves.easeOut)),
-          child: child,
-        ),
-      ),
+      transitionBuilder: (child, animation) {
+        final isEdk = child.key == const ValueKey('edk');
+        if (isEdk) {
+          // EdkPanel: soft scale-up from 0.97 + fade — gentle overlay feel
+          return FadeTransition(
+            opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.97, end: 1.0).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+              ),
+              child: child,
+            ),
+          );
+        }
+        // Default: subtle horizontal slide + fade
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.04, 0),
+              end: Offset.zero,
+            ).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeOut)),
+            child: child,
+          ),
+        );
+      },
       child: _activeEdkOffer != null
-          ? EdkPanel(
-              key: ValueKey('edk-${_activeEdkOffer!.drug.id}'),
-              offer: _activeEdkOffer!,
-              onAddPackage: _addEdkToCart,
-              onAddBlister: _activeEdkOffer!.drug.unitsPerPackage != null
-                  ? _addEdkBlisterToCart
-                  : null,
-              onDismiss: _dismissEdk,
-            )
-          : (_selectedDrug != null && _selectedDrug!.isOutOfStock)
-              ? OutOfStockPanel(
-                  key: _outOfStockPanelKey,
-                  drug: _selectedDrug!,
-                  edkOffer: _edkOffers[_selectedDrug!.id],
-                  onAddPackage: () =>
-                      _addOosEdkPackage(_selectedDrug!),
+              ? EdkPanel(
+                  key: const ValueKey('edk'),
+                  offer: _activeEdkOffer!,
+                  onAddPackage: _addEdkToCart,
                   onAddBlister:
-                      _edkOffers[_selectedDrug!.id]
-                                  ?.drug
-                                  .unitsPerPackage !=
-                              null
-                          ? () => _addOosEdkBlister(_selectedDrug!)
+                      _activeEdkOffer!.drug.unitsPerPackage != null
+                          ? _addEdkBlisterToCart
                           : null,
-                  onDismissEdk: () {},
-                  nearbyPharmacies: mockNearbyPharmacies,
-                  hasPhone: _isCustomerAuthorized,
-                  onFocusPhone: _focusPhoneField,
-                  onReserve: _reserveAtPharmacy,
-                  onOrderForClient: _orderForClient,
+                  onDismiss: _dismissEdk,
                 )
-              : DrugDetailPanel(
-                  key: const ValueKey('detail'),
-                  drug: _selectedDrug,
-                  analogues: _analogues,
-                  onSelectAnalogue: _selectAnalogue,
-                  earnedAmount: _totalEarned,
-                ),
+              : (_selectedDrug != null && _selectedDrug!.isOutOfStock)
+                  ? OutOfStockPanel(
+                      key: _outOfStockPanelKey,
+                      drug: _selectedDrug!,
+                      edkOffer: _edkOffers[_selectedDrug!.id],
+                      onAddPackage: () =>
+                          _addOosEdkPackage(_selectedDrug!),
+                      onAddBlister:
+                          _edkOffers[_selectedDrug!.id]
+                                      ?.drug
+                                      .unitsPerPackage !=
+                                  null
+                              ? () => _addOosEdkBlister(_selectedDrug!)
+                              : null,
+                      onDismissEdk: () {},
+                      nearbyPharmacies: mockNearbyPharmacies,
+                      hasPhone: _isCustomerAuthorized,
+                      onFocusPhone: _focusPhoneField,
+                      onReserve: _reserveAtPharmacy,
+                      onOrderForClient: _orderForClient,
+                    )
+                  : DrugDetailPanel(
+                      key: const ValueKey('detail'),
+                      drug: _selectedDrug,
+                      analogues: _analogues,
+                      onSelectAnalogue: _selectAnalogue,
+                      earnedAmount: _totalEarned,
+                    ),
     );
   }
 

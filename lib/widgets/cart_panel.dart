@@ -64,7 +64,7 @@ class CartPanelState extends State<CartPanel> {
   bool _isLoadingDiscount = false;
 
   // Payment method
-  PaymentMethod _paymentMethod = PaymentMethod.card;
+  PaymentMethod _paymentMethod = PaymentMethod.cash;
 
   // Cash change
   final _cashController = TextEditingController();
@@ -98,6 +98,20 @@ class CartPanelState extends State<CartPanel> {
     return raw < 0 ? 0 : raw;
   }
 
+  /// Whether payment can be processed.
+  /// For cash/mixed: requires entered amount ≥ finalTotal.
+  /// For card: always allowed.
+  bool get _canProcessPayment {
+    if (widget.cart.isEmpty) return false;
+    if (_paymentMethod == PaymentMethod.card) return true;
+    // Cash or mixed — must have sufficient cash entered
+    final text =
+        _cashController.text.replaceAll(',', '.').replaceAll(' ', '');
+    final cash = double.tryParse(text);
+    if (cash == null) return false;
+    return cash >= _finalTotal;
+  }
+
   /// Whether all cart items have been scanned (barcode confirmed).
   bool get _allCartScanned {
     if (widget.cart.isEmpty) return false;
@@ -112,6 +126,10 @@ class CartPanelState extends State<CartPanel> {
   void enterCheckout() {
     if (widget.cart.isEmpty || !_allCartScanned) return;
     setState(() => _checkoutMode = true);
+    // Default is cash → auto-focus the cash amount field
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _cashFocusNode.requestFocus();
+    });
   }
 
   /// Public method — allows PosScreen to exit checkout back to cart
@@ -121,21 +139,17 @@ class CartPanelState extends State<CartPanel> {
 
   bool get isInCheckout => _checkoutMode;
 
-  /// Public method — allows PosScreen to trigger card payment via F10
-  void payByCard() {
-    if (widget.cart.isEmpty) return;
-    if (!_checkoutMode) {
-      if (!_allCartScanned) return;
-      setState(() {
-        _checkoutMode = true;
-        _paymentMethod = PaymentMethod.card;
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) => _processPayment());
-    } else {
-      setState(() => _paymentMethod = PaymentMethod.card);
-      _processPayment();
-    }
+  /// Public method — F10 switches payment method to card
+  void switchToCard() {
+    if (!_checkoutMode) return;
+    setState(() {
+      _paymentMethod = PaymentMethod.card;
+      _cashController.clear();
+    });
   }
+
+  /// Public method — F5 processes payment when already in checkout
+  void processPayment() => _processPayment();
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -206,7 +220,7 @@ class CartPanelState extends State<CartPanel> {
   // ── Payment ───────────────────────────────────────────────────────────────
 
   void _processPayment() {
-    if (widget.cart.isEmpty) return;
+    if (!_canProcessPayment) return;
     widget.onPay();
     setState(() => _showPaymentSuccess = true);
     Future.delayed(const Duration(seconds: 2), () {
@@ -214,7 +228,7 @@ class CartPanelState extends State<CartPanel> {
         setState(() {
           _showPaymentSuccess = false;
           _checkoutMode = false;
-          _paymentMethod = PaymentMethod.card;
+          _paymentMethod = PaymentMethod.cash;
           _useBonuses = false;
           _bonusController.clear();
           _personalDiscount = null;
@@ -228,7 +242,7 @@ class CartPanelState extends State<CartPanel> {
   }
 
   void _resetCheckoutState() {
-    _paymentMethod = PaymentMethod.card;
+    _paymentMethod = PaymentMethod.cash;
     _useBonuses = false;
     _bonusController.clear();
     _personalDiscount = null;
@@ -1206,6 +1220,43 @@ class CartPanelState extends State<CartPanel> {
 
           const SizedBox(height: 10),
 
+          // ── Cash hint — ask to enter amount ────────────────────────────
+          if (!_showPaymentSuccess &&
+              _paymentMethod != PaymentMethod.card &&
+              !_canProcessPayment)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0F7FF),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Icon(
+                      Icons.info_outline_rounded,
+                      size: 16,
+                      color: Color(0xFF1E7DC8),
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Введіть суму готівки від клієнта',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: Color(0xFF1E7DC8),
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
           // ── Pay / success button ─────────────────────────────────────────
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 280),
@@ -1374,15 +1425,17 @@ class CartPanelState extends State<CartPanel> {
         ),
       );
 
-  Widget _payButtonWidget() => GestureDetector(
+  Widget _payButtonWidget() {
+    final enabled = _canProcessPayment;
+    return GestureDetector(
         key: const ValueKey('pay'),
-        onTap: _processPayment,
+        onTap: enabled ? _processPayment : null,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           width: double.infinity,
           height: 46,
           decoration: BoxDecoration(
-            color: widget.cart.isNotEmpty
+            color: enabled
                 ? const Color(0xFF1E7DC8)
                 : const Color(0xFFE5E7EB),
             borderRadius: BorderRadius.circular(10),
@@ -1392,7 +1445,7 @@ class CartPanelState extends State<CartPanel> {
             children: [
               Icon(
                 Icons.payment_rounded,
-                color: widget.cart.isNotEmpty
+                color: enabled
                     ? Colors.white
                     : const Color(0xFFB0B7C3),
                 size: 18,
@@ -1401,14 +1454,14 @@ class CartPanelState extends State<CartPanel> {
               Text(
                 'Провести оплату',
                 style: TextStyle(
-                  color: widget.cart.isNotEmpty
+                  color: enabled
                       ? Colors.white
                       : const Color(0xFFB0B7C3),
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              if (widget.cart.isNotEmpty) ...[
+              if (enabled) ...[
                 const SizedBox(width: 8),
                 Container(
                   padding:
@@ -1418,7 +1471,7 @@ class CartPanelState extends State<CartPanel> {
                     borderRadius: BorderRadius.circular(3),
                   ),
                   child: const Text(
-                    'F10',
+                    'F5',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 10,
@@ -1432,6 +1485,7 @@ class CartPanelState extends State<CartPanel> {
           ),
         ),
       );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

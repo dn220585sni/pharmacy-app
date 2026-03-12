@@ -68,50 +68,53 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
         mainAxisSize: MainAxisSize.min,
         children: [
           // ── Bonus row ────────────────────────────────────────────────────
-          Row(
-            children: [
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: Checkbox(
-                  value: widget.useBonuses,
-                  onChanged: hasLoyalty
-                      ? (v) => widget.onUseBonusesChanged(v ?? false)
-                      : null,
-                  activeColor: const Color(0xFF1E7DC8),
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  visualDensity: VisualDensity.compact,
-                  side: BorderSide(
-                      color: hasLoyalty
-                          ? const Color(0xFFD1D5DB)
-                          : const Color(0xFFE5E7EB)),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(
-                    text: 'Списати бонуси',
-                    style: TextStyle(
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 28),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: Checkbox(
+                    value: widget.useBonuses,
+                    onChanged: hasLoyalty
+                        ? (v) => widget.onUseBonusesChanged(v ?? false)
+                        : null,
+                    activeColor: const Color(0xFF1E7DC8),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    side: BorderSide(
                         color: hasLoyalty
-                            ? const Color(0xFF1C1C2E)
-                            : disabledText,
-                        fontSize: 12),
-                    children: [
-                      if (hasLoyalty)
-                        TextSpan(
-                          text:
-                              ' (доступно ${widget.loyalty!.bonusBalance.toStringAsFixed(2).replaceAll('.', ',')})',
-                          style: const TextStyle(
-                              color: Color(0xFF9CA3AF), fontSize: 11.5),
-                        ),
-                    ],
+                            ? const Color(0xFFD1D5DB)
+                            : const Color(0xFFE5E7EB)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4)),
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      text: 'Списати бонуси',
+                      style: TextStyle(
+                          color: hasLoyalty
+                              ? const Color(0xFF1C1C2E)
+                              : disabledText,
+                          fontSize: 12),
+                      children: [
+                        if (hasLoyalty)
+                          TextSpan(
+                            text:
+                                ' (доступно ${widget.loyalty!.bonusBalance.toStringAsFixed(2).replaceAll('.', ',')})',
+                            style: const TextStyle(
+                                color: Color(0xFF9CA3AF), fontSize: 11.5),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
 
           // Bonus amount input (if checked)
@@ -197,8 +200,10 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                     }
                   }
                 : null,
-            child: Row(
-              children: [
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 28),
+              child: Row(
+                children: [
                 SizedBox(
                   width: 20,
                   height: 20,
@@ -269,6 +274,7 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                   ),
                 ),
               ],
+            ),
             ),
           ),
 

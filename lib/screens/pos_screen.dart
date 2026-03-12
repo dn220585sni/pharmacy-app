@@ -16,6 +16,7 @@ import '../widgets/customer_auth_card.dart';
 import '../data/mock_orders.dart';
 import '../models/internet_order.dart';
 import '../widgets/orders_panel.dart';
+import '../widgets/expenses_panel.dart';
 import '../widgets/out_of_stock_panel.dart';
 import '../data/mock_nearby_pharmacies.dart';
 import '../models/nearby_pharmacy.dart';
@@ -60,8 +61,14 @@ class _PosScreenState extends State<PosScreen> {
   /// Whether the internet orders panel is shown in the right column.
   bool _ordersOpen = false;
 
+  /// Whether the cash expenses panel is shown in the right column.
+  bool _expensesOpen = false;
+
   /// Key for accessing OrdersPanelState (for Esc cascade).
   final _ordersPanelKey = GlobalKey<OrdersPanelState>();
+
+  /// Key for accessing ExpensesPanelState (for Esc cascade).
+  final _expensesPanelKey = GlobalKey<ExpensesPanelState>();
 
   // ── ЄДК (Є Дещо Краще) — pharmaceutical substitution ────────────────────
   EdkOffer? _activeEdkOffer;
@@ -76,7 +83,10 @@ class _PosScreenState extends State<PosScreen> {
   void _toggleCart() {
     setState(() {
       _cartOpen = !_cartOpen;
-      if (_cartOpen) _ordersOpen = false; // mutually exclusive
+      if (_cartOpen) {
+        _ordersOpen = false;
+        _expensesOpen = false;
+      }
     });
     if (_cartOpen) _focusPhoneField();
   }
@@ -84,11 +94,29 @@ class _PosScreenState extends State<PosScreen> {
   void _toggleOrders() {
     setState(() {
       _ordersOpen = !_ordersOpen;
-      if (_ordersOpen) _cartOpen = false; // mutually exclusive
+      if (_ordersOpen) {
+        _cartOpen = false;
+        _expensesOpen = false;
+      }
     });
     if (_ordersOpen) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _ordersPanelKey.currentState?.focusSearch();
+      });
+    }
+  }
+
+  void _toggleExpenses() {
+    setState(() {
+      _expensesOpen = !_expensesOpen;
+      if (_expensesOpen) {
+        _cartOpen = false;
+        _ordersOpen = false;
+      }
+    });
+    if (_expensesOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _expensesPanelKey.currentState?.focusSearch();
       });
     }
   }
@@ -116,7 +144,7 @@ class _PosScreenState extends State<PosScreen> {
 
   /// Auth card is visible when a drug row is selected OR cart is open.
   /// Hidden only on the dashboard view (no drug selected, cart closed).
-  bool get _showAuthCard => _cartOpen || _ordersOpen || _selectedDrug != null;
+  bool get _showAuthCard => _cartOpen || _ordersOpen || _expensesOpen || _selectedDrug != null;
 
   // ── Customer loyalty (phone auth) ─────────────────────────────────────────
   final _loyaltyPhoneController = TextEditingController();
@@ -196,6 +224,11 @@ class _PosScreenState extends State<PosScreen> {
         _toggleOrders();
         return true;
       }
+      // ── Ctrl+E: toggle cash expenses panel ─────────────────────────────
+      if (event.logicalKey == LogicalKeyboardKey.keyE) {
+        _toggleExpenses();
+        return true;
+      }
       return false; // other Ctrl combos — pass through
     }
 
@@ -263,6 +296,10 @@ class _PosScreenState extends State<PosScreen> {
         _ordersPanelKey.currentState?.closeDetail();
       } else if (_ordersOpen) {
         setState(() => _ordersOpen = false);
+      } else if (_expensesOpen && _expensesPanelKey.currentState?.isDetailOpen == true) {
+        _expensesPanelKey.currentState?.closeDetail();
+      } else if (_expensesOpen) {
+        setState(() => _expensesOpen = false);
       } else if (_outOfStockPanelKey.currentState?.isEdkActive == true) {
         _outOfStockPanelKey.currentState?.dismissEdk();
       } else if (_activeEdkOffer != null) {
@@ -333,6 +370,9 @@ class _PosScreenState extends State<PosScreen> {
 
     // Search field already has focus — let it handle naturally
     if (_searchFocusNode.hasFocus) return false;
+
+    // Expenses / orders panel is open — let their own search handle input
+    if (_expensesOpen || _ordersOpen) return false;
 
     // If a qty TextField has focus and the key is a digit — don't intercept,
     // let the digit go to the qty field as intended.
@@ -953,6 +993,40 @@ class _PosScreenState extends State<PosScreen> {
     if (idx >= 0) _scrollToIndex(idx);
   }
 
+  // ─── Storage location editing ────────────────────────────────────────────────
+
+  void _onStorageLocationChanged(StorageLocationType type, String code, bool applyToCart) {
+    Drug updateDrugStorage(Drug drug) {
+      // Build updated storageLocations list preserving robot, replacing non-robot
+      final oldLocs = drug.storageLocations ?? <StorageLocation>[];
+      final robotLocs = oldLocs.where((l) => l.type == StorageLocationType.robot).toList();
+      final nonRobotOld = oldLocs.where((l) => l.type != StorageLocationType.robot);
+      final oldQty = nonRobotOld.isNotEmpty ? nonRobotOld.first.qty : drug.stock;
+      final newLoc = StorageLocation(type: type, code: code, qty: oldQty);
+      return drug.copyWithStorage(
+        locationType: type,
+        locationCode: code,
+        storageLocations: [...robotLocs, newLoc],
+      );
+    }
+
+    setState(() {
+      if (_selectedDrug != null) {
+        _selectedDrug = updateDrugStorage(_selectedDrug!);
+      }
+
+      if (applyToCart) {
+        for (int i = 0; i < _cart.length; i++) {
+          _cart[i] = CartItem(
+            drug: updateDrugStorage(_cart[i].drug),
+            quantity: _cart[i].quantity,
+            fractionalQty: _cart[i].fractionalQty,
+          );
+        }
+      }
+    });
+  }
+
   // ─── Cart dialog ────────────────────────────────────────────────────────────
 
   void _openClearCartConfirmDialog() {
@@ -1055,7 +1129,12 @@ class _PosScreenState extends State<PosScreen> {
                                                       _setFractionalQuantity(
                                                           drug, 1),
                                                 )
-                                              : _buildRightPanel(),
+                                              : _expensesOpen
+                                                  ? ExpensesPanel(
+                                                      key: _expensesPanelKey,
+                                                      onClose: _toggleExpenses,
+                                                    )
+                                                  : _buildRightPanel(),
                                     ),
                                   ],
                                 ),
@@ -1097,6 +1176,8 @@ class _PosScreenState extends State<PosScreen> {
                             o.status != OrderStatus.collected &&
                             o.status != OrderStatus.dispensed)
                         .length,
+                    onExpensesTap: _toggleExpenses,
+                    expensesActive: _expensesOpen,
                   ),
                 ],
               ),
@@ -1188,6 +1269,7 @@ class _PosScreenState extends State<PosScreen> {
                       drug: _selectedDrug,
                       analogues: _analogues,
                       onSelectAnalogue: _selectAnalogue,
+                      onStorageLocationChanged: _onStorageLocationChanged,
                       earnedAmount: _totalEarned,
                     ),
     );

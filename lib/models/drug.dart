@@ -1,6 +1,6 @@
 // ── Storage location ──────────────────────────────────────────────────────────
 
-enum StorageLocationType { shelf, showcase, robot }
+enum StorageLocationType { shelf, showcase, polka, robot }
 
 class StorageLocation {
   final StorageLocationType type;
@@ -130,6 +130,43 @@ class Drug {
     final fullYear = 2000 + year;
     final now = DateTime.now();
     return DateTime(fullYear, month + 1).isBefore(DateTime(now.year, now.month, 1));
+  }
+
+  Drug copyWithStorage({
+    StorageLocationType? locationType,
+    String? locationCode,
+    List<StorageLocation>? storageLocations,
+  }) {
+    return Drug(
+      id: id,
+      name: name,
+      manufacturer: manufacturer,
+      category: category,
+      price: price,
+      stock: stock,
+      unit: unit,
+      requiresPrescription: requiresPrescription,
+      expiryDate: expiryDate,
+      pharmacistBonus: pharmacistBonus,
+      isInTransit: isInTransit,
+      isOwnBrand: isOwnBrand,
+      analogueGroup: analogueGroup,
+      dosageForm: dosageForm,
+      inn: inn,
+      dosage: dosage,
+      storageConditions: storageConditions,
+      locationType: locationType ?? this.locationType,
+      locationCode: locationCode ?? this.locationCode,
+      storageLocations: storageLocations ?? this.storageLocations,
+      usageInfo: usageInfo,
+      imageUrl: imageUrl,
+      unitsPerPackage: unitsPerPackage,
+      intakeWarning: intakeWarning,
+      series: series,
+      serialNumber: serialNumber,
+      barcode: barcode,
+      availabilityStatus: availabilityStatus,
+    );
   }
 
   bool get isExpiringSoon {

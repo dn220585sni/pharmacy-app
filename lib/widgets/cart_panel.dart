@@ -71,13 +71,17 @@ class CartPanelState extends State<CartPanel> {
   final _cashFocusNode = FocusNode();
   bool _transferChangeToBonus = false;
 
+  // Cash withdrawal (видача готівки з картки)
+  bool _cashWithdrawal = false;
+  final _cashWithdrawalController = TextEditingController();
+  final _cashWithdrawalFocus = FocusNode();
+
   // Social projects
   String? _selectedSocialProject;
 
   // ── Computed getters ──────────────────────────────────────────────────────
 
   double get _cartTotal => widget.cart.fold(0.0, (s, i) => s + i.total);
-  int get _cartItemCount => widget.cart.length;
 
   double get _discountAmount {
     if (_personalDiscount == null) return 0;
@@ -93,8 +97,14 @@ class CartPanelState extends State<CartPanel> {
     return entered.clamp(0, maxByBalance).clamp(0, maxByTotal).toDouble();
   }
 
+  double get _cashWithdrawalAmount {
+    if (!_cashWithdrawal || _paymentMethod != PaymentMethod.card) return 0;
+    final text = _cashWithdrawalController.text.replaceAll(',', '.').replaceAll(' ', '');
+    return double.tryParse(text) ?? 0;
+  }
+
   double get _finalTotal {
-    final raw = _cartTotal - _discountAmount - _effectiveBonusAmount;
+    final raw = _cartTotal - _discountAmount - _effectiveBonusAmount + _cashWithdrawalAmount;
     return raw < 0 ? 0 : raw;
   }
 
@@ -171,6 +181,8 @@ class CartPanelState extends State<CartPanel> {
     _bonusController.dispose();
     _cashController.dispose();
     _cashFocusNode.dispose();
+    _cashWithdrawalController.dispose();
+    _cashWithdrawalFocus.dispose();
     super.dispose();
   }
 
@@ -945,23 +957,6 @@ class CartPanelState extends State<CartPanel> {
             ),
           ),
           const Spacer(),
-          // Item count badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE8F3FB),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              '$_cartItemCount шт.',
-              style: const TextStyle(
-                color: Color(0xFF1E7DC8),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(width: 7),
           GestureDetector(
             onTap: widget.onClose,
             child: Container(
@@ -1202,8 +1197,18 @@ class CartPanelState extends State<CartPanel> {
               } else {
                 _cashController.clear();
               }
+              if (method != PaymentMethod.card) {
+                _cashWithdrawal = false;
+                _cashWithdrawalController.clear();
+              }
             }),
           ),
+
+          // ── Cash withdrawal (card only) ───────────────────────────────────
+          if (_paymentMethod == PaymentMethod.card && !_showPaymentSuccess) ...[
+            const SizedBox(height: 10),
+            _buildCashWithdrawalSection(),
+          ],
 
           // ── Cash: amount from client + change ────────────────────────────
           if (_paymentMethod == PaymentMethod.cash && !_showPaymentSuccess)
@@ -1393,6 +1398,95 @@ class CartPanelState extends State<CartPanel> {
         ),
       ),
     ];
+  }
+
+  // ── Cash withdrawal section (card payment) ────────────────────────────────
+
+  Widget _buildCashWithdrawalSection() {
+    return Padding(
+      padding: const EdgeInsets.only(left: 10),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: Checkbox(
+              value: _cashWithdrawal,
+              onChanged: (v) => setState(() {
+                _cashWithdrawal = v ?? false;
+                if (_cashWithdrawal) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _cashWithdrawalFocus.requestFocus();
+                  });
+                } else {
+                  _cashWithdrawalController.clear();
+                }
+              }),
+              activeColor: const Color(0xFF1E7DC8),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              side: const BorderSide(color: Color(0xFFD1D5DB)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            'Видати готівку з картки клієнта',
+            style: TextStyle(
+              color: Color(0xFF1C1C2E),
+              fontSize: 12,
+            ),
+          ),
+          if (_cashWithdrawal) ...[
+            const SizedBox(width: 8),
+            Expanded(
+              child: SizedBox(
+                height: 28,
+                child: TextField(
+                  controller: _cashWithdrawalController,
+                  focusNode: _cashWithdrawalFocus,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1C1C2E),
+                  ),
+                  decoration: InputDecoration(
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 7),
+                    isDense: true,
+                    filled: true,
+                    fillColor: const Color(0xFFF9FAFB),
+                    suffixText: '₴',
+                    suffixStyle: const TextStyle(
+                      color: Color(0xFF9CA3AF),
+                      fontSize: 12,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6),
+                      borderSide:
+                          const BorderSide(color: Color(0xFFE5E7EB)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6),
+                      borderSide:
+                          const BorderSide(color: Color(0xFFE5E7EB)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6),
+                      borderSide:
+                          const BorderSide(color: Color(0xFF1E7DC8)),
+                    ),
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   // ── Shared helpers ────────────────────────────────────────────────────────

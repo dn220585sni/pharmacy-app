@@ -15,11 +15,19 @@ class ActionSidebar extends StatelessWidget {
   /// Number of urgent non-collected orders (red dot badge on button).
   final int urgentCount;
 
+  /// Callback when "Витрати по касі" button is tapped.
+  final VoidCallback? onExpensesTap;
+
+  /// Whether the expenses panel is currently open (shows active state).
+  final bool expensesActive;
+
   const ActionSidebar({
     super.key,
     this.onOrdersTap,
     this.ordersActive = false,
     this.urgentCount = 0,
+    this.onExpensesTap,
+    this.expensesActive = false,
   });
 
   @override
@@ -43,6 +51,13 @@ class ActionSidebar extends StatelessWidget {
       _SidebarItem(
         tooltip: 'Пакунок малюка',
         customChild: const _SwaddledBabyIcon(),
+      ),
+      _SidebarItem(
+        icon: Icons.receipt_long_outlined,
+        tooltip: 'Витрати по касі',
+        onTap: onExpensesTap,
+        isActive: expensesActive,
+        hotkeyLabel: 'Ctrl E',
       ),
       _SidebarItem(icon: Icons.explore_outlined, tooltip: 'Путівник'),
       _SidebarItem(

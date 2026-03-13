@@ -11,5 +11,10 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()
+
+    // Launch fullscreen
+    DispatchQueue.main.async {
+      self.toggleFullScreen(nil)
+    }
   }
 }

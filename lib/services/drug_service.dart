@@ -30,6 +30,42 @@ class StockBatch {
   }
 }
 
+/// Елемент результату пошуку за назвою (з SearchByName).
+class DrugSearchItem {
+  final String ids;
+  final String name;
+  final String manufacturer;
+  final String shelf;
+  final int qty;
+  final double price;
+
+  DrugSearchItem({
+    required this.ids,
+    required this.name,
+    required this.manufacturer,
+    required this.shelf,
+    required this.qty,
+    required this.price,
+  });
+
+  factory DrugSearchItem.fromJson(Map<String, dynamic> json) {
+    return DrugSearchItem(
+      ids: json['ids']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      manufacturer: json['manufacturer']?.toString() ?? '',
+      shelf: json['shelf']?.toString() ?? '',
+      qty: (double.tryParse(
+                json['qty']?.toString().replaceAll(',', '.') ?? '0',
+              ) ?? 0.0)
+              .round(),
+      price: double.tryParse(
+            json['price']?.toString().replaceAll(',', '.') ?? '0',
+          ) ??
+          0.0,
+    );
+  }
+}
+
 /// Результат пошуку товару (з GetSKU).
 class DrugLookupResult {
   final bool found;
@@ -149,13 +185,20 @@ class DrugService {
 
   /// Отримати ціни та залишки по партіях.
   ///
-  /// Caché: `GET ?ServiceName=GetSKUprice&sku={sku}`
+  /// Caché: `GET ?ServiceName=GetSKUprice&sku={sku}[&barcode={barcode}]`
   /// Повертає: Name, Proiz, stelazh, vitrina, polka, robot, prices[]
-  static Future<DrugPriceResult> getStockAndPrices(String sku) async {
+  ///
+  /// Якщо передати [barcode], сервер спочатку спробує знайти по sku,
+  /// а потім по штрихкоду (фолбек).
+  static Future<DrugPriceResult> getStockAndPrices(
+    String sku, {
+    String? barcode,
+  }) async {
     if (ApiConfig.useMock) return _mockGetStockAndPrices(sku);
 
     final response = await _api.call('GetSKUprice', params: {
       'sku': sku,
+      if (barcode != null) 'barcode': barcode,
     });
 
     if (!response.isOk) {
@@ -185,6 +228,36 @@ class DrugService {
   }
 
   // ---------------------------------------------------------------------------
+  // Пошук препаратів за назвою
+  // ---------------------------------------------------------------------------
+
+  /// Результат пошуку за назвою.
+  ///
+  /// Caché: `GET ?ServiceName=SearchByName&name={name}`
+  /// Повертає: items[] з {ids, name, manufacturer, shelf, qty, price}
+  static Future<List<DrugSearchItem>> searchByName(String name) async {
+    if (ApiConfig.useMock) return [];
+
+    try {
+      final response = await _api.call('SearchByName', params: {
+        'name': name,
+      });
+
+      if (!response.isOk) return [];
+
+      final itemsJson = response.data['items'];
+      if (itemsJson is! List) return [];
+
+      return itemsJson
+          .whereType<Map<String, dynamic>>()
+          .map((j) => DrugSearchItem.fromJson(j))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Залишок по коду довідника
   // ---------------------------------------------------------------------------
 
@@ -195,12 +268,12 @@ class DrugService {
     if (ApiConfig.useMock) return _mockGetStock(kodSP);
 
     final response = await _api.call('GetOstatokForKodSP', params: {
-      'kodsp': kodSP,
+      'IDS': kodSP,
     });
 
     if (!response.isOk) return 0;
 
-    return int.tryParse(response.data['Qty']?.toString() ?? '0') ?? 0;
+    return int.tryParse(response.data['Result']?.toString() ?? '0') ?? 0;
   }
 
   // ---------------------------------------------------------------------------

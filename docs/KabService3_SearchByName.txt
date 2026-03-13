@@ -1,0 +1,81 @@
+; ===========================================================================
+; SearchByName — пошук препаратів за назвою (підрядковий пошук)
+; ===========================================================================
+;
+; КРОК 1: Додати до $Case таблиці у KabService.mac:
+;   "SearchByName":Price^KabService3("searchbyname",.params,.return),
+;
+; КРОК 2: Додати змінні до n-рядку функції Price:
+;   Існуючий n-рядок:
+;     n allok,sku,price,ukod,skod,price,status,name,proiz,id,i,skodlist,pricelist,priceall,inlist,SKod,qty,st,j,jj,json,audit,ex,barcode
+;   Додати в кінець:
+;     ,nameU,nameVal,tqty,fprice,sq,cnt
+;
+; КРОК 3: Вставити наступний блок у функцію Price ПЕРЕД рядком:
+;   i allok=0 d
+;
+; Тобто ПІСЛЯ блоку "i mode="getprice" do" і ПЕРЕД фінальним обробником помилок.
+; ===========================================================================
+
+     i mode="searchbyname" do
+     .s name=$g(params("name"))
+     .i name="" d  q
+     ..set return(1)="{""Status"":""BAD"","
+     ..set return(2)="""Result"":""name is required""}"
+     .s nameU=$zconvert(name,"U")
+     .s allok=0
+     .s cnt=0
+     .set return(1)="{""Status"":""OK"","
+     .set return(2)="""items"":["
+     .s i=3
+     .s ukod=""
+     .f  s ukod=$o(^Farm("Spr","SPR",1,ukod)) q:ukod=""  q:cnt>=50  d
+     ..s nameVal=$p(^Farm("Spr","SPR",1,ukod),d,1)
+     ..q:nameVal=""
+     ..q:$zconvert(nameVal,"U")'[nameU
+     ..s proiz=$p(^Farm("Spr","PROIZ",1,+$p(ukod,"*",3)),d,1)
+     ..s shelf=$p(^Farm("Spr","SPR",1,ukod),d,78)
+     ..;; підрахунок залишку та ціни по партіях
+     ..s tqty=0,fprice=""
+     ..s skod=""
+     ..f  s skod=$o(^FarmSAllCachedAll(3,ukod,skod)) q:skod=""  d
+     ...q:$$chkSkod(skod)'=1
+     ...s sq=+$p($g(^Farm("Sklad",1,skod)),d,8)
+     ...s tqty=tqty+sq
+     ...i fprice="" d
+     ....s fprice=$p($g(^Farm("Sklad",1,skod)),d,27)
+     ....s fprice=$tr(fprice,",",".")
+     ....s fprice=$fn(fprice*$$getNDSkoef^nds(skod,1),"",2)
+     ....i $d(^PricePriority(skod))'=0 s fprice=^PricePriority(skod)
+     ..i cnt>0 d
+     ...set return(i)=","
+     ...s i=i+1
+     ..set return(i)="{"
+     ..s i=i+1
+     ..set return(i)="""ids"":"""_ukod_""","
+     ..s i=i+1
+     ..set return(i)="""name"":"""_$$SafeJsonSymb^webreqSendJson1(nameVal)_""","
+     ..s i=i+1
+     ..set return(i)="""manufacturer"":"""_$$SafeJsonSymb^webreqSendJson1(proiz)_""","
+     ..s i=i+1
+     ..set return(i)="""shelf"":"""_$$SafeJsonSymb^webreqSendJson1(shelf)_""","
+     ..s i=i+1
+     ..set return(i)="""qty"":"""_tqty_""","
+     ..s i=i+1
+     ..set return(i)="""price"":"""_fprice_"""}"
+     ..s i=i+1
+     ..s cnt=cnt+1
+     .set return(i)="]}"
+     .s i=i+1
+     .s allok=1
+
+; ===========================================================================
+; Приклад виклику:
+; http://10.90.77.66:57772/csp/user/Kab.Service.cls?ServiceName=SearchByName&name=цитрамон
+;
+; Приклад відповіді:
+; {"Status":"OK","items":[
+;   {"ids":"5511*3*14","name":"ЦИТРАМОН-Д №6","manufacturer":"Дарниця","shelf":"70204","qty":"10","price":"16.60"},
+;   {"ids":"5512*3*14","name":"ЦИТРАМОН-Д №10","manufacturer":"Дарниця","shelf":"70204","qty":"15","price":"36.38"}
+; ]}
+; ===========================================================================

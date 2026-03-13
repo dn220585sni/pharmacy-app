@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../data/mock_drugs.dart';
+import '../services/auth_service.dart';
+import '../services/drug_service.dart';
 import '../data/symptom_categories.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
@@ -50,6 +53,15 @@ class _PosScreenState extends State<PosScreen> {
   /// True when navigating with keyboard or clicking a row.
   /// False when selection changes due to filter (search field must keep focus).
   bool _focusQtyOnSelect = false;
+
+  // ── Pharmacist (from GetUsers) ──────────────────────────────────────────────
+  List<PharmacistInfo> _pharmacists = [];
+  PharmacistInfo? _currentPharmacist;
+
+  // ── Server lookup (barcode + name search) ────────────────────────────────
+  Timer? _barcodeLookupTimer;
+  Timer? _nameSearchTimer;
+  bool _isServerLookup = false;
 
   /// A digit character waiting to be injected into the qty field on the
   /// next frame after focus transfers from the search field.
@@ -189,10 +201,44 @@ class _PosScreenState extends State<PosScreen> {
 
     // Global key handler: redirect printable chars to search field
     HardwareKeyboard.instance.addHandler(_handleGlobalKey);
+
+    // Load pharmacists from server and auto-show picker
+    _loadPharmacists(autoShow: true);
+  }
+
+  Future<void> _loadPharmacists({bool autoShow = false}) async {
+    try {
+      final users = await AuthService.getUsers();
+      if (!mounted) return;
+      users.sort((a, b) => a.user.toLowerCase().compareTo(b.user.toLowerCase()));
+      setState(() => _pharmacists = users);
+      if (autoShow && _currentPharmacist == null && users.isNotEmpty) {
+        _showPharmacistPicker();
+      }
+    } catch (_) {
+      // Silently ignore — pharmacist list stays empty
+    }
+  }
+
+  void _showPharmacistPicker() {
+    if (_pharmacists.isEmpty) {
+      _loadPharmacists(autoShow: true);
+      return;
+    }
+    showDialog<PharmacistInfo>(
+      context: context,
+      builder: (ctx) => _PharmacistPickerDialog(pharmacists: _pharmacists),
+    ).then((selected) {
+      if (selected != null && mounted) {
+        setState(() => _currentPharmacist = selected);
+      }
+    });
   }
 
   @override
   void dispose() {
+    _barcodeLookupTimer?.cancel();
+    _nameSearchTimer?.cancel();
     HardwareKeyboard.instance.removeHandler(_handleGlobalKey);
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -207,6 +253,9 @@ class _PosScreenState extends State<PosScreen> {
   /// unless the search field or a digit-input (qty) field already has focus.
   bool _handleGlobalKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
+
+    // Don't intercept keys when a dialog/overlay is open (e.g. pharmacist picker)
+    if (ModalRoute.of(context)?.isCurrent != true) return false;
 
     // ── Ctrl+digit → fractional qty (blisters) when a row is selected ──────
     if (HardwareKeyboard.instance.isControlPressed) {
@@ -294,6 +343,8 @@ class _PosScreenState extends State<PosScreen> {
         _ordersPanelKey.currentState?.dismissEdk();
       } else if (_ordersOpen && _ordersPanelKey.currentState?.isDetailOpen == true) {
         _ordersPanelKey.currentState?.closeDetail();
+      } else if (_ordersOpen && _ordersPanelKey.currentState?.isDisbandedOpen == true) {
+        _ordersPanelKey.currentState?.closeDisbanded();
       } else if (_ordersOpen) {
         setState(() => _ordersOpen = false);
       } else if (_expensesOpen && _expensesPanelKey.currentState?.isDetailOpen == true) {
@@ -436,6 +487,175 @@ class _PosScreenState extends State<PosScreen> {
         _selectedDrug = null;
       }
     });
+
+    // ── Server barcode lookup ──────────────────────────────────────────────
+    // If the query looks like a barcode (8-13 digits), ask the live server.
+    _barcodeLookupTimer?.cancel();
+    _nameSearchTimer?.cancel();
+    if (RegExp(r'^\d{8,13}$').hasMatch(query)) {
+      _barcodeLookupTimer = Timer(
+        const Duration(milliseconds: 400),
+        () => _lookupBarcodeOnServer(query),
+      );
+    } else if (query.length >= 2) {
+      // ── Server name search ────────────────────────────────────────────
+      _nameSearchTimer = Timer(
+        const Duration(milliseconds: 500),
+        () => _searchByNameOnServer(query),
+      );
+    }
+  }
+
+  /// Search drugs by name on Caché server; merge results into table.
+  Future<void> _searchByNameOnServer(String query) async {
+    if (!mounted) return;
+    setState(() => _isServerLookup = true);
+
+    try {
+      final items = await DrugService.searchByName(query);
+      if (!mounted) return;
+
+      // Ignore if user already changed the search query.
+      if (_searchController.text.trim() != query) {
+        setState(() => _isServerLookup = false);
+        return;
+      }
+
+      if (items.isEmpty) {
+        setState(() => _isServerLookup = false);
+        return;
+      }
+
+      // Sort: in-stock first, then by name.
+      items.sort((a, b) {
+        if (a.qty > 0 && b.qty <= 0) return -1;
+        if (a.qty <= 0 && b.qty > 0) return 1;
+        return a.name.compareTo(b.name);
+      });
+
+      // Convert server items to Drug objects.
+      final serverDrugs = items.map((item) {
+        final locations = <StorageLocation>[];
+        if (item.shelf.isNotEmpty) {
+          locations.add(StorageLocation(
+            type: StorageLocationType.shelf,
+            code: item.shelf,
+            qty: item.qty,
+          ));
+        }
+        return Drug(
+          id: 'srv_${item.ids}',
+          name: item.name,
+          manufacturer: item.manufacturer,
+          category: '',
+          price: item.price,
+          stock: item.qty,
+          unit: 'шт',
+          locationCode: item.shelf.isNotEmpty ? item.shelf : null,
+          storageLocations: locations.isNotEmpty ? locations : null,
+        );
+      }).toList();
+
+      setState(() {
+        // Remove old server drugs, prepend new ones before mock results.
+        final mockResults =
+            _searchResults.where((d) => !d.id.startsWith('srv_')).toList();
+        _searchResults = [...serverDrugs, ...mockResults];
+        // Select first result if nothing selected.
+        if (_selectedDrug == null ||
+            !_searchResults.any((d) => d.id == _selectedDrug!.id)) {
+          _selectedDrug =
+              _searchResults.isNotEmpty ? _searchResults.first : null;
+        }
+        _isServerLookup = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isServerLookup = false);
+    }
+  }
+
+  /// Call Caché GetSKUprice by barcode; if found, insert Drug at top of results.
+  ///
+  /// Uses [DrugService.getStockAndPrices] with the `barcode` parameter
+  /// so we get name, price, stock, and location in a single request.
+  Future<void> _lookupBarcodeOnServer(String barcode) async {
+    if (!mounted) return;
+    setState(() => _isServerLookup = true);
+
+    try {
+      final result = await DrugService.getStockAndPrices('', barcode: barcode);
+      if (!mounted) return;
+
+      // Ignore if user already changed the search query.
+      if (_searchController.text.trim() != barcode) {
+        setState(() => _isServerLookup = false);
+        return;
+      }
+
+      if (result.found) {
+        // Build storage locations from server fields.
+        final locations = <StorageLocation>[];
+        if ((result.stelazh ?? '').isNotEmpty) {
+          locations.add(StorageLocation(
+            type: StorageLocationType.shelf,
+            code: result.stelazh!,
+            qty: result.totalStock,
+          ));
+        }
+        if ((result.vitrina ?? '').isNotEmpty) {
+          locations.add(StorageLocation(
+            type: StorageLocationType.showcase,
+            code: result.vitrina!,
+            qty: 0,
+          ));
+        }
+        if ((result.polka ?? '').isNotEmpty) {
+          locations.add(StorageLocation(
+            type: StorageLocationType.polka,
+            code: result.polka!,
+            qty: 0,
+          ));
+        }
+        if ((result.robot ?? '').isNotEmpty) {
+          locations.add(StorageLocation(
+            type: StorageLocationType.robot,
+            code: result.robot!,
+            qty: 0,
+          ));
+        }
+
+        final drug = Drug(
+          id: 'srv_$barcode',
+          name: result.name ?? 'Невідомо',
+          manufacturer: result.manufacturer ?? '',
+          category: '',
+          price: result.retailPrice,
+          stock: result.totalStock,
+          unit: 'шт',
+          barcode: barcode,
+          locationCode: result.stelazh,
+          storageLocations: locations.isNotEmpty ? locations : null,
+        );
+
+        setState(() {
+          // Remove previous server drug if any, then prepend.
+          _searchResults = [
+            drug,
+            ..._searchResults.where((d) => !d.id.startsWith('srv_')),
+          ];
+          _selectedDrug = drug;
+          _isServerLookup = false;
+        });
+
+        _scrollToIndex(0);
+      } else {
+        setState(() => _isServerLookup = false);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isServerLookup = false);
+    }
   }
 
   /// Move keyboard selection by [delta] rows (+1 down, -1 up).
@@ -797,12 +1017,15 @@ class _PosScreenState extends State<PosScreen> {
     _searchController.clear();
     _searchController.addListener(_filterDrugs);
 
+    _barcodeLookupTimer?.cancel();
+    _nameSearchTimer?.cancel();
     setState(() {
       _cart.clear();
       _selectedDrug = null;
       _searchResults = mockDrugs;
       _selectedSymptom = 'Всі';
       _cartOpen = false;
+      _isServerLookup = false;
       _resetLoyalty();
       _dismissedEdkDrugIds.clear();
       _activeEdkOffer = null;
@@ -1048,7 +1271,10 @@ class _PosScreenState extends State<PosScreen> {
       backgroundColor: const Color(0xFFF4F5F8),
       body: Column(
         children: [
-          const TopBar(),
+          TopBar(
+            pharmacistName: _currentPharmacist?.user,
+            onPharmacistTap: _showPharmacistPicker,
+          ),
 
           // ── Main content area ──────────────────────────────────────────────
           Expanded(
@@ -1294,8 +1520,19 @@ class _PosScreenState extends State<PosScreen> {
               hintText: 'Пошук за назвою або виробником...',
               hintStyle:
                   const TextStyle(color: Color(0xFFB0B7C3), fontSize: 14),
-              prefixIcon: const Icon(Icons.search_rounded,
-                  color: Color(0xFF9CA3AF), size: 20),
+              prefixIcon: _isServerLookup
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: 20, height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Color(0xFF4F6EF7),
+                        ),
+                      ),
+                    )
+                  : const Icon(Icons.search_rounded,
+                      color: Color(0xFF9CA3AF), size: 20),
               suffixIcon: _searchController.text.isNotEmpty
                   ? GestureDetector(
                       onTap: () => _searchController.clear(),
@@ -2001,6 +2238,209 @@ class _OrderSuccessDialogState extends State<_OrderSuccessDialog>
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pharmacist picker dialog
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PharmacistPickerDialog extends StatefulWidget {
+  final List<PharmacistInfo> pharmacists;
+  const _PharmacistPickerDialog({required this.pharmacists});
+
+  @override
+  State<_PharmacistPickerDialog> createState() =>
+      _PharmacistPickerDialogState();
+}
+
+class _PharmacistPickerDialogState extends State<_PharmacistPickerDialog> {
+  final _searchController = TextEditingController();
+  List<PharmacistInfo> _filtered = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filtered = widget.pharmacists;
+    _searchController.addListener(_onSearch);
+  }
+
+  void _onSearch() {
+    final q = _searchController.text.trim().toLowerCase();
+    setState(() {
+      if (q.isEmpty) {
+        _filtered = widget.pharmacists;
+      } else {
+        _filtered = widget.pharmacists
+            .where((p) => p.user.toLowerCase().contains(q))
+            .toList();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Container(
+        width: 420,
+        height: 500,
+        padding: const EdgeInsets.all(0),
+        child: Column(
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
+              decoration: const BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: Color(0xFFE5E7EB)),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Оберіть фармацевта',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1C1C2E),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _searchController,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      hintText: 'Пошук за прізвищем...',
+                      hintStyle: const TextStyle(
+                        color: Color(0xFF9CA3AF),
+                        fontSize: 13,
+                      ),
+                      prefixIcon: const Icon(
+                        Icons.search_rounded,
+                        size: 18,
+                        color: Color(0xFF9CA3AF),
+                      ),
+                      filled: true,
+                      fillColor: const Color(0xFFF4F5F8),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+            // List
+            Expanded(
+              child: _filtered.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'Нікого не знайдено',
+                        style:
+                            TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      itemCount: _filtered.length,
+                      itemBuilder: (ctx, i) {
+                        final p = _filtered[i];
+                        return InkWell(
+                          onTap: () => Navigator.of(context).pop(p),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 11),
+                            decoration: const BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(
+                                    color: Color(0xFFF3F4F6), width: 0.5),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFE8F3FB),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      p.user.isNotEmpty
+                                          ? p.user[0].toUpperCase()
+                                          : '?',
+                                      style: const TextStyle(
+                                        color: Color(0xFF1E7DC8),
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    p.user,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: Color(0xFF1C1C2E),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            // Footer
+            Container(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+              decoration: const BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: Color(0xFFE5E7EB)),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(
+                    '${widget.pharmacists.length} фармацевтів',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF9CA3AF),
+                    ),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text(
+                      'Скасувати',
+                      style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

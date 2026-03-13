@@ -1,0 +1,179 @@
+Price(mode,params,return)
+ n allok,sku,price,ukod,skod,price,status,name,proiz,id,i,skodlist,pricelist,priceall,inlist,SKod,qty,st,j,jj,json,audit,ex,barcode
+ s d=$c(9)
+ s P0="kabservice"
+ d Init^Init
+ set $zt="ErrPrice^KabService3"
+ s allok=1
+ if $g(allok)=1 {
+     i mode="cleandata" do
+     .s allok=0
+     .j cleanDataall^KabService3
+     .s allok=1
+     .i allok'=1 d
+     ..set TextError="unknown"
+     .i allok=1 d
+     ..set TextResult="запрос принят"
+     ..set return(1)="{""Status"":""OK"","
+     ..set return(2)="""Result"":"""_TextResult_""")"
+     i mode="loaddata" do
+     .s allok=0
+     .s json=""
+     .d GetTokenPriceTabl^webreqS1(json)
+     .s json=""
+     .d GetPriceTabl^webreqS1(json)
+     .s allok=1
+     .i allok'=1 d
+     ..set TextError="unknown"
+     .i allok=1 d
+     ..set TextResult="запрос принят"
+     ..set return(1)="{""Status"":""OK"","
+     ..set return(2)="""Result"":"""_TextResult_""")"
+     i mode="getsku" do
+     .s sku=$g(params("sku"))
+     .s barcode=$g(params("barcode"))
+     .s audit=+$g(params("audit"))
+     .s allok=0
+     .s ids=sku
+     .s ukod=""
+     .i ids'="" d
+     ..s ex=""
+     ..s ukod=""
+     ..f  s ukod=$o(^PriceServ("SprLink","uft",0,ids,ukod)) q:ukod=""  d:ex=""
+     ...q:$d(^Farm("Spr","SPR",1,ukod))=0
+     ...q:$d(^Farm("Spr","KODS",0,ukod))=0
+     ...s ex=ukod
+         ...s name=$p(^Farm("Spr","SPR",1,ukod),d,1)
+     ...s proiz=$p(^Farm("Spr","PROIZ",1,+$p(ukod,"*",3)),d,1)
+     ...s allok=1
+     ..i ex="" d
+     ...s ukod=$o(^PriceServ("SprLink","uft",0,ids,""))
+     ...i ukod'="" d
+     ....i $d(^Farm("Spr","SPR",1,ukod))'=0 d
+     .....s name=$p(^Farm("Spr","SPR",1,ukod),d,1)
+     .....s proiz=$p(^Farm("Spr","PROIZ",1,+$p(ukod,"*",3)),d,1)
+     .....s allok=1
+     ..e  d
+     ...s ukod=ex
+     .i (allok'=1)&(barcode'="") d
+     ..s ukod=""
+     ..f  s ukod=$o(^BarCode("kods",1,barcode,ukod)) q:(ukod="")!(allok=1)  d
+     ...q:+$p($g(^FarmSAllCachedAll(2,ukod)),d,2)=0
+     ...i $d(^Farm("Spr","SPR",1,ukod))'=0 d
+     ....s ex=ukod
+     ....s name=$p(^Farm("Spr","SPR",1,ukod),d,1)
+     ....s proiz=$p(^Farm("Spr","PROIZ",1,+$p(ukod,"*",3)),d,1)
+     ....s allok=1
+     ..i allok=1 s ukod=ex
+     ..i allok'=1 d
+     ...s ukod=""
+     ...f  s ukod=$o(^BarCode("kods",1,barcode,ukod)) q:(ukod="")!(allok=1)  d
+     ....i $d(^Farm("Spr","SPR",1,ukod))'=0 d
+     .....s ex=ukod
+     .....s name=$p(^Farm("Spr","SPR",1,ukod),d,1)
+     .....s proiz=$p(^Farm("Spr","PROIZ",1,+$p(ukod,"*",3)),d,1)
+     .....s allok=1
+     ..i allok=1 s ukod=ex
+     .i allok'=1 d
+     ..set TextError="товар не найден"
+     .i allok=1 d
+     ..set TextResult="данные по товару"
+     ..set return(1)="{""Status"":""OK"","
+     ..set return(2)="""Result"":"""_TextResult_""","
+     ..;set return(3)="""Name"":"""_name_""","
+     ..set return(3)="""Name"":"""_$$SafeJsonSymb^webreqSendJson1(name)_""","
+     ..;set return(4)="""Proiz"":"""_proiz_""","
+     ..set return(4)="""Proiz"":"""_$$SafeJsonSymb^webreqSendJson1(proiz)_""","
+     ..set return(5)="""stelazh"":"""_$$SafeJsonSymb^webreqSendJson1($p(^Farm("Spr","SPR",1,ukod),d,78))_""","
+     ..set return(6)="""vitrina"":"""_$$SafeJsonSymb^webreqSendJson1($p(^Farm("Spr","SPR",1,ukod),d,100))_""","
+     ..set return(7)="""polka"":"""_$$SafeJsonSymb^webreqSendJson1($p(^Farm("Spr","SPR",1,ukod),d,101))_""","
+     ..set return(8)="""robot"":"""_$$SafeJsonSymb^webreqSendJson1($$robot(ukod))_""","
+     ..set return(9)="""prices"":["
+     ..s i=10
+     ..s inlist=0
+     ..s skod=""
+     ..f  s skod=$o(^FarmSAllCachedAll(3,ukod,skod)) q:skod=""  d
+     ... s SKod=skod
+        ... q:(audit=0)&($$chkSkod(skod)'=1)
+        ... q:(audit=1)&($$chkSkodAudit(skod)'=1)
+     ...i inlist d
+     ....set return(i)=","
+     ....s i=i+1
+     ... s st=""
+     ...set return(i)="{"
+     ...s i=i+1
+     ...set return(i)="""skod"":"""_skod_""","
+     ...s i=i+1
+     ...set return(i)="""status"":"""_st_""","
+     ...s i=i+1
+     ...set return(i)="""qty"":"""_$p(@sklad1,d,8)_""","
+     ...s i=i+1
+     ... s price=$p(@sklad1,d,27)
+     ... s price=$tr(price,",",".")
+     ... s price=$fn(price*$$getNDSkoef^nds(SKod,1),"",2)
+     ... i $d(^PricePriority(skod))'=0 d
+     .... s price=^PricePriority(skod)
+     ...set return(i)="""price"":"""_price_""""
+     ...s i=i+1
+     ...set return(i)="}"
+     ...s i=i+1
+     ...s inlist=1
+     ..set return(i)="]"
+     ..s i=i+1
+     ..set return(i)="}"
+     ..s i=i+1
+     i mode="getprice" do
+     .s sku=$g(params("sku"))
+     .s priceall=$g(params("priceall"))
+     .s skodlist=$g(params("skod"))
+     .s pricelist=$g(params("price"))
+     .s allok=0
+     .s ids=sku
+     .s ukod=""
+     .i ids'="" d
+     ..s ukod=$o(^PriceServ("SprLink","uft",0,ids,""))
+     ..i ukod'="" d
+     ...i $d(^Farm("Spr","SPR",1,ukod))'=0 d
+     ....s allok=1
+     .i allok=1 d
+     ..set TextResult="данные по товару"
+     ..set return(1)="{""Status"":""OK"","
+     ..set return(2)="""Result"":"""_TextResult_""","
+     ..set return(3)="""prices"":["
+     ..s i=4
+     ..s j=$l(skodlist,",")
+     ..f jj=1:1:j d
+     ...;set return(i)=">"_jj_" "_$p(skodlist,",",jj)_" "_$tr($p(pricelist,",",jj),",",".")_"<"
+     ...;s i=i+1
+     ...s skod=+$p(skodlist,",",jj)
+     ...s price=+$tr($p(pricelist,",",jj),",",".")
+     ...s st=""
+     ...i ($d(^Farm("Sklad",1,skod))=0) s st=st_$s(st="":"",1:",")_"нет скода"
+     ...i ($g(^Farm("Spr","KODS",1,skod))'=ukod) s st=st_$s(st="":"",1:",")_"разные товары"
+     ...i price'>0 s st=st_$s(st="":"",1:",")_"нет цены"
+     ...i st="" d
+     ....s stt=$$processSkod(skod,price)
+     ...set return(i)="{""skod"":"""_skod_""","
+     ...s i=i+1
+     ...i st="" d
+     ....s st="ok"
+     ...set return(i)="""status"":"""_st_"""}"
+     ...s i=i+1
+     ...i (jj'=j) d
+     ....set return(i)=","
+     ....s i=i+1
+     ..set return(i)="]"
+     ..s i=i+1
+     ..set return(i)="}"
+     ..s i=i+1
+         .i allok'=1 d
+         ..set TextError="товар не найден"
+         i allok=0 d
+         .i $g(TextError)="" set TextError="ошибка вызова"
+         .set return(1)="{""Status"":""BAD"","
+         .set return(2)="""Result"":"""_TextError_"""}"
+ } else {
+         set TextError="ошибка вызова"
+         set return(1)="{""Status"":""BAD"","
+         set return(2)="""Result"":"""_TextError_"""}"
+ }       quit

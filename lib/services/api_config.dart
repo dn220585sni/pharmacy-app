@@ -6,12 +6,12 @@ class ApiConfig {
   /// Перемикач mock / live.
   /// true  = розробка без сервера (mock дані)
   /// false = реальний Caché сервер
-  static const bool useMock = true;
+  static const bool useMock = false;
 
   /// Адреса Caché CSP сервера.
   /// Формат: http://IP:PORT/csp/user/Kab.Service.cls
   static const String baseUrl =
-      'http://10.10.99.1:6001/csp/user/Kab.Service.cls';
+      'http://10.90.77.66:57772/csp/user/Kab.Service.cls';
 
   /// Таймаут запиту в секундах.
   static const int timeoutSeconds = 10;

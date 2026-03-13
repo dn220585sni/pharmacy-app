@@ -302,7 +302,28 @@ class _DrugListItemState extends State<DrugListItem> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if (drug.requiresPrescription && !isDimmed)
+                        if (drug.id.startsWith('srv_'))
+                          Container(
+                            margin: const EdgeInsets.only(left: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEFF6FF),
+                              borderRadius: BorderRadius.circular(3),
+                              border: Border.all(
+                                color: const Color(0xFFBFDBFE), width: 0.5),
+                            ),
+                            child: const Text(
+                              'Caché',
+                              style: TextStyle(
+                                color: Color(0xFF2563EB),
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          )
+                        else if (drug.requiresPrescription && !isDimmed)
                           Container(
                             margin: const EdgeInsets.only(left: 6),
                             padding: const EdgeInsets.symmetric(
@@ -404,7 +425,9 @@ class _DrugListItemState extends State<DrugListItem> {
                   SizedBox(
                     width: kColPrice,
                     child: Text(
-                      drug.price.toStringAsFixed(2).replaceAll('.', ','),
+                      drug.price > 0
+                          ? drug.price.toStringAsFixed(2).replaceAll('.', ',')
+                          : '—',
                       textAlign: TextAlign.right,
                       style: TextStyle(
                         color:

@@ -1,0 +1,1 @@
+ /Users/mykolashcherbyna/Desktop/pharmacy_app/.dart_tool/flutter_build/91b753bc5364dfab1487f6515da1019c/dart_build_result.json: 

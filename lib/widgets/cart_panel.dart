@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+import '../mixins/checkout_mixin.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
 import '../models/customer_loyalty.dart';
 import '../models/drug.dart';
 import '../models/payment_method.dart';
+import '../models/prescription.dart';
+import '../services/bonus_service.dart';
 import 'cart_item_widget.dart';
+import 'cart_offer_card.dart';
 import 'checkout/bonus_discount_block.dart';
 import 'checkout/cash_change_section.dart';
 import 'checkout/payment_method_toggle.dart';
@@ -26,6 +30,7 @@ class CartPanel extends StatefulWidget {
   final void Function(Drug drug) onAddOffer;
   final void Function(Drug drug) onAddOfferBlister;
   final CustomerLoyalty? loyalty;
+  final VoidCallback? onFocusPhone;
 
   const CartPanel({
     super.key,
@@ -40,36 +45,20 @@ class CartPanel extends StatefulWidget {
     required this.onAddOffer,
     required this.onAddOfferBlister,
     this.loyalty,
+    this.onFocusPhone,
   });
 
   @override
   State<CartPanel> createState() => CartPanelState();
 }
 
-class CartPanelState extends State<CartPanel> {
+class CartPanelState extends State<CartPanel> with CheckoutMixin {
   // ── Two-screen mode ────────────────────────────────────────────────────────
   bool _checkoutMode = false;
-  bool _showPaymentSuccess = false;
+  bool _isProcessingPayment = false;
 
   // Scanned drug IDs (simulated barcode scan by tapping price)
   final Set<String> _scannedDrugIds = {};
-
-  // Bonuses
-  bool _useBonuses = false;
-  final _bonusController = TextEditingController();
-
-  // Personal discount
-  double? _personalDiscount;
-  double? _availableDiscount; // fetched on loyalty auth, before checkbox
-  bool _isLoadingDiscount = false;
-
-  // Payment method
-  PaymentMethod _paymentMethod = PaymentMethod.cash;
-
-  // Cash change
-  final _cashController = TextEditingController();
-  final _cashFocusNode = FocusNode();
-  bool _transferChangeToBonus = false;
 
   // Cash withdrawal (видача готівки з картки)
   bool _cashWithdrawal = false;
@@ -79,33 +68,37 @@ class CartPanelState extends State<CartPanel> {
   // Social projects
   String? _selectedSocialProject;
 
-  // ── Computed getters ──────────────────────────────────────────────────────
+  // Prescription redemption (shown AFTER successful payment)
+  final _redemptionCodeController = TextEditingController();
+  final _redemptionCodeFocus = FocusNode();
+  bool _isRedemptionVerified = false;
+  bool _isVerifyingRedemption = false;
+  bool _showRedemptionAfterPayment = false;
+  // Snapshot of prescription data — persists after onPay clears the cart.
+  PrescriptionCartData? _savedPrescriptionData;
+  // Snapshot of fully-reimbursed flag — persists after onPay clears the cart.
+  bool? _savedFullyReimbursed;
 
-  double get _cartTotal => widget.cart.fold(0.0, (s, i) => s + i.total);
+  // ── CheckoutMixin overrides ─────────────────────────────────────────────
 
-  double get _discountAmount {
-    if (_personalDiscount == null) return 0;
-    return _cartTotal * _personalDiscount! / 100;
+  @override
+  double get baseTotal => widget.cart.fold(0.0, (s, i) => s + i.total);
+
+  @override
+  CustomerLoyalty? get checkoutLoyalty => widget.loyalty;
+
+  @override
+  double get finalTotal {
+    final raw = baseTotal - discountAmount - effectiveBonusAmount + _cashWithdrawalAmount;
+    return raw < 0 ? 0 : raw;
   }
 
-  double get _effectiveBonusAmount {
-    if (!_useBonuses || widget.loyalty == null) return 0;
-    final text = _bonusController.text.replaceAll(',', '.');
-    final entered = double.tryParse(text) ?? 0;
-    final maxByBalance = widget.loyalty!.bonusBalance;
-    final maxByTotal = _cartTotal - _discountAmount;
-    return entered.clamp(0, maxByBalance).clamp(0, maxByTotal).toDouble();
-  }
+  // ── Cart-specific getters ───────────────────────────────────────────────
 
   double get _cashWithdrawalAmount {
-    if (!_cashWithdrawal || _paymentMethod != PaymentMethod.card) return 0;
+    if (!_cashWithdrawal || paymentMethod != PaymentMethod.card) return 0;
     final text = _cashWithdrawalController.text.replaceAll(',', '.').replaceAll(' ', '');
     return double.tryParse(text) ?? 0;
-  }
-
-  double get _finalTotal {
-    final raw = _cartTotal - _discountAmount - _effectiveBonusAmount + _cashWithdrawalAmount;
-    return raw < 0 ? 0 : raw;
   }
 
   /// Whether payment can be processed.
@@ -113,14 +106,49 @@ class CartPanelState extends State<CartPanel> {
   /// For card: always allowed.
   bool get _canProcessPayment {
     if (widget.cart.isEmpty) return false;
-    if (_paymentMethod == PaymentMethod.card) return true;
+    if (paymentMethod == PaymentMethod.card) return true;
     // Cash or mixed — must have sufficient cash entered
     final text =
-        _cashController.text.replaceAll(',', '.').replaceAll(' ', '');
+        cashCtr.text.replaceAll(',', '.').replaceAll(' ', '');
     final cash = double.tryParse(text);
     if (cash == null) return false;
-    return cash >= _finalTotal;
+    return cash >= finalTotal;
   }
+
+  /// Whether cart contains prescription items (or had them before payment).
+  bool get _hasPrescriptionItems =>
+      widget.cart.any((i) => i.isPrescription) ||
+      _savedPrescriptionData != null;
+
+  /// First prescription data found in cart, or saved snapshot after payment.
+  PrescriptionCartData? get _prescriptionData {
+    final fromCart = widget.cart.where((i) => i.isPrescription);
+    if (fromCart.isNotEmpty) return fromCart.first.prescriptionData;
+    return _savedPrescriptionData;
+  }
+
+  /// Whether this prescription checkout needs a redemption code.
+  /// Paper 1303 prescriptions do not require redemption.
+  bool get _needsRedemptionCode =>
+      _prescriptionData?.needsRedemptionCode ?? false;
+
+  /// Whether all prescription items are 100% reimbursed (copayment == 0).
+  /// In this case no payment is needed — only redemption code verification.
+  /// Uses saved snapshot after onPay clears the cart.
+  bool get _isFullyReimbursed {
+    if (_savedFullyReimbursed != null) return _savedFullyReimbursed!;
+    if (!_hasPrescriptionItems) return false;
+    final rxItems = widget.cart.where((i) => i.isPrescription);
+    if (rxItems.isEmpty) return false;
+    return rxItems.every((i) => i.prescriptionData!.copayment <= 0);
+  }
+
+  /// Whether we're in a state where redemption is required but not yet done.
+  bool get _isRedemptionPending =>
+      _hasPrescriptionItems &&
+      _needsRedemptionCode &&
+      !_isRedemptionVerified &&
+      (showPaymentSuccess || _isFullyReimbursed);
 
   /// Whether all cart items have been scanned (barcode confirmed).
   bool get _allCartScanned {
@@ -136,26 +164,53 @@ class CartPanelState extends State<CartPanel> {
   void enterCheckout() {
     if (widget.cart.isEmpty || !_allCartScanned) return;
     setState(() => _checkoutMode = true);
-    // Default is cash → auto-focus the cash amount field
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _cashFocusNode.requestFocus();
-    });
+
+    // Auto-fill social project from prescription program if present
+    if (_hasPrescriptionItems) {
+      final rxData = _prescriptionData;
+      if (rxData != null) {
+        _selectedSocialProject =
+            _mapProgramToSocialProject(rxData.programName);
+      }
+    }
+    if (_isFullyReimbursed && _needsRedemptionCode) {
+      // 100% reimbursed → focus the redemption code field
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _redemptionCodeFocus.requestFocus();
+      });
+    } else {
+      // Default is cash → auto-focus the cash amount field
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        cashFocus.requestFocus();
+      });
+    }
+  }
+
+  /// Map prescription program name to social project.
+  static String? _mapProgramToSocialProject(String program) {
+    if (program.contains('1303')) return 'Паперові 1303';
+    if (program.contains('Доступні ліки') || program.contains('Реімбурсація')) {
+      return 'Реімбурсація';
+    }
+    if (program.contains('Рецептурний')) return 'Рецептурний відпуск';
+    return null;
   }
 
   /// Public method — allows PosScreen to exit checkout back to cart
   void exitCheckout() {
+    if (_isRedemptionPending) {
+      _confirmExitWithoutRedemption(() => _closeAfterPayment());
+      return;
+    }
     setState(() => _checkoutMode = false);
   }
 
   bool get isInCheckout => _checkoutMode;
 
-  /// Public method — F10 switches payment method to card
+  @override
   void switchToCard() {
     if (!_checkoutMode) return;
-    setState(() {
-      _paymentMethod = PaymentMethod.card;
-      _cashController.clear();
-    });
+    super.switchToCard();
   }
 
   /// Public method — F5 processes payment when already in checkout
@@ -167,22 +222,22 @@ class CartPanelState extends State<CartPanel> {
   void didUpdateWidget(covariant oldWidget) {
     super.didUpdateWidget(oldWidget);
     // Auto-fetch available discount when loyalty card is first linked
-    if (oldWidget.loyalty == null && widget.loyalty != null && _availableDiscount == null) {
+    if (oldWidget.loyalty == null && widget.loyalty != null && availableDiscount == null) {
       _fetchAvailableDiscount();
     }
     // Reset when loyalty removed
-    if (widget.loyalty == null && _availableDiscount != null) {
-      _availableDiscount = null;
+    if (widget.loyalty == null && availableDiscount != null) {
+      availableDiscount = null;
     }
   }
 
   @override
   void dispose() {
-    _bonusController.dispose();
-    _cashController.dispose();
-    _cashFocusNode.dispose();
+    disposeCheckout();
     _cashWithdrawalController.dispose();
     _cashWithdrawalFocus.dispose();
+    _redemptionCodeController.dispose();
+    _redemptionCodeFocus.dispose();
     super.dispose();
   }
 
@@ -197,26 +252,26 @@ class CartPanelState extends State<CartPanel> {
     // Simulate short network delay
     await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
-    setState(() => _availableDiscount = discount);
+    setState(() => availableDiscount = discount);
   }
 
   Future<void> _requestDiscount() async {
-    if (widget.loyalty == null || _isLoadingDiscount) return;
-    if (_availableDiscount != null) {
+    if (widget.loyalty == null || isLoadingDiscount) return;
+    if (availableDiscount != null) {
       // Already fetched — just activate
-      setState(() => _personalDiscount = _availableDiscount);
+      setState(() => personalDiscount = availableDiscount);
       return;
     }
-    setState(() => _isLoadingDiscount = true);
+    setState(() => isLoadingDiscount = true);
     await Future.delayed(const Duration(milliseconds: 500));
     if (!mounted) return;
     final lastDigit = widget.loyalty!.phone.characters.last;
     final d = int.tryParse(lastDigit) ?? 0;
     final discount = d >= 5 ? (d.toDouble()) : null;
     setState(() {
-      _availableDiscount = discount;
-      _personalDiscount = discount;
-      _isLoadingDiscount = false;
+      availableDiscount = discount;
+      personalDiscount = discount;
+      isLoadingDiscount = false;
     });
     if (discount == null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -231,37 +286,164 @@ class CartPanelState extends State<CartPanel> {
 
   // ── Payment ───────────────────────────────────────────────────────────────
 
-  void _processPayment() {
-    if (!_canProcessPayment) return;
-    widget.onPay();
-    setState(() => _showPaymentSuccess = true);
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        setState(() {
-          _showPaymentSuccess = false;
-          _checkoutMode = false;
-          _paymentMethod = PaymentMethod.cash;
-          _useBonuses = false;
-          _bonusController.clear();
-          _personalDiscount = null;
-          _cashController.clear();
-          _transferChangeToBonus = false;
-          _scannedDrugIds.clear();
-        });
-        widget.onClose();
+  Future<void> _processPayment() async {
+    if (!_canProcessPayment || _isProcessingPayment) return;
+
+    final bonusAmount = effectiveBonusAmount;
+    final hasBonusWriteOff = useBonuses && bonusAmount > 0 && widget.loyalty != null;
+
+    // ── Step 1: write off bonuses on the server ──────────────────────────
+    if (hasBonusWriteOff) {
+      setState(() => _isProcessingPayment = true);
+      try {
+        final result = await BonusService.writeOff(
+          clientCode: widget.loyalty!.phone,
+          amount: bonusAmount,
+        );
+        if (!mounted) return;
+        if (!result.success) {
+          setState(() => _isProcessingPayment = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result.error ?? 'Не вдалося списати бонуси'),
+              backgroundColor: const Color(0xFFEF4444),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+          return;
+        }
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _isProcessingPayment = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Помилка зʼєднання: $e'),
+            backgroundColor: const Color(0xFFEF4444),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        return;
       }
+    }
+
+    // ── Step 2: complete payment ─────────────────────────────────────────
+    // Capture prescription state BEFORE onPay (which clears the cart).
+    final hadPrescription = _hasPrescriptionItems;
+    final neededRedemption = _needsRedemptionCode;
+    final rxDataSnapshot = _prescriptionData;
+    final wasFullyReimbursed = _isFullyReimbursed;
+
+    widget.onPay();
+    setState(() {
+      _isProcessingPayment = false;
+      showPaymentSuccess = true;
+      // Persist prescription data so redemption section can render
+      // even after cart is cleared by onPay.
+      if (hadPrescription && rxDataSnapshot != null) {
+        _savedPrescriptionData = rxDataSnapshot;
+      }
+      _savedFullyReimbursed = wasFullyReimbursed;
     });
+
+    if (hadPrescription && neededRedemption) {
+      // Prescription checkout: show redemption code input after short delay
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (!mounted) return;
+        setState(() => _showRedemptionAfterPayment = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _redemptionCodeFocus.requestFocus();
+        });
+      });
+    } else {
+      // Normal checkout: auto-close after 2 seconds
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) _closeAfterPayment();
+      });
+    }
+  }
+
+  /// Show warning when pharmacist tries to exit with unredeemed prescription.
+  Future<void> _confirmExitWithoutRedemption(VoidCallback onConfirm) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        icon: const Icon(Icons.warning_amber_rounded,
+            color: Color(0xFFF59E0B), size: 36),
+        title: const Text(
+          'Рецепт не погашено',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        ),
+        content: const Text(
+          'Ви маєте погасити рецепт клієнта.\n'
+          'Ви точно хочете завершити цю транзакцію?',
+          style: TextStyle(fontSize: 13.5, height: 1.4),
+          textAlign: TextAlign.center,
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Ні, погасити рецепт',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Так, завершити',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) onConfirm();
+  }
+
+  /// Attempt to close — checks if redemption is pending first.
+  void _tryClose() {
+    if (_isRedemptionPending) {
+      _confirmExitWithoutRedemption(() => _closeAfterPayment());
+    } else {
+      widget.onClose();
+    }
+  }
+
+  /// Attempt to go back from checkout — checks if redemption is pending first.
+  void _tryBackFromCheckout() {
+    if (_isRedemptionPending) {
+      _confirmExitWithoutRedemption(() => _closeAfterPayment());
+    } else {
+      _resetCheckoutState();
+      setState(() => _checkoutMode = false);
+    }
+  }
+
+  void _closeAfterPayment() {
+    setState(() {
+      _checkoutMode = false;
+      _resetCheckoutState();
+    });
+    widget.onClose();
   }
 
   void _resetCheckoutState() {
-    _paymentMethod = PaymentMethod.cash;
-    _useBonuses = false;
-    _bonusController.clear();
-    _personalDiscount = null;
-    _availableDiscount = null;
-    _cashController.clear();
-    _transferChangeToBonus = false;
+    resetCheckout();
     _scannedDrugIds.clear();
+    _redemptionCodeController.clear();
+    _isRedemptionVerified = false;
+    _isVerifyingRedemption = false;
+    _showRedemptionAfterPayment = false;
+    _savedPrescriptionData = null;
+    _savedFullyReimbursed = null;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -448,320 +630,10 @@ class CartPanelState extends State<CartPanel> {
   Widget _buildOffersSection() {
     if (widget.offers.isEmpty) return const SizedBox.shrink();
     final offer = widget.offers.first;
-    return _buildOfferCard(offer);
-  }
-
-  Widget _buildOfferCard(CartOffer offer) {
-    final drug = offer.drug;
-    final bonus = drug.pharmacistBonus;
-    final hasScript = offer.script != null && offer.script!.isNotEmpty;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: const Color(0xFF1E7DC8).withValues(alpha: 0.18)),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ── Header ───────────────────────────────────────────────
-            Container(
-              padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-              decoration: const BoxDecoration(
-                color: Color(0xFFF0F7FF),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF8B5CF6),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Icon(
-                      Icons.favorite_rounded,
-                      color: Colors.white,
-                      size: 14,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Турбота Про Клієнта',
-                      style: TextStyle(
-                        color: Color(0xFF1E7DC8),
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  if (offer.promoLabel != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF8B5CF6),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        offer.promoLabel!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-
-            // ── Body (horizontal: photo left, info right) ────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      // Photo
-                      Container(
-                        width: 56,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF9FAFB),
-                          borderRadius: BorderRadius.circular(10),
-                          border:
-                              Border.all(color: const Color(0xFFE5E7EB)),
-                        ),
-                        child: drug.imageUrl != null
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(9),
-                                child: Image.network(
-                                  drug.imageUrl!,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (context, error, stack) =>
-                                      _offerPlaceholderIcon(),
-                                ),
-                              )
-                            : _offerPlaceholderIcon(),
-                      ),
-                      const SizedBox(width: 10),
-                      // Bonus badge + name + manufacturer (left)
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                if (bonus != null) ...[
-                                  Container(
-                                    width: 22,
-                                    height: 22,
-                                    decoration: const BoxDecoration(
-                                      color: Color(0xFFFEF3C7),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Center(
-                                      child: Text(
-                                        '$bonus',
-                                        style: const TextStyle(
-                                          color: Color(0xFFB45309),
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                ],
-                                Expanded(
-                                  child: Text(
-                                    drug.name,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Color(0xFF1C1C2E),
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w700,
-                                      height: 1.25,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              drug.manufacturer,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Color(0xFF9CA3AF),
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Price (right)
-                      Text(
-                        '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                        style: const TextStyle(
-                          color: Color(0xFF1C1C2E),
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
-                  ),
-                  // Script block
-                  if (hasScript) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF0F7FF),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: const Color(0xFF1E7DC8)
-                              .withValues(alpha: 0.15),
-                        ),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(
-                            Icons.chat_bubble_outline_rounded,
-                            size: 13,
-                            color: Color(0xFF1E7DC8),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              offer.script!,
-                              style: const TextStyle(
-                                color: Color(0xFF1E5A8A),
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                                height: 1.4,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ] else ...[
-                    const SizedBox(height: 4),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 66),
-                        child: Text(
-                          offer.reason,
-                          style: const TextStyle(
-                            color: Color(0xFF9CA3AF),
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-
-            // ── Buttons ──────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Row(
-                children: [
-                  if (drug.unitsPerPackage != null) ...[
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () => widget.onAddOfferBlister(drug),
-                        child: Container(
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF4F5F8),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: const Color(0xFFE5E7EB)),
-                          ),
-                          child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.grid_view_rounded,
-                                  size: 13, color: Color(0xFF6B7280)),
-                              SizedBox(width: 5),
-                              Text(
-                                'Блістер',
-                                style: TextStyle(
-                                  color: Color(0xFF6B7280),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                  ],
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => widget.onAddOffer(drug),
-                      child: Container(
-                        height: 38,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E7DC8),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.add_shopping_cart_rounded,
-                                color: Colors.white, size: 14),
-                            SizedBox(width: 5),
-                            Text(
-                              'Упаковку',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _offerPlaceholderIcon() {
-    return const Center(
-      child: Icon(
-        Icons.medication_rounded,
-        size: 32,
-        color: Color(0xFFD1D5DB),
-      ),
+    return CartOfferCard(
+      offer: offer,
+      onAddPackage: widget.onAddOffer,
+      onAddBlister: widget.onAddOfferBlister,
     );
   }
 
@@ -769,7 +641,7 @@ class CartPanelState extends State<CartPanel> {
 
   Widget _buildCartFooter() {
     final formattedTotal =
-        _cartTotal.toStringAsFixed(2).replaceAll('.', ',');
+        baseTotal.toStringAsFixed(2).replaceAll('.', ',');
     final hasItems = widget.cart.isNotEmpty;
     final canCheckout = hasItems && _allCartScanned;
 
@@ -929,10 +801,7 @@ class CartPanelState extends State<CartPanel> {
         children: [
           // Back button
           GestureDetector(
-            onTap: () {
-              _resetCheckoutState();
-              setState(() => _checkoutMode = false);
-            },
+            onTap: _tryBackFromCheckout,
             child: Container(
               width: 28,
               height: 28,
@@ -958,7 +827,7 @@ class CartPanelState extends State<CartPanel> {
           ),
           const Spacer(),
           GestureDetector(
-            onTap: widget.onClose,
+            onTap: _tryClose,
             child: Container(
               width: 26,
               height: 26,
@@ -1109,11 +978,206 @@ class CartPanelState extends State<CartPanel> {
     });
   }
 
+  // ── Prescription checkout section ──────────────────────────────────────────
+
+  Widget _buildPrescriptionCheckoutSection() {
+    final rxData = _prescriptionData;
+    if (rxData == null) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0FDF4),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFBBF7D0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Label ──────────────────────────────────────────────────────
+          Row(
+            children: const [
+              Icon(Icons.health_and_safety,
+                  size: 14, color: Color(0xFF16A34A)),
+              SizedBox(width: 6),
+              Text('Погашення рецепту',
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF16A34A))),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          // ── Рецепт (read-only, auto-filled) ────────────────────────────
+          _rxReadOnlyField('Рецепт', rxData.prescriptionNumber),
+          const SizedBox(height: 6),
+
+          // ── Соц.проект (read-only, auto-filled) ────────────────────────
+          _rxReadOnlyField(
+              'Соц.проект', _selectedSocialProject ?? rxData.programName),
+          const SizedBox(height: 8),
+
+          // ── Код погашення ──────────────────────────────────────────────
+          const Text('Код погашення рецепту',
+              style: TextStyle(
+                  fontSize: 10.5,
+                  color: Color(0xFF6B7280),
+                  fontWeight: FontWeight.w500)),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 34,
+                  child: TextField(
+                    controller: _redemptionCodeController,
+                    focusNode: _redemptionCodeFocus,
+                    enabled: !_isRedemptionVerified,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.8),
+                    onSubmitted: (_) => _verifyRedemptionCode(),
+                    decoration: InputDecoration(
+                      hintText: 'Введіть код',
+                      hintStyle: TextStyle(
+                          fontSize: 12, color: Colors.grey.shade400),
+                      filled: true,
+                      fillColor: _isRedemptionVerified
+                          ? const Color(0xFFECFDF5)
+                          : Colors.white,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(7),
+                        borderSide:
+                            const BorderSide(color: Color(0xFFBBF7D0)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(7),
+                        borderSide: BorderSide(
+                            color: _isRedemptionVerified
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFFBBF7D0)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(7),
+                        borderSide: const BorderSide(
+                            color: Color(0xFF16A34A), width: 1.5),
+                      ),
+                      suffixIcon: _isRedemptionVerified
+                          ? const Icon(Icons.check_circle,
+                              size: 18, color: Color(0xFF16A34A))
+                          : null,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 34,
+                child: ElevatedButton(
+                  onPressed: _isRedemptionVerified || _isVerifyingRedemption
+                      ? null
+                      : _verifyRedemptionCode,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _isRedemptionVerified
+                        ? const Color(0xFFDCFCE7)
+                        : const Color(0xFF16A34A),
+                    foregroundColor: _isRedemptionVerified
+                        ? const Color(0xFF16A34A)
+                        : Colors.white,
+                    elevation: 0,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(7)),
+                  ),
+                  child: _isVerifyingRedemption
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : Text(
+                          _isRedemptionVerified
+                              ? 'Погашено'
+                              : 'Погасити',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _rxReadOnlyField(String label, String value) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 76,
+          child: Text(label,
+              style: const TextStyle(
+                  fontSize: 10.5,
+                  color: Color(0xFF6B7280),
+                  fontWeight: FontWeight.w500)),
+        ),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xFFECFDF5),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: const Color(0xFFBBF7D0)),
+            ),
+            child: Text(value,
+                style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF15803D)),
+                overflow: TextOverflow.ellipsis),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Mock API call to verify prescription redemption code.
+  Future<void> _verifyRedemptionCode() async {
+    final code = _redemptionCodeController.text.trim();
+    if (code.isEmpty) return;
+
+    setState(() => _isVerifyingRedemption = true);
+    // Simulate API call
+    await Future.delayed(const Duration(milliseconds: 800));
+    if (!mounted) return;
+    setState(() {
+      _isVerifyingRedemption = false;
+      _isRedemptionVerified = true;
+    });
+
+    // For fully reimbursed: trigger onPay callback now (no prior payment)
+    if (_isFullyReimbursed && !showPaymentSuccess) {
+      widget.onPay();
+    }
+
+    // Close cart after a short pause so the user sees the "Погашено" state
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) _closeAfterPayment();
+    });
+  }
+
   // ── Checkout body: total → bonuses/discount → payment → pay → change ────
 
   Widget _buildCheckoutBody() {
     final formattedTotal =
-        _finalTotal.toStringAsFixed(2).replaceAll('.', ',');
+        finalTotal.toStringAsFixed(2).replaceAll('.', ',');
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
@@ -1147,112 +1211,220 @@ class CartPanelState extends State<CartPanel> {
             ],
           ),
 
-          // ── Bonuses + Discount block (always visible, disabled w/o loyalty)
-          const SizedBox(height: 12),
-          BonusDiscountBlock(
-            loyalty: widget.loyalty,
-            useBonuses: _useBonuses,
-            onUseBonusesChanged: (v) {
-              setState(() {
-                _useBonuses = v;
-                if (_useBonuses && widget.loyalty != null) {
-                  final max = _cartTotal - _discountAmount;
-                  final capped =
-                      widget.loyalty!.bonusBalance.clamp(0, max);
-                  _bonusController.text = capped.toStringAsFixed(0);
-                }
-              });
-            },
-            bonusController: _bonusController,
-            cartTotal: _cartTotal,
-            discountAmount: _discountAmount,
-            effectiveBonusAmount: _effectiveBonusAmount,
-            personalDiscount: _personalDiscount,
-            availableDiscountAmount: _availableDiscount != null
-                ? _cartTotal * _availableDiscount! / 100
-                : null,
-            isLoadingDiscount: _isLoadingDiscount,
-            onRequestDiscount: _requestDiscount,
-            onClearDiscount: () =>
-                setState(() => _personalDiscount = null),
-            onBonusAmountChanged: () => setState(() {}),
-          ),
-
-          const SizedBox(height: 10),
-
-          // ── Social projects ────────────────────────────────────────────
-          _buildSocialProjectsSection(),
-
-          const SizedBox(height: 14),
-
-          // ── Payment method toggle ────────────────────────────────────────
-          PaymentMethodToggle(
-            selectedMethod: _paymentMethod,
-            onMethodChanged: (method) => setState(() {
-              _paymentMethod = method;
-              if (method == PaymentMethod.cash) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _cashFocusNode.requestFocus();
-                });
-              } else {
-                _cashController.clear();
-              }
-              if (method != PaymentMethod.card) {
-                _cashWithdrawal = false;
-                _cashWithdrawalController.clear();
-              }
-            }),
-          ),
-
-          // ── Cash withdrawal (card only) ───────────────────────────────────
-          if (_paymentMethod == PaymentMethod.card && !_showPaymentSuccess) ...[
+          // ── Fully reimbursed: skip payment, go straight to redemption ──
+          if (_isFullyReimbursed) ...[
+            const SizedBox(height: 12),
+            // Green info: 100% reimbursement
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFECFDF5),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFBBF7D0)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.verified_rounded,
+                          size: 16, color: Color(0xFF16A34A)),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '100% реімбурсація — оплата клієнта не потрібна',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF15803D),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_needsRedemptionCode) ...[
+                    const SizedBox(height: 6),
+                    const Padding(
+                      padding: EdgeInsets.only(left: 24),
+                      child: Text(
+                        'Обовʼязково погасіть рецепт через введення коду '
+                        'і тільки потім віддайте товар і чек.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF15803D),
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
             const SizedBox(height: 10),
-            _buildCashWithdrawalSection(),
-          ],
 
-          // ── Cash: amount from client + change ────────────────────────────
-          if (_paymentMethod == PaymentMethod.cash && !_showPaymentSuccess)
-            CashChangeSection(
-              cashController: _cashController,
-              cashFocusNode: _cashFocusNode,
-              finalTotal: _finalTotal,
-              onChanged: () => setState(() {}),
-              showBonusTransfer: widget.loyalty != null,
-              transferChangeToBonus: _transferChangeToBonus,
-              onTransferChangeToBonusChanged: (v) =>
-                  setState(() => _transferChangeToBonus = v),
+            // ── Social projects ──────────────────────────────────────────
+            _buildSocialProjectsSection(),
+            const SizedBox(height: 12),
+
+            // Redemption code section shown directly
+            if (_needsRedemptionCode) _buildPrescriptionCheckoutSection(),
+          ] else ...[
+            // ── Normal checkout: bonuses + discount + payment ─────────────
+
+            // ── Bonuses + Discount block (always visible, disabled w/o loyalty)
+            const SizedBox(height: 12),
+            BonusDiscountBlock(
+              loyalty: widget.loyalty,
+              useBonuses: useBonuses,
+              onUseBonusesChanged: (v) {
+                setState(() {
+                  useBonuses = v;
+                  if (useBonuses && widget.loyalty != null) {
+                    final max = baseTotal - discountAmount;
+                    final capped =
+                        widget.loyalty!.bonusBalance.clamp(0, max);
+                    bonusCtr.text = capped.toStringAsFixed(0);
+                  }
+                });
+              },
+              bonusController: bonusCtr,
+              cartTotal: baseTotal,
+              discountAmount: discountAmount,
+              effectiveBonusAmount: effectiveBonusAmount,
+              personalDiscount: personalDiscount,
+              availableDiscountAmount: availableDiscount != null
+                  ? baseTotal * availableDiscount! / 100
+                  : null,
+              isLoadingDiscount: isLoadingDiscount,
+              onRequestDiscount: _requestDiscount,
+              onClearDiscount: () =>
+                  setState(() => personalDiscount = null),
+              onBonusAmountChanged: () => setState(() {}),
             ),
 
-          const SizedBox(height: 10),
+            const SizedBox(height: 10),
 
-          // ── Cash hint — ask to enter amount ────────────────────────────
-          if (!_showPaymentSuccess &&
-              _paymentMethod != PaymentMethod.card &&
-              !_canProcessPayment)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Container(
+            // ── Social projects ────────────────────────────────────────────
+            _buildSocialProjectsSection(),
+
+            const SizedBox(height: 14),
+
+            // ── Payment method toggle ────────────────────────────────────────
+            PaymentMethodToggle(
+              selectedMethod: paymentMethod,
+              onMethodChanged: (method) => setState(() {
+                paymentMethod = method;
+                if (method == PaymentMethod.cash) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    cashFocus.requestFocus();
+                  });
+                } else {
+                  cashCtr.clear();
+                }
+                if (method != PaymentMethod.card) {
+                  _cashWithdrawal = false;
+                  _cashWithdrawalController.clear();
+                }
+              }),
+            ),
+
+            // ── Cash withdrawal (card only) ───────────────────────────────────
+            if (paymentMethod == PaymentMethod.card && !showPaymentSuccess) ...[
+              const SizedBox(height: 10),
+              _buildCashWithdrawalSection(),
+            ],
+
+            // ── Cash: amount from client + change ────────────────────────────
+            if (paymentMethod == PaymentMethod.cash && !showPaymentSuccess)
+              CashChangeSection(
+                cashController: cashCtr,
+                cashFocusNode: cashFocus,
+                finalTotal: finalTotal,
+                onChanged: () => setState(() {}),
+                showBonusTransfer: true,
+                hasLoyalty: widget.loyalty != null,
+                transferChangeToBonus: transferChangeToBonus,
+                onTransferChangeToBonusChanged: (v) =>
+                    setState(() => transferChangeToBonus = v),
+                bonusTransferController: bonusTransferCtr,
+                bonusTransferFocusNode: bonusTransferFocus,
+                onBonusTransferAmountChanged: () => setState(() {}),
+                onFocusPhone: widget.onFocusPhone,
+              ),
+
+            const SizedBox(height: 10),
+
+            // ── Cash hint — ask to enter amount ────────────────────────────
+            if (!showPaymentSuccess &&
+                paymentMethod != PaymentMethod.card &&
+                !_canProcessPayment)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0F7FF),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFBFDBFE)),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 16,
+                        color: Color(0xFF1E7DC8),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Введіть суму готівки від клієнта',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: Color(0xFF1E7DC8),
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // ── Pay / success button ─────────────────────────────────────────
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 280),
+              child: showPaymentSuccess
+                  ? _paySuccessWidget()
+                  : _payButtonWidget(),
+            ),
+
+            // ── Prescription redemption code (after payment) ───────────────
+            if (showPaymentSuccess && _showRedemptionAfterPayment) ...[
+              const SizedBox(height: 10),
+              Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF0F7FF),
+                  color: const Color(0xFFF0FDF4),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                  border: Border.all(color: const Color(0xFFBBF7D0)),
                 ),
-                child: Row(
+                child: const Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Icon(
-                      Icons.info_outline_rounded,
-                      size: 16,
-                      color: Color(0xFF1E7DC8),
-                    ),
+                  children: [
+                    Icon(Icons.info_outline_rounded,
+                        size: 15, color: Color(0xFF16A34A)),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Введіть суму готівки від клієнта',
+                        'Оплата успішна! Обовʼязково погасіть рецепт '
+                        'через введення коду і тільки потім '
+                        'віддайте товар і чек.',
                         style: TextStyle(
-                          fontSize: 11.5,
-                          color: Color(0xFF1E7DC8),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF15803D),
                           height: 1.35,
                         ),
                       ),
@@ -1260,15 +1432,10 @@ class CartPanelState extends State<CartPanel> {
                   ],
                 ),
               ),
-            ),
-
-          // ── Pay / success button ─────────────────────────────────────────
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 280),
-            child: _showPaymentSuccess
-                ? _paySuccessWidget()
-                : _payButtonWidget(),
-          ),
+              const SizedBox(height: 10),
+              _buildPrescriptionCheckoutSection(),
+            ],
+          ],
 
           const SizedBox(height: 8),
 
@@ -1520,7 +1687,7 @@ class CartPanelState extends State<CartPanel> {
       );
 
   Widget _payButtonWidget() {
-    final enabled = _canProcessPayment;
+    final enabled = _canProcessPayment && !_isProcessingPayment;
     return GestureDetector(
         key: const ValueKey('pay'),
         onTap: enabled ? _processPayment : null,
@@ -1531,49 +1698,71 @@ class CartPanelState extends State<CartPanel> {
           decoration: BoxDecoration(
             color: enabled
                 ? const Color(0xFF1E7DC8)
-                : const Color(0xFFE5E7EB),
+                : _isProcessingPayment
+                    ? const Color(0xFF1E7DC8).withValues(alpha: 0.7)
+                    : const Color(0xFFE5E7EB),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.payment_rounded,
-                color: enabled
-                    ? Colors.white
-                    : const Color(0xFFB0B7C3),
-                size: 18,
-              ),
-              const SizedBox(width: 7),
-              Text(
-                'Провести оплату',
-                style: TextStyle(
+              if (_isProcessingPayment) ...[
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Списання бонусів…',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ] else ...[
+                Icon(
+                  Icons.payment_rounded,
                   color: enabled
                       ? Colors.white
                       : const Color(0xFFB0B7C3),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
+                  size: 18,
                 ),
-              ),
-              if (enabled) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: const Color(0x33FFFFFF),
-                    borderRadius: BorderRadius.circular(3),
+                const SizedBox(width: 7),
+                Text(
+                  'Провести оплату',
+                  style: TextStyle(
+                    color: enabled
+                        ? Colors.white
+                        : const Color(0xFFB0B7C3),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
                   ),
-                  child: const Text(
-                    'F5',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.3,
+                ),
+                if (enabled) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: const Color(0x33FFFFFF),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: const Text(
+                      'F5',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                      ),
                     ),
                   ),
-                ),
+                ],
               ],
             ],
           ),

@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
+import '../mixins/checkout_mixin.dart';
+import '../mixins/edk_state_mixin.dart';
 import '../models/internet_order.dart';
 import '../models/customer_loyalty.dart';
 import '../models/payment_method.dart';
 import '../models/edk_offer.dart';
 import '../models/drug.dart';
 import '../data/mock_orders.dart';
+import '../data/edk_offers.dart';
 import '../data/mock_drugs.dart';
 import 'checkout/bonus_discount_block.dart';
 import 'checkout/cash_change_section.dart';
 import 'checkout/payment_method_toggle.dart';
+import 'order_edk_card.dart';
+import 'disbanded_orders_screen.dart';
+import 'hover_icon_button.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OrdersPanel — Internet orders panel shown in the right detail column.
@@ -21,19 +27,29 @@ class OrdersPanel extends StatefulWidget {
   final void Function(Drug drug)? onAddEdkPackage;
   final void Function(Drug drug)? onAddEdkBlister;
 
+  /// Called after a successful order payment with the order total.
+  /// PosScreen uses this to accumulate pharmacist bonuses + reset to zero state.
+  final void Function(double amount)? onOrderPaid;
+
+  /// Called to focus the phone input when loyalty is needed.
+  final VoidCallback? onFocusPhone;
+
   const OrdersPanel({
     super.key,
     required this.onClose,
     this.loyalty,
     this.onAddEdkPackage,
     this.onAddEdkBlister,
+    this.onOrderPaid,
+    this.onFocusPhone,
   });
 
   @override
   State<OrdersPanel> createState() => OrdersPanelState();
 }
 
-class OrdersPanelState extends State<OrdersPanel> {
+class OrdersPanelState extends State<OrdersPanel>
+    with CheckoutMixin, EdkStateMixin {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   InternetOrder? _selectedOrder;
@@ -48,98 +64,42 @@ class OrdersPanelState extends State<OrdersPanel> {
   /// SKUs scanned during the current order collection (simulated by price tap).
   final Set<String> _scannedSkus = {};
 
+  /// Whether the "Розформовані замовлення" screen is open.
+  bool _showDisbandedOrders = false;
+
+  /// Active filter chip labels (multi-select, OR logic).
+  Set<String> _activeFilters = {'Термінові', 'Зібрані'};
+
+  /// All available filter labels.
+  static const List<String> _filterLabels = [
+    'Всі',
+    'Термінові',
+    'Зібрані',
+    'Відпущені',
+    'Розформовані',
+    'Відмова клієнта',
+    'Відмова аптеки',
+  ];
+
   /// Whether the search field has non-empty text (drives highlight).
   bool get _hasQuery => _searchController.text.trim().isNotEmpty;
 
+  // ── CheckoutMixin overrides ─────────────────────────────────────────────
+
+  @override
+  double get baseTotal => _selectedOrder?.total ?? 0;
+
+  @override
+  CustomerLoyalty? get checkoutLoyalty => widget.loyalty;
+
   // ── ЄДК (pharmaceutical substitution for order items) ─────────────────────
-  EdkOffer? _activeEdkOffer;
-  final Set<String> _dismissedEdkSkus = {};
 
-  /// EDK offers mapped by order item SKU → replacement drug.
-  /// In production this comes from the server; here we hardcode a few.
-  late final Map<String, EdkOffer> _orderEdkOffers = {
-    // МЕЛОКСИКАМ-ТЕВА (ord-07) → Нурофен Експрес
-    '26771903': EdkOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '009'),
-      donorDrugId: '26771903',
-      description: 'Капсульна форма — швидше всмоктування.',
-      script:
-          'У клієнта Мелоксикам. Пропоную Нурофен Експрес — '
-          'капсули для швидкого знеболення.',
-      promoLabel: 'Потрійний кешбек',
-    ),
-    // ЕНТЕРОСГЕЛЬ (ord-14, Glovo) → Атоксіл (mock id '032')
-    '26883210': EdkOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '032'),
-      donorDrugId: '26883210',
-      description: 'Потужний сорбент нового покоління.',
-      script:
-          'До Ентеросгелю рекомендую розглянути Атоксіл — '
-          'сильніший сорбент за нижчою ціною.',
-    ),
-    // СІОФОР ХР (ord-09) → Метформін (mock id '010')
-    '26890213': EdkOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '010'),
-      donorDrugId: '26890213',
-      description: 'Та ж діюча речовина, вигідніша ціна.',
-      script:
-          'Замість Сіофору пропоную Метформін — ідентичний склад, '
-          'значно вигідніша ціна для клієнта.',
-    ),
-    // ДОППЕЛЬГЕРЦ АКТ (ord-11) → Вітамін D3 (mock id '019')
-    '26345670': EdkOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '019'),
-      donorDrugId: '26345670',
-      description: 'Преміальна якість від Солгар.',
-      script:
-          'До Доппельгерц рекомендую Вітамін D3 від Солгар — '
-          'вищий вміст діючої речовини, перевірена якість.',
-      promoLabel: 'Кешбек ×2',
-    ),
-    // ЦИПРОФЛОКСАЦИН (ord-03) → Флемоксин Солютаб (mock id '042')
-    '25487201': EdkOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '042'),
-      donorDrugId: '25487201',
-      description: 'Зручна форма прийому без ін\'єкцій.',
-      script:
-          'Рекомендую розглянути Флемоксин Солютаб — '
-          'потужний антибіотик у зручній формі таблеток.',
-    ),
-  };
+  /// EDK offers: order item SKU → replacement drug.
+  late final Map<String, EdkOffer> _orderEdkOffers =
+      buildOrderEdkOffers(mockDrugs);
 
-  // ── Checkout state (mirrors CartPanel) ─────────────────────────────────────
+  // ── Checkout state ─────────────────────────────────────────────────────────
   bool _orderCheckoutMode = false;
-  bool _showPaymentSuccess = false;
-  PaymentMethod _paymentMethod = PaymentMethod.cash;
-  final _cashController = TextEditingController();
-  final _cashFocusNode = FocusNode();
-  bool _transferChangeToBonus = false;
-  bool _useBonuses = false;
-  final _bonusController = TextEditingController();
-  double? _personalDiscount;
-  double? _availableDiscount;
-  bool _isLoadingDiscount = false;
-
-  double get _orderTotal => _selectedOrder?.total ?? 0;
-
-  double get _discountAmount {
-    if (_personalDiscount == null) return 0;
-    return _orderTotal * _personalDiscount! / 100;
-  }
-
-  double get _effectiveBonusAmount {
-    if (!_useBonuses || widget.loyalty == null) return 0;
-    final text = _bonusController.text.replaceAll(',', '.');
-    final entered = double.tryParse(text) ?? 0;
-    final maxByBalance = widget.loyalty!.bonusBalance;
-    final maxByTotal = _orderTotal - _discountAmount;
-    return entered.clamp(0, maxByBalance).clamp(0, maxByTotal).toDouble();
-  }
-
-  double get _finalTotal {
-    final raw = _orderTotal - _discountAmount - _effectiveBonusAmount;
-    return raw < 0 ? 0 : raw;
-  }
 
   /// Public — allows PosScreen to check if detail is open (for Esc cascade).
   bool get isDetailOpen => _selectedOrder != null && !_orderCheckoutMode;
@@ -160,6 +120,18 @@ class OrdersPanelState extends State<OrdersPanel> {
     setState(() => _orderCheckoutMode = false);
   }
 
+  /// Public — whether the disbanded orders screen is open.
+  bool get isDisbandedOpen => _showDisbandedOrders;
+
+  /// Public — close disbanded orders screen (Esc).
+  void closeDisbanded() {
+    setState(() => _showDisbandedOrders = false);
+  }
+
+  /// Refused orders for the disbanded screen.
+  List<InternetOrder> get _refusedOrders =>
+      _orders.where((o) => o.status == OrderStatus.refused).toList();
+
   /// Public — focuses the search field (called after panel opens).
   void focusSearch() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -178,11 +150,11 @@ class OrdersPanelState extends State<OrdersPanel> {
   @override
   void didUpdateWidget(covariant OrdersPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.loyalty == null && widget.loyalty != null && _availableDiscount == null) {
+    if (oldWidget.loyalty == null && widget.loyalty != null && availableDiscount == null) {
       _fetchAvailableOrderDiscount();
     }
-    if (widget.loyalty == null && _availableDiscount != null) {
-      _availableDiscount = null;
+    if (widget.loyalty == null && availableDiscount != null) {
+      availableDiscount = null;
     }
   }
 
@@ -190,15 +162,35 @@ class OrdersPanelState extends State<OrdersPanel> {
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();
-    _cashController.dispose();
-    _cashFocusNode.dispose();
-    _bonusController.dispose();
+    disposeCheckout();
     super.dispose();
+  }
+
+  /// Whether an order matches any of the active filter chips.
+  bool _matchesFilters(InternetOrder o) {
+    if (_activeFilters.contains('Всі')) return true;
+    for (final f in _activeFilters) {
+      switch (f) {
+        case 'Термінові':
+          if (o.isUrgent) return true;
+        case 'Зібрані':
+          if (o.status == OrderStatus.collected) return true;
+        case 'Відпущені':
+          if (o.status == OrderStatus.dispensed) return true;
+        case 'Розформовані':
+          if (o.status == OrderStatus.refused) return true;
+        case 'Відмова клієнта':
+          if (o.status == OrderStatus.customerRefusal) return true;
+        case 'Відмова аптеки':
+          if (o.status == OrderStatus.pharmacyRefusal) return true;
+      }
+    }
+    return false;
   }
 
   /// Sort: urgent non-collected first, then the rest chronologically.
   List<InternetOrder> _sorted(List<InternetOrder> orders) {
-    final list = List<InternetOrder>.from(orders);
+    final list = orders.where(_matchesFilters).toList();
     list.sort((a, b) {
       final aUrgent = a.isUrgent && a.status != OrderStatus.collected && a.status != OrderStatus.dispensed;
       final bUrgent = b.isUrgent && b.status != OrderStatus.collected && b.status != OrderStatus.dispensed;
@@ -227,6 +219,25 @@ class OrdersPanelState extends State<OrdersPanel> {
     });
   }
 
+  void _toggleFilter(String label) {
+    setState(() {
+      if (label == 'Всі') {
+        // "Всі" is exclusive — clear others
+        _activeFilters = {'Всі'};
+      } else {
+        _activeFilters.remove('Всі');
+        if (_activeFilters.contains(label)) {
+          _activeFilters.remove(label);
+          // If none left, auto-select "Всі"
+          if (_activeFilters.isEmpty) _activeFilters = {'Всі'};
+        } else {
+          _activeFilters.add(label);
+        }
+      }
+    });
+    _filterOrders();
+  }
+
   /// Open highlighted order (Enter from search field).
   void _openHighlighted() {
     if (_highlightedIndex >= 0 &&
@@ -239,7 +250,7 @@ class OrdersPanelState extends State<OrdersPanel> {
     setState(() {
       _selectedOrder = order;
       _scannedSkus.clear();
-      _activeEdkOffer = null;
+      activeEdkOffer = null;
     });
     // Show EDK immediately when opening an eligible order
     _triggerEdkForOrder(order);
@@ -252,12 +263,7 @@ class OrdersPanelState extends State<OrdersPanel> {
     if (order.type == OrderType.novaPoshta) return;
     if (order.status == OrderStatus.dispensed) return;
     for (final item in order.items) {
-      if (_dismissedEdkSkus.contains(item.sku)) continue;
-      final offer = _orderEdkOffers[item.sku];
-      if (offer != null) {
-        setState(() => _activeEdkOffer = offer);
-        return;
-      }
+      if (tryActivateEdk(item.sku, _orderEdkOffers)) return;
     }
   }
 
@@ -277,44 +283,28 @@ class OrdersPanelState extends State<OrdersPanel> {
     final wasScanned = _scannedSkus.contains(item.sku);
     setState(() => _scannedSkus.add(item.sku));
     // Trigger EDK if this item has an offer and wasn't already scanned
-    if (_edkAllowed &&
-        !wasScanned &&
-        !_dismissedEdkSkus.contains(item.sku)) {
-      final offer = _orderEdkOffers[item.sku];
-      if (offer != null) {
-        setState(() => _activeEdkOffer = offer);
-      }
+    if (_edkAllowed && !wasScanned) {
+      tryActivateEdk(item.sku, _orderEdkOffers);
     }
   }
 
   void _acceptEdkPackage() {
-    final offer = _activeEdkOffer;
+    final offer = activeEdkOffer;
     if (offer == null) return;
     widget.onAddEdkPackage?.call(offer.drug);
-    setState(() => _activeEdkOffer = null);
+    setState(() => activeEdkOffer = null);
   }
 
   void _acceptEdkBlister() {
-    final offer = _activeEdkOffer;
+    final offer = activeEdkOffer;
     if (offer == null) return;
     widget.onAddEdkBlister?.call(offer.drug);
-    setState(() => _activeEdkOffer = null);
+    setState(() => activeEdkOffer = null);
   }
 
-  void _dismissOrderEdk() {
-    final offer = _activeEdkOffer;
-    if (offer == null) return;
-    setState(() {
-      _dismissedEdkSkus.add(offer.donorDrugId);
-      _activeEdkOffer = null;
-    });
-  }
-
-  /// Public — for Esc cascade from PosScreen
-  bool get isEdkActive => _activeEdkOffer != null;
-
-  /// Public — dismiss EDK from PosScreen (Esc)
-  void dismissEdk() => _dismissOrderEdk();
+  /// Public — dismiss EDK from PosScreen (Esc).
+  /// Delegates to [EdkStateMixin.dismissActiveEdk].
+  void dismissEdk() => dismissActiveEdk();
 
   /// Public — accept EDK package from PosScreen (Enter)
   void acceptEdkPackage() => _acceptEdkPackage();
@@ -356,22 +346,119 @@ class OrdersPanelState extends State<OrdersPanel> {
     });
   }
 
+  // ── Refusal flow ──────────────────────────────────────────────────────────
+
+  static const _refusalReasons = [
+    'Продано (немає на залишку)',
+    'Пересорт',
+    'Неможлива доставка',
+  ];
+
+  /// Show refusal reason picker dialog.
+  void _showRefuseDialog() {
+    final order = _selectedOrder;
+    if (order == null) return;
+
+    showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        icon: const Icon(Icons.cancel_outlined,
+            color: Color(0xFFEF4444), size: 32),
+        title: const Text(
+          'Причина відмови',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        ),
+        contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Оберіть причину відмови від замовлення:',
+              style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            for (final reason in _refusalReasons)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 42,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx, reason),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF1C1C2E),
+                      side: const BorderSide(color: Color(0xFFE5E7EB)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: Text(reason,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w500)),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Скасувати',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    ).then((reason) {
+      if (reason != null) _refuseOrder(reason);
+    });
+  }
+
+  /// Apply refusal with the selected reason.
+  void _refuseOrder(String reason) {
+    final order = _selectedOrder;
+    if (order == null) return;
+    final idx = _orders.indexWhere((o) => o.id == order.id);
+    if (idx < 0) return;
+    final updated = order.copyWith(
+      status: OrderStatus.pharmacyRefusal,
+      refusalReason: reason,
+    );
+    setState(() {
+      _orders[idx] = updated;
+      _selectedOrder = updated;
+      _scannedSkus.clear();
+      _filterOrders();
+    });
+  }
+
+  /// Cancel refusal and return order to newOrder status.
+  void _cancelRefusal() {
+    final order = _selectedOrder;
+    if (order == null) return;
+    final idx = _orders.indexWhere((o) => o.id == order.id);
+    if (idx < 0) return;
+    final updated = order.copyWith(
+      status: OrderStatus.newOrder,
+      clearRefusalReason: true,
+    );
+    setState(() {
+      _orders[idx] = updated;
+      _selectedOrder = updated;
+      _filterOrders();
+    });
+  }
+
   void _resetOrderCheckoutState() {
     _orderCheckoutMode = false;
-    _showPaymentSuccess = false;
-    _paymentMethod = PaymentMethod.cash;
-    _useBonuses = false;
-    _bonusController.clear();
-    _personalDiscount = null;
-    _availableDiscount = null;
-    _cashController.clear();
-    _transferChangeToBonus = false;
+    resetCheckout();
   }
 
   void _processOrderPayment() {
     final order = _selectedOrder;
     if (order == null) return;
-    setState(() => _showPaymentSuccess = true);
+    setState(() => showPaymentSuccess = true);
     Future.delayed(const Duration(seconds: 2), () {
       if (!mounted) return;
       // Mark order as dispensed
@@ -385,6 +472,8 @@ class OrdersPanelState extends State<OrdersPanel> {
         _scannedSkus.clear();
         _filterOrders();
       });
+      // Notify PosScreen → accumulate pharmacist bonuses + go to zero state
+      widget.onOrderPaid?.call(order.total);
     });
   }
 
@@ -395,25 +484,25 @@ class OrdersPanelState extends State<OrdersPanel> {
     final discount = d >= 5 ? d.toDouble() : null;
     await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
-    setState(() => _availableDiscount = discount);
+    setState(() => availableDiscount = discount);
   }
 
   Future<void> _requestOrderDiscount() async {
-    if (widget.loyalty == null || _isLoadingDiscount) return;
-    if (_availableDiscount != null) {
-      setState(() => _personalDiscount = _availableDiscount);
+    if (widget.loyalty == null || isLoadingDiscount) return;
+    if (availableDiscount != null) {
+      setState(() => personalDiscount = availableDiscount);
       return;
     }
-    setState(() => _isLoadingDiscount = true);
+    setState(() => isLoadingDiscount = true);
     await Future.delayed(const Duration(milliseconds: 500));
     if (!mounted) return;
     final lastDigit = widget.loyalty!.phone.characters.last;
     final d = int.tryParse(lastDigit) ?? 0;
     final discount = d >= 5 ? (d.toDouble()) : null;
     setState(() {
-      _availableDiscount = discount;
-      _personalDiscount = discount;
-      _isLoadingDiscount = false;
+      availableDiscount = discount;
+      personalDiscount = discount;
+      isLoadingDiscount = false;
     });
     if (discount == null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -462,7 +551,24 @@ class OrdersPanelState extends State<OrdersPanel> {
             ? _buildCheckoutScreen(_selectedOrder!)
             : _selectedOrder != null
                 ? _buildDetailScreen(_selectedOrder!)
-                : _buildListScreen(),
+                : _showDisbandedOrders
+                    ? DisbandedOrdersScreen(
+                        refusedOrders: _refusedOrders,
+                        onBack: () =>
+                            setState(() => _showDisbandedOrders = false),
+                        onClose: widget.onClose,
+                        onDisband: (checkedIds) {
+                          setState(() {
+                            _orders.removeWhere(
+                                (o) => checkedIds.contains(o.id));
+                            _filteredOrders = _sorted(_orders);
+                            if (_refusedOrders.isEmpty) {
+                              _showDisbandedOrders = false;
+                            }
+                          });
+                        },
+                      )
+                    : _buildListScreen(),
       ),
     );
   }
@@ -478,6 +584,7 @@ class OrdersPanelState extends State<OrdersPanel> {
         _buildListHeader(),
         const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
         _buildSearchField(),
+        _buildFilterChips(),
         const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
         Expanded(child: _buildOrdersList()),
         _buildListFooter(),
@@ -522,7 +629,7 @@ class OrdersPanelState extends State<OrdersPanel> {
           ),
           const Spacer(),
           // Close button
-          _HoverIconButton(
+          HoverIconButton(
             icon: Icons.close_rounded,
             tooltip: 'Закрити',
             onTap: widget.onClose,
@@ -582,6 +689,49 @@ class OrdersPanelState extends State<OrdersPanel> {
     );
   }
 
+  Widget _buildFilterChips() {
+    return SizedBox(
+      height: 38,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+        children: _filterLabels.map((label) {
+          final isSelected = _activeFilters.contains(label);
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: GestureDetector(
+              onTap: () => _toggleFilter(label),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? const Color(0xFF1E7DC8)
+                      : const Color(0xFFF4F5F8),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isSelected
+                        ? const Color(0xFF1E7DC8)
+                        : const Color(0xFFE5E7EB),
+                  ),
+                ),
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color:
+                        isSelected ? Colors.white : const Color(0xFF6B7280),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _buildOrdersList() {
     if (_filteredOrders.isEmpty) {
       return const Center(
@@ -622,26 +772,38 @@ class OrdersPanelState extends State<OrdersPanel> {
   }
 
   Widget _buildListFooter() {
+    final refusedCount = _refusedOrders.length;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
       decoration: const BoxDecoration(
         border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
       ),
-      child: Row(
-        children: [
-          const Icon(Icons.list_alt_rounded,
-              size: 14, color: Color(0xFF9CA3AF)),
-          const SizedBox(width: 6),
-          Text(
-            'Замовлень: ${_filteredOrders.length}',
-            style: const TextStyle(
-              color: Color(0xFF6B7280),
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
+      child: refusedCount > 0
+          ? SizedBox(
+              width: double.infinity,
+              height: 34,
+              child: OutlinedButton.icon(
+                onPressed: () => setState(() {
+                  _showDisbandedOrders = true;
+                }),
+                icon: const Icon(Icons.inventory_2_outlined, size: 15),
+                label: Text('Розформовані замовлення · $refusedCount'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF6B7280),
+                  side: const BorderSide(color: Color(0xFFE5E7EB)),
+                  backgroundColor: const Color(0xFFF9FAFB),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+              ),
+            )
+          : const SizedBox.shrink(),
     );
   }
 
@@ -650,7 +812,7 @@ class OrdersPanelState extends State<OrdersPanel> {
   // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildDetailScreen(InternetOrder order) {
-    final showEdk = _activeEdkOffer != null &&
+    final showEdk = activeEdkOffer != null &&
         order.status != OrderStatus.dispensed;
 
     return Column(
@@ -673,364 +835,17 @@ class OrdersPanelState extends State<OrdersPanel> {
                 ),
               // ── EDK offer card (inline after items) ────────────────
               if (showEdk)
-                _buildOrderEdkCard(_activeEdkOffer!),
+                OrderEdkCard(
+                  offer: activeEdkOffer!,
+                  onAcceptPackage: _acceptEdkPackage,
+                  onAcceptBlister: _acceptEdkBlister,
+                  onDismiss: dismissActiveEdk,
+                ),
             ],
           ),
         ),
         _buildDetailFooter(order),
       ],
-    );
-  }
-
-  // ── EDK card (inline, matching retail EdkPanel style) ─────────────────────
-
-  Widget _buildOrderEdkCard(EdkOffer offer) {
-    final drug = offer.drug;
-    final bonus = drug.pharmacistBonus;
-    final hasBlister = drug.unitsPerPackage != null;
-
-    return Container(
-      key: ValueKey('order_edk_${offer.donorDrugId}'),
-      margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF0F7FF),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: const Color(0xFF1E7DC8).withValues(alpha: 0.2),
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 8, 0),
-            child: Row(
-              children: [
-                Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF10B981),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Icon(
-                    Icons.auto_awesome_rounded,
-                    color: Colors.white,
-                    size: 13,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Є Дещо Краще',
-                  style: TextStyle(
-                    color: Color(0xFF1E7DC8),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                if (offer.promoLabel != null) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF10B981),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      offer.promoLabel!,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-                const Spacer(),
-                GestureDetector(
-                  onTap: _dismissOrderEdk,
-                  child: const Padding(
-                    padding: EdgeInsets.all(4),
-                    child: Icon(Icons.close_rounded,
-                        size: 16, color: Color(0xFF9CA3AF)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          // Drug info row
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                // Image
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE5E7EB)),
-                  ),
-                  child: drug.imageUrl != null
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(7),
-                          child: Image.network(
-                            drug.imageUrl!,
-                            fit: BoxFit.contain,
-                            errorBuilder: (context, error, stack) => const Icon(
-                              Icons.medication_rounded,
-                              size: 24,
-                              color: Color(0xFFD1D5DB),
-                            ),
-                          ),
-                        )
-                      : const Icon(
-                          Icons.medication_rounded,
-                          size: 24,
-                          color: Color(0xFFD1D5DB),
-                        ),
-                ),
-                const SizedBox(width: 10),
-                // Name + manufacturer + price
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        drug.name,
-                        style: const TextStyle(
-                          color: Color(0xFF1C1C2E),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        drug.manufacturer,
-                        style: const TextStyle(
-                          color: Color(0xFF9CA3AF),
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Price + bonus badge
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                      style: const TextStyle(
-                        color: Color(0xFF1C1C2E),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    if (bonus != null) ...[
-                      const SizedBox(height: 2),
-                      Container(
-                        width: 22,
-                        height: 22,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFFEF3C7),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Text(
-                            '$bonus',
-                            style: const TextStyle(
-                              color: Color(0xFFB45309),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          // Script block
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: const Color(0xFF1E7DC8).withValues(alpha: 0.12),
-                ),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(
-                    Icons.chat_bubble_outline_rounded,
-                    size: 14,
-                    color: Color(0xFF1E7DC8),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      offer.script,
-                      style: const TextStyle(
-                        color: Color(0xFF1E5A8A),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          // Action buttons
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-            child: Row(
-              children: [
-                if (hasBlister) ...[
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: _acceptEdkBlister,
-                      child: Container(
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF4F5F8),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFE5E7EB)),
-                        ),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.grid_view_rounded,
-                                size: 13, color: Color(0xFF6B7280)),
-                            SizedBox(width: 5),
-                            Text(
-                              'Блістер',
-                              style: TextStyle(
-                                color: Color(0xFF6B7280),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                Expanded(
-                  child: GestureDetector(
-                    onTap: _acceptEdkPackage,
-                    child: Container(
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E7DC8),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.add_shopping_cart_rounded,
-                              color: Colors.white, size: 13),
-                          const SizedBox(width: 5),
-                          const Text(
-                            'Упаковку',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(width: 5),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 4, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: const Color(0x33FFFFFF),
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                            child: const Text(
-                              'Enter',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 9,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.3,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Dismiss button
-                GestureDetector(
-                  onTap: _dismissOrderEdk,
-                  child: Container(
-                    height: 36,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF4F5F8),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          'Ні',
-                          style: TextStyle(
-                            color: Color(0xFF9CA3AF),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: const Color(0x0F000000),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: const Text(
-                            'Esc',
-                            style: TextStyle(
-                              color: Color(0xFF9CA3AF),
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.3,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -1048,7 +863,7 @@ class OrdersPanelState extends State<OrdersPanel> {
           // Row 1: back + reserve number + status badge
           Row(
             children: [
-              _HoverIconButton(
+              HoverIconButton(
                 icon: Icons.arrow_back_rounded,
                 tooltip: 'До списку',
                 onTap: () => setState(() => _selectedOrder = null),
@@ -1331,9 +1146,7 @@ class OrdersPanelState extends State<OrdersPanel> {
               child: SizedBox(
                 height: 38,
                 child: OutlinedButton.icon(
-                  onPressed: () {
-                    // TODO: wire up refuse
-                  },
+                  onPressed: _showRefuseDialog,
                   icon: const Icon(Icons.cancel_outlined, size: 15),
                   label: const Text('Відмовити',
                       style:
@@ -1372,6 +1185,75 @@ class OrdersPanelState extends State<OrdersPanel> {
               ),
             ),
           ],
+        ),
+      ],
+    );
+  }
+
+  // ── Refused order actions (cancel refusal) ──────────────────────────────
+
+  Widget _buildRefusedActions(InternetOrder order) {
+    return Column(
+      children: [
+        // Refusal reason banner
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEF2F2),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFFECACA)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.cancel_rounded,
+                      size: 15, color: Color(0xFFEF4444)),
+                  SizedBox(width: 6),
+                  Text('Замовлення відмовлено',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFDC2626))),
+                ],
+              ),
+              if (order.refusalReason != null) ...[
+                const SizedBox(height: 6),
+                Padding(
+                  padding: const EdgeInsets.only(left: 21),
+                  child: Text(
+                    'Причина: ${order.refusalReason}',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: Color(0xFF991B1B),
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        // Cancel refusal button
+        SizedBox(
+          width: double.infinity,
+          height: 42,
+          child: OutlinedButton.icon(
+            onPressed: _cancelRefusal,
+            icon: const Icon(Icons.undo_rounded, size: 16),
+            label: const Text('Скасувати відмову',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF1E7DC8),
+              side: const BorderSide(color: Color(0xFFBFDBFE)),
+              backgroundColor: const Color(0xFFF0F7FF),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
         ),
       ],
     );
@@ -1485,7 +1367,9 @@ class OrdersPanelState extends State<OrdersPanel> {
           ],
           const SizedBox(height: 12),
           // Action buttons — depend on order status
-          if (order.status == OrderStatus.collected)
+          if (order.status == OrderStatus.pharmacyRefusal)
+            _buildRefusedActions(order)
+          else if (order.status == OrderStatus.collected)
             _buildCollectedActions()
           else
             _buildNotCollectedActions(),
@@ -1585,7 +1469,7 @@ class OrdersPanelState extends State<OrdersPanel> {
 
   Widget _buildCheckoutBody(InternetOrder order) {
     final formattedTotal =
-        _finalTotal.toStringAsFixed(2).replaceAll('.', ',');
+        finalTotal.toStringAsFixed(2).replaceAll('.', ',');
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
@@ -1623,30 +1507,30 @@ class OrdersPanelState extends State<OrdersPanel> {
           const SizedBox(height: 12),
           BonusDiscountBlock(
             loyalty: widget.loyalty,
-            useBonuses: _useBonuses,
+            useBonuses: useBonuses,
             onUseBonusesChanged: (v) {
               setState(() {
-                _useBonuses = v;
-                if (_useBonuses && widget.loyalty != null) {
-                  final max = _orderTotal - _discountAmount;
+                useBonuses = v;
+                if (useBonuses && widget.loyalty != null) {
+                  final max = baseTotal - discountAmount;
                   final capped =
                       widget.loyalty!.bonusBalance.clamp(0, max);
-                  _bonusController.text = capped.toStringAsFixed(0);
+                  bonusCtr.text = capped.toStringAsFixed(0);
                 }
               });
             },
-            bonusController: _bonusController,
-            cartTotal: _orderTotal,
-            discountAmount: _discountAmount,
-            effectiveBonusAmount: _effectiveBonusAmount,
-            personalDiscount: _personalDiscount,
-            availableDiscountAmount: _availableDiscount != null
-                ? _orderTotal * _availableDiscount! / 100
+            bonusController: bonusCtr,
+            cartTotal: baseTotal,
+            discountAmount: discountAmount,
+            effectiveBonusAmount: effectiveBonusAmount,
+            personalDiscount: personalDiscount,
+            availableDiscountAmount: availableDiscount != null
+                ? baseTotal * availableDiscount! / 100
                 : null,
-            isLoadingDiscount: _isLoadingDiscount,
+            isLoadingDiscount: isLoadingDiscount,
             onRequestDiscount: _requestOrderDiscount,
             onClearDiscount: () =>
-                setState(() => _personalDiscount = null),
+                setState(() => personalDiscount = null),
             onBonusAmountChanged: () => setState(() {}),
           ),
 
@@ -1654,30 +1538,35 @@ class OrdersPanelState extends State<OrdersPanel> {
 
           // ── Payment method toggle ──────────────────────────────────────────
           PaymentMethodToggle(
-            selectedMethod: _paymentMethod,
+            selectedMethod: paymentMethod,
             onMethodChanged: (method) => setState(() {
-              _paymentMethod = method;
+              paymentMethod = method;
               if (method == PaymentMethod.cash) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _cashFocusNode.requestFocus();
+                  cashFocus.requestFocus();
                 });
               } else {
-                _cashController.clear();
+                cashCtr.clear();
               }
             }),
           ),
 
           // ── Cash section ───────────────────────────────────────────────────
-          if (_paymentMethod == PaymentMethod.cash && !_showPaymentSuccess)
+          if (paymentMethod == PaymentMethod.cash && !showPaymentSuccess)
             CashChangeSection(
-              cashController: _cashController,
-              cashFocusNode: _cashFocusNode,
-              finalTotal: _finalTotal,
+              cashController: cashCtr,
+              cashFocusNode: cashFocus,
+              finalTotal: finalTotal,
               onChanged: () => setState(() {}),
-              showBonusTransfer: widget.loyalty != null,
-              transferChangeToBonus: _transferChangeToBonus,
+              showBonusTransfer: true,
+              hasLoyalty: widget.loyalty != null,
+              transferChangeToBonus: transferChangeToBonus,
               onTransferChangeToBonusChanged: (v) =>
-                  setState(() => _transferChangeToBonus = v),
+                  setState(() => transferChangeToBonus = v),
+              bonusTransferController: bonusTransferCtr,
+              bonusTransferFocusNode: bonusTransferFocus,
+              onBonusTransferAmountChanged: () => setState(() {}),
+              onFocusPhone: widget.onFocusPhone,
             ),
 
           const SizedBox(height: 10),
@@ -1685,7 +1574,7 @@ class OrdersPanelState extends State<OrdersPanel> {
           // ── Pay / success button ───────────────────────────────────────────
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 280),
-            child: _showPaymentSuccess
+            child: showPaymentSuccess
                 ? _orderPaySuccessWidget()
                 : _orderPayButtonWidget(),
           ),
@@ -2085,6 +1974,8 @@ class _StatusDot extends StatelessWidget {
             OrderStatus.collected => const Color(0xFF22C55E),    // green
             OrderStatus.dispensed => const Color(0xFF6B7280),    // gray
             OrderStatus.refused => const Color(0xFFEF4444),      // red
+            OrderStatus.customerRefusal => const Color(0xFFEF4444),
+            OrderStatus.pharmacyRefusal => const Color(0xFFD97706),
           };
 
     final isFilled = isActiveUrgent ||
@@ -2132,6 +2023,14 @@ class _OrderStatusBadge extends StatelessWidget {
           const Color(0xFFEF4444),
           const Color(0xFFFEF2F2)
         ),
+      OrderStatus.customerRefusal => (
+          const Color(0xFFEF4444),
+          const Color(0xFFFEF2F2)
+        ),
+      OrderStatus.pharmacyRefusal => (
+          const Color(0xFFD97706),
+          const Color(0xFFFFFBEB)
+        ),
     };
 
     final label = switch (status) {
@@ -2139,7 +2038,9 @@ class _OrderStatusBadge extends StatelessWidget {
       OrderStatus.inProgress => 'В обробці',
       OrderStatus.collected => 'Зібране',
       OrderStatus.dispensed => 'Видане',
-      OrderStatus.refused => 'Відмовлено',
+      OrderStatus.refused => 'Розформоване',
+      OrderStatus.customerRefusal => 'Відмова клієнта',
+      OrderStatus.pharmacyRefusal => 'Відмова аптеки',
     };
 
     return Container(
@@ -2326,57 +2227,3 @@ class _OrderItemRow extends StatelessWidget {
   }
 }
 
-// ── Hover icon button (reusable) ────────────────────────────────────────────
-
-class _HoverIconButton extends StatefulWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-  const _HoverIconButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  @override
-  State<_HoverIconButton> createState() => _HoverIconButtonState();
-}
-
-class _HoverIconButtonState extends State<_HoverIconButton> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: widget.tooltip,
-      preferBelow: false,
-      waitDuration: const Duration(milliseconds: 400),
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 100),
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: _hovered
-                  ? const Color(0xFFF4F5F8)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              widget.icon,
-              size: 18,
-              color: _hovered
-                  ? const Color(0xFF1C1C2E)
-                  : const Color(0xFF9CA3AF),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}

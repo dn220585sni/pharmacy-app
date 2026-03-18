@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../data/cart_offers.dart';
+import '../data/edk_offers.dart';
 import '../data/mock_drugs.dart';
 import '../services/auth_service.dart';
 import '../services/drug_service.dart';
@@ -9,6 +11,7 @@ import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
 import '../models/customer_loyalty.dart';
 import '../models/drug.dart';
+import '../mixins/edk_state_mixin.dart';
 import '../models/edk_offer.dart';
 import '../widgets/action_sidebar.dart';
 import '../widgets/cart_panel.dart';
@@ -19,8 +22,13 @@ import '../widgets/customer_auth_card.dart';
 import '../data/mock_orders.dart';
 import '../models/internet_order.dart';
 import '../widgets/orders_panel.dart';
+import '../widgets/pharmacist_picker_dialog.dart';
 import '../widgets/expenses_panel.dart';
+import '../widgets/order_success_dialog.dart';
 import '../widgets/out_of_stock_panel.dart';
+import '../widgets/reservation_success_dialog.dart';
+import '../widgets/prescription_panel.dart';
+import '../models/prescription.dart';
 import '../data/mock_nearby_pharmacies.dart';
 import '../models/nearby_pharmacy.dart';
 import '../widgets/top_bar.dart';
@@ -37,7 +45,7 @@ class PosScreen extends StatefulWidget {
   State<PosScreen> createState() => _PosScreenState();
 }
 
-class _PosScreenState extends State<PosScreen> {
+class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   final TextEditingController _searchController = TextEditingController();
   late final FocusNode _searchFocusNode;
   final ScrollController _listScrollController = ScrollController();
@@ -82,15 +90,17 @@ class _PosScreenState extends State<PosScreen> {
   /// Key for accessing ExpensesPanelState (for Esc cascade).
   final _expensesPanelKey = GlobalKey<ExpensesPanelState>();
 
-  // ── ЄДК (Є Дещо Краще) — pharmaceutical substitution ────────────────────
-  EdkOffer? _activeEdkOffer;
-  final Set<String> _dismissedEdkDrugIds = {};
-
   /// Key for accessing CartPanelState (enterCheckout via F5).
   final _cartPanelKey = GlobalKey<CartPanelState>();
 
   /// Key for accessing OutOfStockPanelState (keyboard handling).
   final _outOfStockPanelKey = GlobalKey<OutOfStockPanelState>();
+
+  /// Whether the e-Prescription panel is shown in the right column.
+  bool _prescriptionOpen = false;
+
+  /// Key for accessing PrescriptionPanelState (Esc cascade).
+  final _prescriptionPanelKey = GlobalKey<PrescriptionPanelState>();
 
   void _toggleCart() {
     setState(() {
@@ -98,6 +108,7 @@ class _PosScreenState extends State<PosScreen> {
       if (_cartOpen) {
         _ordersOpen = false;
         _expensesOpen = false;
+        _prescriptionOpen = false;
       }
     });
     if (_cartOpen) _focusPhoneField();
@@ -109,6 +120,7 @@ class _PosScreenState extends State<PosScreen> {
       if (_ordersOpen) {
         _cartOpen = false;
         _expensesOpen = false;
+        _prescriptionOpen = false;
       }
     });
     if (_ordersOpen) {
@@ -124,6 +136,7 @@ class _PosScreenState extends State<PosScreen> {
       if (_expensesOpen) {
         _cartOpen = false;
         _ordersOpen = false;
+        _prescriptionOpen = false;
       }
     });
     if (_expensesOpen) {
@@ -131,6 +144,45 @@ class _PosScreenState extends State<PosScreen> {
         _expensesPanelKey.currentState?.focusSearch();
       });
     }
+  }
+
+  void _togglePrescription() {
+    setState(() {
+      _prescriptionOpen = !_prescriptionOpen;
+      if (_prescriptionOpen) {
+        _cartOpen = false;
+        _ordersOpen = false;
+        _expensesOpen = false;
+      }
+    });
+    if (_prescriptionOpen) {
+      _searchFocusNode.unfocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _prescriptionPanelKey.currentState?.focusSearch();
+      });
+    }
+  }
+
+  void _addPrescriptionToCart(
+      List<PrescriptionMatch> selectedMatches, Prescription rx) {
+    setState(() {
+      for (final match in selectedMatches) {
+        _cart.add(CartItem(
+          drug: match.drug,
+          quantity: match.selectedQuantity,
+          prescriptionData: PrescriptionCartData(
+            prescriptionNumber: rx.number,
+            reimbursementPrice: match.reimbursementPrice,
+            copayment: match.copayment,
+            programName: rx.programName,
+            prescriptionType: rx.type,
+          ),
+        ));
+      }
+      _prescriptionOpen = false;
+      _cartOpen = true;
+    });
+    // Open cart panel for scanning → then F5 to checkout
   }
 
   /// Focus the loyalty phone field with the cursor after the prefix.
@@ -156,7 +208,7 @@ class _PosScreenState extends State<PosScreen> {
 
   /// Auth card is visible when a drug row is selected OR cart is open.
   /// Hidden only on the dashboard view (no drug selected, cart closed).
-  bool get _showAuthCard => _cartOpen || _ordersOpen || _expensesOpen || _selectedDrug != null;
+  bool get _showAuthCard => _cartOpen || _ordersOpen || _expensesOpen || _prescriptionOpen || _selectedDrug != null;
 
   // ── Customer loyalty (phone auth) ─────────────────────────────────────────
   final _loyaltyPhoneController = TextEditingController();
@@ -225,10 +277,7 @@ class _PosScreenState extends State<PosScreen> {
       _loadPharmacists(autoShow: true);
       return;
     }
-    showDialog<PharmacistInfo>(
-      context: context,
-      builder: (ctx) => _PharmacistPickerDialog(pharmacists: _pharmacists),
-    ).then((selected) {
+    showPharmacistPicker(context, _pharmacists).then((selected) {
       if (selected != null && mounted) {
         setState(() => _currentPharmacist = selected);
       }
@@ -254,6 +303,25 @@ class _PosScreenState extends State<PosScreen> {
   bool _handleGlobalKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
 
+    // ══════════════════════════════════════════════════════════════════════
+    // PRESCRIPTION PANEL — absolute minimal handler.
+    // On macOS desktop, HardwareKeyboard handlers can suppress the
+    // platform text-input channel (insertText: / interpretKeyEvents:).
+    // By returning false at the very top — before ANY event inspection —
+    // we guarantee the platform delivers characters to the focused
+    // TextField inside the prescription panel.
+    // Esc is handled locally inside PrescriptionPanel (Focus.onKeyEvent).
+    // ══════════════════════════════════════════════════════════════════════
+    if (_prescriptionOpen) {
+      // Ctrl+R: toggle prescription panel (close it)
+      if (HardwareKeyboard.instance.isControlPressed &&
+          event.logicalKey == LogicalKeyboardKey.keyR) {
+        _togglePrescription();
+        return true;
+      }
+      return false; // everything else — completely transparent
+    }
+
     // Don't intercept keys when a dialog/overlay is open (e.g. pharmacist picker)
     if (ModalRoute.of(context)?.isCurrent != true) return false;
 
@@ -276,6 +344,11 @@ class _PosScreenState extends State<PosScreen> {
       // ── Ctrl+E: toggle cash expenses panel ─────────────────────────────
       if (event.logicalKey == LogicalKeyboardKey.keyE) {
         _toggleExpenses();
+        return true;
+      }
+      // ── Ctrl+R: toggle e-Prescription panel ────────────────────────────
+      if (event.logicalKey == LogicalKeyboardKey.keyR) {
+        _togglePrescription();
         return true;
       }
       return false; // other Ctrl combos — pass through
@@ -353,7 +426,7 @@ class _PosScreenState extends State<PosScreen> {
         setState(() => _expensesOpen = false);
       } else if (_outOfStockPanelKey.currentState?.isEdkActive == true) {
         _outOfStockPanelKey.currentState?.dismissEdk();
-      } else if (_activeEdkOffer != null) {
+      } else if (activeEdkOffer != null) {
         _dismissEdk();
       } else if (_cart.isNotEmpty) {
         _openClearCartConfirmDialog();
@@ -386,12 +459,15 @@ class _PosScreenState extends State<PosScreen> {
         return true;
       }
       // Standard EDK
-      if (_activeEdkOffer != null) {
+      if (activeEdkOffer != null) {
         _addEdkToCart();
         return true;
       }
       return false;
     }
+
+    // ── When orders/expenses panel is open, don't process characters ────────
+    if (_expensesOpen || _ordersOpen) return false;
 
     final character = event.character;
     if (character == null || character.isEmpty) return false;
@@ -421,9 +497,6 @@ class _PosScreenState extends State<PosScreen> {
 
     // Search field already has focus — let it handle naturally
     if (_searchFocusNode.hasFocus) return false;
-
-    // Expenses / orders panel is open — let their own search handle input
-    if (_expensesOpen || _ordersOpen) return false;
 
     // If a qty TextField has focus and the key is a digit — don't intercept,
     // let the digit go to the qty field as intended.
@@ -672,7 +745,7 @@ class _PosScreenState extends State<PosScreen> {
     setState(() {
       _selectedDrug = _searchResults[newIdx];
       _focusQtyOnSelect = true;
-      _activeEdkOffer = null;
+      activeEdkOffer = null;
     });
 
     _scrollToIndex(newIdx);
@@ -768,96 +841,23 @@ class _PosScreenState extends State<PosScreen> {
 
   // ── ЄДК logic ────────────────────────────────────────────────────────────
 
-  /// Hardcoded EDK offers (simulates external service).
-  /// Key = donor drug id, value = replacement offer.
-  late final Map<String, EdkOffer> _edkOffers = {
-    // Ібупрофен 200мг №20 id:'024' (bonus 8) → Нурофен Експрес id:'009' (bonus 20)
-    '024': EdkOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '009'),
-      donorDrugId: '024',
-      description:
-          'Капсульна форма для швидшого всмоктування — '
-          'ефект настає вже через 15 хвилин.',
-      script:
-          'Зверніть увагу, є аналогічний препарат у капсулах — '
-          'діє значно швидше. Бажаєте спробувати?',
-      promoLabel: 'Потрійний кешбек',
-    ),
-    // Парацетамол 500мг №20 id:'001' (bonus 5) → Панадол 500мг №12 id:'031' (bonus 12)
-    '001': EdkOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '031'),
-      donorDrugId: '001',
-      description:
-          'Європейська якість, та сама діюча речовина. '
-          'Покращена формула для швидшого всмоктування.',
-      script:
-          'Є такий самий парацетамол європейського виробництва — '
-          'діє швидше завдяки покращеній формулі. Рекомендую!',
-    ),
-    // МІГ 400 №20 id:'025' (bonus 12) → Нурофен форте 400мг id:'035' (bonus 20)
-    '025': EdkOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '035'),
-      donorDrugId: '025',
-      description:
-          'Преміальна якість від світового виробника. '
-          'Швидкодіюча формула для максимального ефекту.',
-      script:
-          'Якщо потрібен максимальний ефект — рекомендую цей варіант. '
-          'Швидкодіюча формула, перевірена якість.',
-      promoLabel: 'Знижка −10%',
-    ),
-    // ── Out-of-stock EDK offers ──────────────────────────────────────────
-    // Диклофенак 50мг id:'050' → Нурофен Експрес id:'009' (bonus 20)
-    '050': EdkOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '009'),
-      donorDrugId: '050',
-      description:
-          'Відмінна заміна — капсульна форма діє швидше '
-          'та ефективніше знімає біль.',
-      script:
-          'На жаль, Диклофенак зараз відсутній на ринку. '
-          'Рекомендую Нурофен Експрес — капсули для швидкого ефекту.',
-    ),
-    // Цефтріаксон 1г id:'051' (quarantined) → Флемоксин Солютаб id:'042' (bonus 12)
-    '051': EdkOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '042'),
-      donorDrugId: '051',
-      description:
-          'Пероральний антибіотик широкого спектру — '
-          'зручна форма прийому без ін\'єкцій.',
-      script:
-          'Цефтріаксон зараз у карантині. Рекомендую Флемоксин Солютаб — '
-          'потужний антибіотик у зручній формі таблеток.',
-    ),
-    // Кларитін 10мг id:'053' → Цетрин 10мг id:'036'
-    '053': EdkOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '036'),
-      donorDrugId: '053',
-      description:
-          'Цетрин — сучасний антигістамінний засіб '
-          'з тією ж ефективністю та м\'якою дією.',
-      script:
-          'Кларитін наразі не замовлений. Рекомендую Цетрин — '
-          'така ж діюча речовина, перевірена якість.',
-    ),
-  };
+  /// EDK offers: donor drug id → replacement offer.
+  late final Map<String, EdkOffer> _edkOffers =
+      buildRetailEdkOffers(mockDrugs);
 
   /// Check and show EDK offer after adding a donor drug to cart.
   void _tryShowEdk(Drug donorDrug) {
-    if (_dismissedEdkDrugIds.contains(donorDrug.id)) return;
-    final offer = _edkOffers[donorDrug.id];
-    if (offer == null) return;
-    setState(() => _activeEdkOffer = offer);
+    tryActivateEdk(donorDrug.id, _edkOffers);
   }
 
   /// Accept EDK: add 1 package of replacement, remove donor from cart.
   void _addEdkToCart() {
-    if (_activeEdkOffer == null) return;
-    final replacement = _activeEdkOffer!.drug;
-    final donorId = _activeEdkOffer!.donorDrugId;
+    if (activeEdkOffer == null) return;
+    final replacement = activeEdkOffer!.drug;
+    final donorId = activeEdkOffer!.donorDrugId;
     setState(() {
-      _dismissedEdkDrugIds.add(donorId);
-      _activeEdkOffer = null;
+      dismissedEdkIds.add(donorId);
+      activeEdkOffer = null;
       // Remove the donor — replacement substitutes it.
       _cart.removeWhere((i) => i.drug.id == donorId);
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
@@ -874,13 +874,13 @@ class _PosScreenState extends State<PosScreen> {
 
   /// Accept EDK as blister: add 1 blister of replacement, remove donor.
   void _addEdkBlisterToCart() {
-    if (_activeEdkOffer == null) return;
-    final replacement = _activeEdkOffer!.drug;
-    final donorId = _activeEdkOffer!.donorDrugId;
+    if (activeEdkOffer == null) return;
+    final replacement = activeEdkOffer!.drug;
+    final donorId = activeEdkOffer!.donorDrugId;
     if (replacement.unitsPerPackage == null) return;
     setState(() {
-      _dismissedEdkDrugIds.add(donorId);
-      _activeEdkOffer = null;
+      dismissedEdkIds.add(donorId);
+      activeEdkOffer = null;
       _cart.removeWhere((i) => i.drug.id == donorId);
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
@@ -898,13 +898,7 @@ class _PosScreenState extends State<PosScreen> {
     if (ri >= 0) _scrollToIndex(ri);
   }
 
-  void _dismissEdk() {
-    if (_activeEdkOffer == null) return;
-    setState(() {
-      _dismissedEdkDrugIds.add(_activeEdkOffer!.donorDrugId);
-      _activeEdkOffer = null;
-    });
-  }
+  void _dismissEdk() => dismissActiveEdk();
 
   // ── OOS (Out-of-Stock) EDK actions ──────────────────────────────────────
 
@@ -991,7 +985,7 @@ class _PosScreenState extends State<PosScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _ReservationSuccessDialog(
+      builder: (_) => ReservationSuccessDialog(
         drugName: drugName,
         pharmacyAddress: pharmacy.displayAddress,
       ),
@@ -1005,7 +999,7 @@ class _PosScreenState extends State<PosScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _OrderSuccessDialog(drugName: drugName),
+      builder: (_) => OrderSuccessDialog(drugName: drugName),
     ).then((_) {
       _clearCart();
     });
@@ -1025,10 +1019,10 @@ class _PosScreenState extends State<PosScreen> {
       _searchResults = mockDrugs;
       _selectedSymptom = 'Всі';
       _cartOpen = false;
+      _prescriptionOpen = false;
       _isServerLookup = false;
       _resetLoyalty();
-      _dismissedEdkDrugIds.clear();
-      _activeEdkOffer = null;
+      clearEdkState();
     });
 
     // Unfocus everything — true zero state
@@ -1125,22 +1119,7 @@ class _PosScreenState extends State<PosScreen> {
     }
   }
 
-  // TODO: offers will come from recommendations service based on cart contents
-  static final List<CartOffer> _allOffers = [
-    CartOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '019'),
-      reason: 'Підтримка імунітету при застуді',
-      promoLabel: 'Акція 1+1',
-      script:
-          'Рекомендую додати вітамін С — він підтримує імунітет і прискорює одужання при застуді.',
-    ),
-    CartOffer(
-      drug: mockDrugs.firstWhere((d) => d.id == '017'),
-      reason: 'Супутній препарат при кашлі',
-      script:
-          'Для полегшення кашлю рекомендую цей муколітик — він розріджує мокротиння.',
-    ),
-  ];
+  static final List<CartOffer> _allOffers = buildCartOffers(mockDrugs);
 
   List<CartOffer> get _recommendedOffers {
     final cartIds = _cart.map((item) => item.drug.id).toSet();
@@ -1191,6 +1170,25 @@ class _PosScreenState extends State<PosScreen> {
     });
   }
 
+  /// Called by OrdersPanel after successful internet order payment.
+  /// Accumulates pharmacist bonuses and resets to zero state.
+  void _onOrderPaid(double amount) {
+    _searchController.removeListener(_filterDrugs);
+    _searchController.clear();
+    _searchController.addListener(_filterDrugs);
+    setState(() {
+      _totalEarned += amount;
+      _ordersOpen = false;
+      _cart.clear();
+      _selectedDrug = null;
+      _searchResults = mockDrugs;
+      _selectedSymptom = 'Всі';
+      _resetLoyalty();
+      clearEdkState();
+    });
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
   // ─── Analogues ─────────────────────────────────────────────────────────────
 
   List<Drug> get _analogues {
@@ -1210,7 +1208,7 @@ class _PosScreenState extends State<PosScreen> {
       _selectedDrug = drug;
       _focusQtyOnSelect = true;
       _cartOpen = false;
-      _activeEdkOffer = null;
+      activeEdkOffer = null;
     });
     final idx = _searchResults.indexWhere((d) => d.id == drug.id);
     if (idx >= 0) _scrollToIndex(idx);
@@ -1343,6 +1341,7 @@ class _PosScreenState extends State<PosScreen> {
                                               onAddOffer: _addOfferToCart,
                                               onAddOfferBlister: _addOfferBlisterToCart,
                                               loyalty: _customerLoyalty,
+                                              onFocusPhone: _focusPhoneField,
                                             )
                                           : _ordersOpen
                                               ? OrdersPanel(
@@ -1354,13 +1353,22 @@ class _PosScreenState extends State<PosScreen> {
                                                   onAddEdkBlister: (drug) =>
                                                       _setFractionalQuantity(
                                                           drug, 1),
+                                                  onOrderPaid: _onOrderPaid,
+                                                  onFocusPhone: _focusPhoneField,
                                                 )
                                               : _expensesOpen
                                                   ? ExpensesPanel(
                                                       key: _expensesPanelKey,
                                                       onClose: _toggleExpenses,
                                                     )
-                                                  : _buildRightPanel(),
+                                                  : _prescriptionOpen
+                                                      ? PrescriptionPanel(
+                                                          key: _prescriptionPanelKey,
+                                                          onClose: _togglePrescription,
+                                                          drugCatalog: mockDrugs,
+                                                          onAddToCart: _addPrescriptionToCart,
+                                                        )
+                                                      : _buildRightPanel(),
                                     ),
                                   ],
                                 ),
@@ -1404,6 +1412,8 @@ class _PosScreenState extends State<PosScreen> {
                         .length,
                     onExpensesTap: _toggleExpenses,
                     expensesActive: _expensesOpen,
+                    onPrescriptionTap: _togglePrescription,
+                    prescriptionActive: _prescriptionOpen,
                   ),
                 ],
               ),
@@ -1458,13 +1468,13 @@ class _PosScreenState extends State<PosScreen> {
           ),
         );
       },
-      child: _activeEdkOffer != null
+      child: activeEdkOffer != null
               ? EdkPanel(
                   key: const ValueKey('edk'),
-                  offer: _activeEdkOffer!,
+                  offer: activeEdkOffer!,
                   onAddPackage: _addEdkToCart,
                   onAddBlister:
-                      _activeEdkOffer!.drug.unitsPerPackage != null
+                      activeEdkOffer!.drug.unitsPerPackage != null
                           ? _addEdkBlisterToCart
                           : null,
                   onDismiss: _dismissEdk,
@@ -1845,7 +1855,7 @@ class _PosScreenState extends State<PosScreen> {
             _selectedDrug = drug;
             _focusQtyOnSelect = true;
             _cartOpen = false;
-            _activeEdkOffer = null;
+            activeEdkOffer = null;
           }),
           onQuantityChanged: (qty) => _setQuantity(drug, qty),
           onFractionalChanged: (blisters) =>
@@ -1913,536 +1923,3 @@ class _PosScreenState extends State<PosScreen> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Reservation success dialog
-// ═══════════════════════════════════════════════════════════════════════════════
-
-class _ReservationSuccessDialog extends StatefulWidget {
-  final String drugName;
-  final String pharmacyAddress;
-
-  const _ReservationSuccessDialog({
-    required this.drugName,
-    required this.pharmacyAddress,
-  });
-
-  @override
-  State<_ReservationSuccessDialog> createState() =>
-      _ReservationSuccessDialogState();
-}
-
-class _ReservationSuccessDialogState extends State<_ReservationSuccessDialog>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _anim = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    )..forward();
-  }
-
-  @override
-  void dispose() {
-    _anim.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: ScaleTransition(
-        scale: CurvedAnimation(parent: _anim, curve: Curves.easeOutBack),
-        child: FadeTransition(
-          opacity: CurvedAnimation(parent: _anim, curve: Curves.easeOut),
-          child: Material(
-            color: Colors.transparent,
-            child: Container(
-              width: 380,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x1A000000),
-                    blurRadius: 32,
-                    offset: Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // ── Check icon ─────────────────────────────────────────
-                  Container(
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEEF6FF),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: const Color(0xFF1E7DC8).withValues(alpha: 0.2),
-                        width: 2,
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.check_rounded,
-                      size: 34,
-                      color: Color(0xFF1E7DC8),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // ── Title ──────────────────────────────────────────────
-                  const Text(
-                    'Препарат успішно заброньовано',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Color(0xFF1C1C2E),
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      height: 1.3,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-
-                  // ── Pharmacy address ───────────────────────────────────
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF4F5F8),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.store_outlined,
-                            size: 18, color: Color(0xFF1E7DC8)),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            widget.pharmacyAddress,
-                            style: const TextStyle(
-                              color: Color(0xFF4B5563),
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-
-                  // ── Drug name ──────────────────────────────────────────
-                  Text(
-                    widget.drugName,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFF9CA3AF),
-                      fontSize: 12.5,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // ── OK button ──────────────────────────────────────────
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: Container(
-                      width: double.infinity,
-                      height: 46,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E7DC8),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      alignment: Alignment.center,
-                      child: const Text(
-                        'Готово',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Order-for-client success dialog
-// ═══════════════════════════════════════════════════════════════════════════════
-
-class _OrderSuccessDialog extends StatefulWidget {
-  final String drugName;
-
-  const _OrderSuccessDialog({required this.drugName});
-
-  @override
-  State<_OrderSuccessDialog> createState() => _OrderSuccessDialogState();
-}
-
-class _OrderSuccessDialogState extends State<_OrderSuccessDialog>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _anim = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    )..forward();
-  }
-
-  @override
-  void dispose() {
-    _anim.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: ScaleTransition(
-        scale: CurvedAnimation(parent: _anim, curve: Curves.easeOutBack),
-        child: FadeTransition(
-          opacity: CurvedAnimation(parent: _anim, curve: Curves.easeOut),
-          child: Material(
-            color: Colors.transparent,
-            child: Container(
-              width: 380,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x1A000000),
-                    blurRadius: 32,
-                    offset: Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // ── Check icon ─────────────────────────────────────
-                  Container(
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEEF6FF),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color:
-                            const Color(0xFF1E7DC8).withValues(alpha: 0.2),
-                        width: 2,
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.check_rounded,
-                      size: 34,
-                      color: Color(0xFF1E7DC8),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // ── Title ──────────────────────────────────────────
-                  const Text(
-                    'Замовлення оформлено',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Color(0xFF1C1C2E),
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      height: 1.3,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-
-                  // ── Drug name ──────────────────────────────────────
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF4F5F8),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.inventory_2_outlined,
-                            size: 18, color: Color(0xFF1E7DC8)),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            widget.drugName,
-                            style: const TextStyle(
-                              color: Color(0xFF4B5563),
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-
-                  // ── Delivery info ──────────────────────────────────
-                  const Text(
-                    'Клієнта буде повідомлено про надходження',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Color(0xFF9CA3AF),
-                      fontSize: 12.5,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // ── OK button ──────────────────────────────────────
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: Container(
-                      width: double.infinity,
-                      height: 46,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E7DC8),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      alignment: Alignment.center,
-                      child: const Text(
-                        'Готово',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pharmacist picker dialog
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _PharmacistPickerDialog extends StatefulWidget {
-  final List<PharmacistInfo> pharmacists;
-  const _PharmacistPickerDialog({required this.pharmacists});
-
-  @override
-  State<_PharmacistPickerDialog> createState() =>
-      _PharmacistPickerDialogState();
-}
-
-class _PharmacistPickerDialogState extends State<_PharmacistPickerDialog> {
-  final _searchController = TextEditingController();
-  List<PharmacistInfo> _filtered = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _filtered = widget.pharmacists;
-    _searchController.addListener(_onSearch);
-  }
-
-  void _onSearch() {
-    final q = _searchController.text.trim().toLowerCase();
-    setState(() {
-      if (q.isEmpty) {
-        _filtered = widget.pharmacists;
-      } else {
-        _filtered = widget.pharmacists
-            .where((p) => p.user.toLowerCase().contains(q))
-            .toList();
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Container(
-        width: 420,
-        height: 500,
-        padding: const EdgeInsets.all(0),
-        child: Column(
-          children: [
-            // Header
-            Container(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
-              decoration: const BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(color: Color(0xFFE5E7EB)),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Оберіть фармацевта',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF1C1C2E),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _searchController,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      hintText: 'Пошук за прізвищем...',
-                      hintStyle: const TextStyle(
-                        color: Color(0xFF9CA3AF),
-                        fontSize: 13,
-                      ),
-                      prefixIcon: const Icon(
-                        Icons.search_rounded,
-                        size: 18,
-                        color: Color(0xFF9CA3AF),
-                      ),
-                      filled: true,
-                      fillColor: const Color(0xFFF4F5F8),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
-            // List
-            Expanded(
-              child: _filtered.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'Нікого не знайдено',
-                        style:
-                            TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
-                      ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      itemCount: _filtered.length,
-                      itemBuilder: (ctx, i) {
-                        final p = _filtered[i];
-                        return InkWell(
-                          onTap: () => Navigator.of(context).pop(p),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 11),
-                            decoration: const BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(
-                                    color: Color(0xFFF3F4F6), width: 0.5),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 32,
-                                  height: 32,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFE8F3FB),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      p.user.isNotEmpty
-                                          ? p.user[0].toUpperCase()
-                                          : '?',
-                                      style: const TextStyle(
-                                        color: Color(0xFF1E7DC8),
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    p.user,
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      color: Color(0xFF1C1C2E),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-            // Footer
-            Container(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
-              decoration: const BoxDecoration(
-                border: Border(
-                  top: BorderSide(color: Color(0xFFE5E7EB)),
-                ),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Text(
-                    '${widget.pharmacists.length} фармацевтів',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFF9CA3AF),
-                    ),
-                  ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text(
-                      'Скасувати',
-                      style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

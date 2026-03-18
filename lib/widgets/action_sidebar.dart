@@ -21,6 +21,12 @@ class ActionSidebar extends StatelessWidget {
   /// Whether the expenses panel is currently open (shows active state).
   final bool expensesActive;
 
+  /// Callback when "е-Рецепт" button is tapped.
+  final VoidCallback? onPrescriptionTap;
+
+  /// Whether the prescription panel is currently open (shows active state).
+  final bool prescriptionActive;
+
   const ActionSidebar({
     super.key,
     this.onOrdersTap,
@@ -28,6 +34,8 @@ class ActionSidebar extends StatelessWidget {
     this.urgentCount = 0,
     this.onExpensesTap,
     this.expensesActive = false,
+    this.onPrescriptionTap,
+    this.prescriptionActive = false,
   });
 
   @override
@@ -47,7 +55,12 @@ class ActionSidebar extends StatelessWidget {
         hotkeyLabel: 'Ctrl I',
       ),
       _SidebarItem(
-          icon: Icons.health_and_safety_outlined, tooltip: 'Доступні ліки'),
+        icon: Icons.health_and_safety_outlined,
+        tooltip: 'е-Рецепт',
+        onTap: onPrescriptionTap,
+        isActive: prescriptionActive,
+        hotkeyLabel: 'Ctrl R',
+      ),
       _SidebarItem(
         tooltip: 'Пакунок малюка',
         customChild: const _SwaddledBabyIcon(),

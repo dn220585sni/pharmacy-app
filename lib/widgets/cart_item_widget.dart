@@ -40,21 +40,32 @@ class CartItemWidget extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Drug icon — blue checkbox when scanned
+          // Drug icon — Rx badge for prescriptions, blue checkbox when scanned
           Container(
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: isScanned
-                  ? const Color(0xFFDBEAFE)
-                  : const Color(0xFFE8F3FB),
+              color: item.isPrescription
+                  ? const Color(0xFFDCFCE7)
+                  : isScanned
+                      ? const Color(0xFFDBEAFE)
+                      : const Color(0xFFE8F3FB),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(
-              isScanned ? Icons.check_box_rounded : Icons.medication_rounded,
-              color: const Color(0xFF1E7DC8),
-              size: 17,
-            ),
+            child: item.isPrescription
+                ? const Center(
+                    child: Text('Rx',
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF16A34A))))
+                : Icon(
+                    isScanned
+                        ? Icons.check_box_rounded
+                        : Icons.medication_rounded,
+                    color: const Color(0xFF1E7DC8),
+                    size: 17,
+                  ),
           ),
           const SizedBox(width: 10),
 
@@ -76,15 +87,25 @@ class CartItemWidget extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  '${item.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴ × ${item.displayQty}',
-                  style: TextStyle(
-                    color: isScanned
-                        ? const Color(0xFF93C5FD)
-                        : const Color(0xFF9CA3AF),
-                    fontSize: 11,
+                if (item.isPrescription) ...[
+                  Text(
+                    'Доплата: ${item.prescriptionData!.copayment.toStringAsFixed(2)} ₴ × ${item.displayQty}',
+                    style: const TextStyle(
+                      color: Color(0xFF16A34A),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
-                ),
+                ] else
+                  Text(
+                    '${item.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴ × ${item.displayQty}',
+                    style: TextStyle(
+                      color: isScanned
+                          ? const Color(0xFF93C5FD)
+                          : const Color(0xFF9CA3AF),
+                      fontSize: 11,
+                    ),
+                  ),
               ],
             ),
           ),

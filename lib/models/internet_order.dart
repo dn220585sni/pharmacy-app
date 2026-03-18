@@ -3,11 +3,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum OrderStatus {
-  newOrder,    // Нове
-  inProgress,  // В обробці
-  collected,   // Зібране
-  dispensed,   // Видане
-  refused,     // Відмовлене
+  newOrder,           // Нове
+  inProgress,         // В обробці
+  collected,          // Зібране
+  dispensed,          // Видане
+  refused,            // Розформоване (disbanded — items returned to shelves)
+  customerRefusal,    // Відмова клієнта
+  pharmacyRefusal,    // Відмова аптеки
 }
 
 enum OrderType {
@@ -58,6 +60,9 @@ class InternetOrder {
   /// Locker-eligible orders are automatically urgent.
   final bool isLockerEligible;
 
+  /// Reason for pharmacy refusal (set when status == pharmacyRefusal).
+  final String? refusalReason;
+
   const InternetOrder({
     required this.id,
     required this.reserveNumber,
@@ -70,6 +75,7 @@ class InternetOrder {
     this.customerPhone,
     this.isUrgent = false,
     this.isLockerEligible = false,
+    this.refusalReason,
   });
 
   String get statusLabel {
@@ -83,7 +89,11 @@ class InternetOrder {
       case OrderStatus.dispensed:
         return 'Видане';
       case OrderStatus.refused:
-        return 'Відмовлене';
+        return 'Розформоване';
+      case OrderStatus.customerRefusal:
+        return 'Відмова клієнта';
+      case OrderStatus.pharmacyRefusal:
+        return 'Відмова аптеки';
     }
   }
 
@@ -101,6 +111,8 @@ class InternetOrder {
   InternetOrder copyWith({
     OrderStatus? status,
     int? lockerCell,
+    String? refusalReason,
+    bool clearRefusalReason = false,
   }) {
     return InternetOrder(
       id: id,
@@ -114,6 +126,8 @@ class InternetOrder {
       customerPhone: customerPhone,
       isUrgent: isUrgent,
       isLockerEligible: isLockerEligible,
+      refusalReason:
+          clearRefusalReason ? null : (refusalReason ?? this.refusalReason),
     );
   }
 }

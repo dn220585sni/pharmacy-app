@@ -728,13 +728,16 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       if (!mounted || result == null) return;
 
       final usageInfo = result.toUsageInfo();
-      if (usageInfo == null) return;
 
       // Update the drug in _searchResults and _selectedDrug
       setState(() {
-        final updatedDrug = drug.copyWithUsageInfo(
-          usageInfo,
-          newImageUrl: result.imageUrl,
+        final updatedDrug = drug.copyWithProductBrowser(
+          usageInfo: usageInfo,
+          imageUrl: result.imageUrl,
+          indications: result.information,
+          instructionsUrl: result.instructionsUrl,
+          applicationMethod: result.applicationMethod,
+          countryOfOrigin: result.countryOfOrigin,
         );
 
         _searchResults = _searchResults.map((d) {

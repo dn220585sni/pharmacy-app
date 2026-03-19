@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/drug.dart';
 import 'drug_list_item.dart'; // for kColBadge
 import 'shift_dashboard.dart';
@@ -197,6 +198,12 @@ class DrugDetailPanel extends StatelessWidget {
         _buildHeader(drug),
         _buildDivider(),
 
+        // ── Показання (indications from Product Browser) ──────────────────
+        if (drug.indications != null && drug.indications!.isNotEmpty) ...[
+          _buildIndications(drug),
+          _buildDivider(),
+        ],
+
         // ── Fixed: usage properties ─────────────────────────────────────────
         if (drug.usageInfo != null) ...[
           _buildUsageProperties(drug),
@@ -358,40 +365,41 @@ class DrugDetailPanel extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 6),
-                      GestureDetector(
-                        onTap: () {
-                          // TODO: open instruction URL
-                        },
-                        child: Tooltip(
-                          message: 'Переглянути інструкцію',
-                          child: Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEEF2FF),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: const Color(0xFFD6DEFF),
-                                width: 1,
+                      if (drug.instructionsUrl != null)
+                        GestureDetector(
+                          onTap: () => _openInstruction(drug.instructionsUrl!),
+                          child: Tooltip(
+                            message: 'Переглянути інструкцію',
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEEF2FF),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: const Color(0xFFD6DEFF),
+                                  width: 1,
+                                ),
                               ),
-                            ),
-                            child: const Icon(
-                              Icons.description_rounded,
-                              size: 18,
-                              color: Color(0xFF1E7DC8),
+                              child: const Icon(
+                                Icons.description_rounded,
+                                size: 18,
+                                color: Color(0xFF1E7DC8),
+                              ),
                             ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${drug.category}  ·  ${drug.manufacturer}',
+                    _buildMetaLine(drug),
                     style: const TextStyle(
                       color: Color(0xFF9CA3AF),
                       fontSize: 11.5,
                     ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 6),
                   _buildBatchInfo(drug),
@@ -400,6 +408,62 @@ class DrugDetailPanel extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ── Meta line: category · manufacturer · country ──────────────────────────
+
+  String _buildMetaLine(Drug drug) {
+    final parts = <String>[];
+    if (drug.category.isNotEmpty) parts.add(drug.category);
+    if (drug.manufacturer.isNotEmpty) parts.add(drug.manufacturer);
+    if (drug.countryOfOrigin != null) parts.add(drug.countryOfOrigin!);
+    if (drug.applicationMethod != null) parts.add(drug.applicationMethod!);
+    return parts.join('  ·  ');
+  }
+
+  // ── Open instruction URL ──────────────────────────────────────────────────
+
+  void _openInstruction(String url) {
+    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  // ── Indications section ───────────────────────────────────────────────────
+
+  Widget _buildIndications(Drug drug) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.medical_information_outlined,
+                  size: 14, color: Color(0xFF1E7DC8)),
+              SizedBox(width: 6),
+              Text(
+                'Показання',
+                style: TextStyle(
+                  color: Color(0xFF1C1C2E),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            drug.indications!,
+            style: const TextStyle(
+              color: Color(0xFF6B7280),
+              fontSize: 12,
+              height: 1.4,
+            ),
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
       ),
     );
   }

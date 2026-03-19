@@ -229,6 +229,26 @@ class ProductBrowserResult {
 
   /// Get product image URL (first available).
   String? get imageUrl => pictures.isNotEmpty ? pictures.first : null;
+
+  /// Get application method from tags (e.g. "Для порожнини рота").
+  String? get applicationMethod {
+    final tag = tags.where((t) => t.jsonName == 'usageName').firstOrNull;
+    return tag?.value;
+  }
+
+  /// Get country of origin from tags (e.g. "Франція").
+  String? get countryOfOrigin {
+    final tag = tags
+        .where((t) => t.jsonName == 'cosmetic_ManufCountry')
+        .firstOrNull;
+    return tag?.value;
+  }
+
+  /// Get dosage form from tags (e.g. "Спреї", "Таблетки").
+  String? get dosageForm {
+    final tag = tags.where((t) => t.jsonName == 'name').firstOrNull;
+    return tag?.value;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

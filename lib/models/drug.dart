@@ -79,6 +79,12 @@ class Drug {
   final int? unitsPerPackage;      // blisters/units per package (null = not splittable)
   final String? intakeWarning;     // e.g. "Вживайте тільки після їжі!" (from external service)
 
+  // ── Product Browser fields (fetched from anc.ua API) ─────────────────────
+  final String? indications;       // показання: "ангіна, фарингіт, стоматит..."
+  final String? instructionsUrl;   // URL to full drug instruction HTML
+  final String? applicationMethod; // спосіб застосування: "Для порожнини рота"
+  final String? countryOfOrigin;   // країна виробництва: "Франція"
+
   // ── Batch / serialisation fields ──────────────────────────────────────────
   final String? series;        // e.g. "036"
   final String? serialNumber;  // e.g. "1234734678"
@@ -112,6 +118,10 @@ class Drug {
     this.imageUrl,
     this.unitsPerPackage,
     this.intakeWarning,
+    this.indications,
+    this.instructionsUrl,
+    this.applicationMethod,
+    this.countryOfOrigin,
     this.series,
     this.serialNumber,
     this.barcode,
@@ -162,6 +172,10 @@ class Drug {
       imageUrl: imageUrl,
       unitsPerPackage: unitsPerPackage,
       intakeWarning: intakeWarning,
+      indications: indications,
+      instructionsUrl: instructionsUrl,
+      applicationMethod: applicationMethod,
+      countryOfOrigin: countryOfOrigin,
       series: series,
       serialNumber: serialNumber,
       barcode: barcode,
@@ -169,8 +183,15 @@ class Drug {
     );
   }
 
-  /// Create copy with updated usage info (from Product Browser API).
-  Drug copyWithUsageInfo(DrugUsageInfo? newUsageInfo, {String? newImageUrl}) {
+  /// Create copy with Product Browser API data.
+  Drug copyWithProductBrowser({
+    DrugUsageInfo? usageInfo,
+    String? imageUrl,
+    String? indications,
+    String? instructionsUrl,
+    String? applicationMethod,
+    String? countryOfOrigin,
+  }) {
     return Drug(
       id: id,
       name: name,
@@ -192,10 +213,14 @@ class Drug {
       locationType: locationType,
       locationCode: locationCode,
       storageLocations: storageLocations,
-      usageInfo: newUsageInfo ?? usageInfo,
-      imageUrl: newImageUrl ?? imageUrl,
+      usageInfo: usageInfo ?? this.usageInfo,
+      imageUrl: imageUrl ?? this.imageUrl,
       unitsPerPackage: unitsPerPackage,
       intakeWarning: intakeWarning,
+      indications: indications ?? this.indications,
+      instructionsUrl: instructionsUrl ?? this.instructionsUrl,
+      applicationMethod: applicationMethod ?? this.applicationMethod,
+      countryOfOrigin: countryOfOrigin ?? this.countryOfOrigin,
       series: series,
       serialNumber: serialNumber,
       barcode: barcode,

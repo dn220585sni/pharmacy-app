@@ -15,6 +15,7 @@ import 'checkout/payment_method_toggle.dart';
 import 'order_edk_card.dart';
 import 'disbanded_orders_screen.dart';
 import 'hover_icon_button.dart';
+import 'likomat_dialog.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OrdersPanel — Internet orders panel shown in the right detail column.
@@ -327,22 +328,25 @@ class OrdersPanelState extends State<OrdersPanel>
     setState(() => _orderCheckoutMode = true);
   }
 
-  /// Place order into locker → change status to collected.
+  /// Place order into locker → show cell picker → change status to collected.
   void _placeInLocker() {
     final order = _selectedOrder;
     if (order == null || !_allScanned) return;
-    final idx = _orders.indexWhere((o) => o.id == order.id);
-    if (idx < 0) return;
-    // Assign a mock locker cell number
-    final updated = order.copyWith(
-      status: OrderStatus.collected,
-      lockerCell: 10 + idx,
-    );
-    setState(() {
-      _orders[idx] = updated;
-      _selectedOrder = null;
-      _scannedSkus.clear();
-      _filterOrders();
+
+    showLikomatDialog(context).then((selectedCell) {
+      if (selectedCell == null) return; // user cancelled
+      final idx = _orders.indexWhere((o) => o.id == order.id);
+      if (idx < 0) return;
+      final updated = order.copyWith(
+        status: OrderStatus.collected,
+        lockerCell: selectedCell,
+      );
+      setState(() {
+        _orders[idx] = updated;
+        _selectedOrder = null;
+        _scannedSkus.clear();
+        _filterOrders();
+      });
     });
   }
 

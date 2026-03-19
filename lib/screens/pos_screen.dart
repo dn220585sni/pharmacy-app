@@ -6,6 +6,7 @@ import '../data/edk_offers.dart';
 import '../data/mock_drugs.dart';
 import '../services/auth_service.dart';
 import '../services/drug_service.dart';
+import '../services/loyalty_service.dart';
 import '../data/symptom_categories.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
@@ -1102,25 +1103,45 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   Future<void> _fetchLoyalty(String digits) async {
     setState(() => _isLoadingLoyalty = true);
-    await Future.delayed(const Duration(milliseconds: 600));
-    if (!mounted) return;
-    final lastDigit = int.tryParse(digits[digits.length - 1]) ?? 0;
-    final balance = (lastDigit + 1) * 25.0;
-    // Mask the phone number: +38050***9993
-    final masked = _maskPhone(digits);
-    _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
-    _loyaltyPhoneController.removeListener(_guardPhoneCursor);
-    _loyaltyPhoneController.text = masked;
-    _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
-    _loyaltyPhoneController.addListener(_guardPhoneCursor);
 
-    setState(() {
-      _customerLoyalty = CustomerLoyalty(
-        phone: '+380$digits',
-        bonusBalance: balance,
-      );
-      _isLoadingLoyalty = false;
-    });
+    try {
+      // Call SPL checkCard with phone number (+380 prefix)
+      final result = await LoyaltyService.checkCard('+380$digits');
+      if (!mounted) return;
+
+      if (!result.success) {
+        setState(() => _isLoadingLoyalty = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(result.errorMsg ?? 'Картку не знайдено'),
+            duration: const Duration(seconds: 2),
+          ));
+        }
+        return;
+      }
+
+      // Mask the phone number: +38050***9993
+      final masked = _maskPhone(digits);
+      _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
+      _loyaltyPhoneController.removeListener(_guardPhoneCursor);
+      _loyaltyPhoneController.text = masked;
+      _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
+      _loyaltyPhoneController.addListener(_guardPhoneCursor);
+
+      setState(() {
+        _customerLoyalty = CustomerLoyalty(
+          phone: '+380$digits',
+          bonusBalance: result.balanceAfter,
+          cardNo: result.cardNo,
+          firstName: result.firstName,
+          lastName: result.lastName,
+        );
+        _isLoadingLoyalty = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingLoyalty = false);
+    }
   }
 
   /// Format: +38050***9993 — show operator code + last 4 digits, mask the middle.

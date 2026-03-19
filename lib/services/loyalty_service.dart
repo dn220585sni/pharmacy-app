@@ -5,10 +5,10 @@ import 'package:http/http.dart' as http;
 /// Конфігурація Sparta Loyalty Platform (ЛАЙК).
 class SplConfig {
   static const baseUrl = 'https://demo.spartaloyalty.com/TestAnc2/api';
-  static const apiUser = 'testpos'; // TODO: уточнити у IT-директора
+  static const apiUser = 'anc_pos';
   static const apiToken = 'ukw4kztxvael528f5ufpnk67r6xzyvc5fm2dghu7';
   static const posKey = '87SNRM9ERH7YP6J6';
-  static const partnerCode = 'MR_TEST'; // TODO: уточнити
+  static const partnerCode = 'ANC';
   static const placeCode = 'MR_TEST_PLACE';
   static const ver = 4;
   static const timeout = Duration(seconds: 5);
@@ -98,8 +98,21 @@ class LoyaltyService {
   }
 
   /// Convert DateTime to milliseconds timestamp string (for signature).
+  /// SPL truncates to whole seconds, so we do the same.
   static String _dateToMs(DateTime dt) {
-    return dt.millisecondsSinceEpoch.toString();
+    final ms = (dt.millisecondsSinceEpoch ~/ 1000) * 1000;
+    return ms.toString();
+  }
+
+  /// Format DateTime as ISO8601 with timezone offset (e.g. "2026-03-19T16:25:42+03:00").
+  /// Required for SPL to correctly parse the date and match our signature timestamp.
+  static String _dateToIso(DateTime dt) {
+    final offset = dt.timeZoneOffset;
+    final sign = offset.isNegative ? '-' : '+';
+    final h = offset.inHours.abs().toString().padLeft(2, '0');
+    final m = (offset.inMinutes.abs() % 60).toString().padLeft(2, '0');
+    final base = dt.toIso8601String().split('.').first;
+    return '$base$sign$h:$m';
   }
 
   /// Generate unique requestId.
@@ -185,7 +198,7 @@ class LoyaltyService {
       'apiToken': SplConfig.apiToken,
       'partnerCode': SplConfig.partnerCode,
       'placeCode': SplConfig.placeCode,
-      'date': now.toIso8601String(),
+      'date': _dateToIso(now),
       'signature': signature,
     });
   }
@@ -215,11 +228,11 @@ class LoyaltyService {
       'apiToken': SplConfig.apiToken,
       'partnerCode': SplConfig.partnerCode,
       'placeCode': SplConfig.placeCode,
-      'date': now.toIso8601String(),
+      'date': _dateToIso(now),
       'signature': signature,
       'cardNo': cardNo,
       'extendedPersonalInfo': true,
-      'debugSignatureSkip': true, // TODO: remove for production
+      // 'debugSignatureSkip': true, // enable for debugging
     });
 
     if (result['errorCode']?.toString() != '0') {
@@ -280,11 +293,11 @@ class LoyaltyService {
       'mode': 'NGD',
       'partnerCode': SplConfig.partnerCode,
       'placeCode': SplConfig.placeCode,
-      'date': now.toIso8601String(),
+      'date': _dateToIso(now),
       'no': receiptNo,
       'signature': signature,
       'basket': basket,
-      'debugSignatureSkip': true, // TODO: remove for production
+      // 'debugSignatureSkip': true, // enable for debugging
     };
 
     if (cardNo != null && cardNo.isNotEmpty) {
@@ -341,11 +354,11 @@ class LoyaltyService {
       'apiToken': SplConfig.apiToken,
       'partnerCode': SplConfig.partnerCode,
       'placeCode': SplConfig.placeCode,
-      'date': now.toIso8601String(),
+      'date': _dateToIso(now),
       'signature': signature,
       'mobileCountry': '+380',
       'mobile': phone,
-      'debugSignatureSkip': true, // TODO: remove for production
+      // 'debugSignatureSkip': true, // enable for debugging
     });
 
     if (result['errorCode']?.toString() != '0') {

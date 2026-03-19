@@ -169,6 +169,40 @@ class Drug {
     );
   }
 
+  /// Create copy with updated usage info (from Product Browser API).
+  Drug copyWithUsageInfo(DrugUsageInfo? newUsageInfo, {String? newImageUrl}) {
+    return Drug(
+      id: id,
+      name: name,
+      manufacturer: manufacturer,
+      category: category,
+      price: price,
+      stock: stock,
+      unit: unit,
+      requiresPrescription: requiresPrescription,
+      expiryDate: expiryDate,
+      pharmacistBonus: pharmacistBonus,
+      isInTransit: isInTransit,
+      isOwnBrand: isOwnBrand,
+      analogueGroup: analogueGroup,
+      dosageForm: dosageForm,
+      inn: inn,
+      dosage: dosage,
+      storageConditions: storageConditions,
+      locationType: locationType,
+      locationCode: locationCode,
+      storageLocations: storageLocations,
+      usageInfo: newUsageInfo ?? usageInfo,
+      imageUrl: newImageUrl ?? imageUrl,
+      unitsPerPackage: unitsPerPackage,
+      intakeWarning: intakeWarning,
+      series: series,
+      serialNumber: serialNumber,
+      barcode: barcode,
+      availabilityStatus: availabilityStatus,
+    );
+  }
+
   bool get isExpiringSoon {
     if (expiryDate == null || isExpired) return false;
     final parts = expiryDate!.split('/');

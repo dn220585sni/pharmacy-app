@@ -7,6 +7,7 @@ import '../data/mock_drugs.dart';
 import '../services/auth_service.dart';
 import '../services/drug_service.dart';
 import '../services/loyalty_service.dart';
+import '../services/product_browser_service.dart';
 import '../data/symptom_categories.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
@@ -72,6 +73,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   Timer? _barcodeLookupTimer;
   Timer? _nameSearchTimer;
   bool _isServerLookup = false;
+
+  // ── Product Browser (drug safety tags) ──────────────────────────────────
+  /// Drug IDs we've already tried fetching from Product Browser.
+  final _productBrowserFetched = <String>{};
 
   /// A digit character waiting to be injected into the qty field on the
   /// next frame after focus transfers from the search field.
@@ -694,10 +699,55 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
         _isServerLookup = false;
       });
+      // Fetch safety tags for the selected drug
+      if (_selectedDrug != null) {
+        _fetchProductBrowserInfo(_selectedDrug!);
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() => _isServerLookup = false);
     }
+  }
+
+  // ── Product Browser: auto-fetch safety tags ──────────────────────────────
+
+  /// Fetch drug safety tags from Product Browser API (anc.ua).
+  /// Called when a drug is selected that doesn't have usageInfo yet.
+  void _fetchProductBrowserInfo(Drug drug) {
+    // Skip if already has usage info or already tried
+    if (drug.usageInfo != null) return;
+    if (_productBrowserFetched.contains(drug.id)) return;
+    _productBrowserFetched.add(drug.id);
+
+    // Build slug from drug name + article ID.
+    // Server drugs have id like "srv_12345" — extract the numeric part.
+    final articleId = drug.id.replaceFirst('srv_', '');
+
+    // Fire-and-forget async fetch
+    ProductBrowserService.fetchByNameAndId(drug.name, articleId).then((result) {
+      if (!mounted || result == null) return;
+
+      final usageInfo = result.toUsageInfo();
+      if (usageInfo == null) return;
+
+      // Update the drug in _searchResults and _selectedDrug
+      setState(() {
+        final updatedDrug = drug.copyWithUsageInfo(
+          usageInfo,
+          newImageUrl: result.imageUrl,
+        );
+
+        _searchResults = _searchResults.map((d) {
+          return d.id == drug.id ? updatedDrug : d;
+        }).toList();
+
+        if (_selectedDrug?.id == drug.id) {
+          _selectedDrug = updatedDrug;
+        }
+      });
+    }).catchError((_) {
+      // Silently ignore — product browser is optional enhancement
+    });
   }
 
   /// Call Caché GetSKUprice by barcode; if found, insert Drug at top of results.
@@ -774,6 +824,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         });
 
         _scrollToIndex(0);
+        _fetchProductBrowserInfo(drug);
       } else {
         setState(() => _isServerLookup = false);
       }
@@ -794,13 +845,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
     if (newIdx == currentIdx && _selectedDrug != null) return;
 
+    final newDrug = _searchResults[newIdx];
     setState(() {
-      _selectedDrug = _searchResults[newIdx];
+      _selectedDrug = newDrug;
       _focusQtyOnSelect = true;
       activeEdkOffer = null;
     });
 
     _scrollToIndex(newIdx);
+    _fetchProductBrowserInfo(newDrug);
   }
 
   void _scrollToIndex(int index) {
@@ -1935,12 +1988,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           cartQuantity: cartItem?.quantity ?? 0,
           cartFractionalQty: cartItem?.fractionalQty,
           pendingInput: isSelected ? _pendingQtyInput : null,
-          onTap: () => setState(() {
-            _selectedDrug = drug;
-            _focusQtyOnSelect = true;
-            _cartOpen = false;
-            activeEdkOffer = null;
-          }),
+          onTap: () {
+            setState(() {
+              _selectedDrug = drug;
+              _focusQtyOnSelect = true;
+              _cartOpen = false;
+              activeEdkOffer = null;
+            });
+            _fetchProductBrowserInfo(drug);
+          },
           onQuantityChanged: (qty) => _setQuantity(drug, qty),
           onFractionalChanged: (blisters) =>
               _setFractionalQuantity(drug, blisters),

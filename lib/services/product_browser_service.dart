@@ -227,8 +227,16 @@ class ProductBrowserResult {
     );
   }
 
-  /// Get product image URL (first available).
-  String? get imageUrl => pictures.isNotEmpty ? pictures.first : null;
+  /// Get product image URL (first available, with .jpg extension).
+  /// API returns URLs without extension — append .jpg for Google Storage.
+  String? get imageUrl {
+    if (pictures.isEmpty) return null;
+    final url = pictures.first;
+    // Already has extension → use as-is
+    if (url.contains(RegExp(r'\.\w{3,4}$'))) return url;
+    // Append .jpg for Google Storage URLs
+    return '$url.jpg';
+  }
 
   /// Get application method from tags (e.g. "Для порожнини рота").
   String? get applicationMethod {

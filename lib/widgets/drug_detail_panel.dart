@@ -365,30 +365,37 @@ class DrugDetailPanel extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 6),
-                      if (drug.instructionsUrl != null)
-                        GestureDetector(
-                          onTap: () => _openInstruction(drug.instructionsUrl!),
-                          child: Tooltip(
-                            message: 'Переглянути інструкцію',
-                            child: Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFEEF2FF),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: const Color(0xFFD6DEFF),
-                                  width: 1,
-                                ),
+                      GestureDetector(
+                        onTap: drug.instructionsUrl != null
+                            ? () => _openInstruction(drug.instructionsUrl!)
+                            : null,
+                        child: Tooltip(
+                          message: 'Переглянути інструкцію',
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: drug.instructionsUrl != null
+                                  ? const Color(0xFFEEF2FF)
+                                  : const Color(0xFFF4F5F8),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: drug.instructionsUrl != null
+                                    ? const Color(0xFFD6DEFF)
+                                    : const Color(0xFFE5E7EB),
+                                width: 1,
                               ),
-                              child: const Icon(
-                                Icons.description_rounded,
-                                size: 18,
-                                color: Color(0xFF1E7DC8),
-                              ),
+                            ),
+                            child: Icon(
+                              Icons.description_rounded,
+                              size: 18,
+                              color: drug.instructionsUrl != null
+                                  ? const Color(0xFF1E7DC8)
+                                  : const Color(0xFFD1D5DB),
                             ),
                           ),
                         ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 4),

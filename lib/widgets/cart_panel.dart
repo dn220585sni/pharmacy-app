@@ -847,25 +847,19 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   // ── Social projects section ─────────────────────────────────────────────
 
   static const _socialProjects = [
-    'Care365',
+    'Пакунок малюка',
+    'єПідтримка',
+    'Нацкешбек',
+    'Дарниця +',
+    'Знижка УБД',
+    'Медикард',
     'EPRUF',
-    'ІОЦ «За Рівні Права»',
-    'Алерговакцини',
-    'БО Асістанс',
-    'БФ Карітас',
-    'ГО «Азов Супровід»',
-    'Ебот кард',
-    'Знижка для УБД',
-    'МП Налбуфін',
-    'Медікард',
-    'Паперові 1303',
-    'Реімбурсація',
-    'Рецептурний відпуск',
-    'Сантен',
+    'АЗОВ супровід',
     'Серце Азовсталі',
     'Серце Азовсталі Ліки',
+    'Асістанс',
+    'Карітас',
     'Сонафарм',
-    'Центр прав. рішень',
   ];
 
   Widget _buildSocialProjectsSection() {
@@ -1261,10 +1255,6 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                 ],
               ),
             ),
-            const SizedBox(height: 10),
-
-            // ── Social projects ──────────────────────────────────────────
-            _buildSocialProjectsSection(),
             const SizedBox(height: 12),
 
             // Redemption code section shown directly

@@ -28,6 +28,7 @@ import '../widgets/order_success_dialog.dart';
 import '../widgets/out_of_stock_panel.dart';
 import '../widgets/reservation_success_dialog.dart';
 import '../widgets/prescription_panel.dart';
+import '../widgets/social_projects_panel.dart';
 import '../models/prescription.dart';
 import '../data/mock_nearby_pharmacies.dart';
 import '../models/nearby_pharmacy.dart';
@@ -102,6 +103,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// Key for accessing PrescriptionPanelState (Esc cascade).
   final _prescriptionPanelKey = GlobalKey<PrescriptionPanelState>();
 
+  /// Whether the social projects panel is shown in the right column.
+  bool _socialProjectsOpen = false;
+
+  /// Currently selected social project (shared with cart).
+  String? _selectedSocialProject;
+
+  /// Key for accessing SocialProjectsPanelState.
+  final _socialProjectsPanelKey = GlobalKey<SocialProjectsPanelState>();
+
   void _toggleCart() {
     setState(() {
       _cartOpen = !_cartOpen;
@@ -109,6 +119,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _ordersOpen = false;
         _expensesOpen = false;
         _prescriptionOpen = false;
+        _socialProjectsOpen = false;
       }
     });
     if (_cartOpen) _focusPhoneField();
@@ -121,6 +132,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _cartOpen = false;
         _expensesOpen = false;
         _prescriptionOpen = false;
+        _socialProjectsOpen = false;
       }
     });
     if (_ordersOpen) {
@@ -137,6 +149,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _cartOpen = false;
         _ordersOpen = false;
         _prescriptionOpen = false;
+        _socialProjectsOpen = false;
       }
     });
     if (_expensesOpen) {
@@ -153,12 +166,30 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _cartOpen = false;
         _ordersOpen = false;
         _expensesOpen = false;
+        _socialProjectsOpen = false;
       }
     });
     if (_prescriptionOpen) {
       _searchFocusNode.unfocus();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _prescriptionPanelKey.currentState?.focusSearch();
+      });
+    }
+  }
+
+  void _toggleSocialProjects() {
+    setState(() {
+      _socialProjectsOpen = !_socialProjectsOpen;
+      if (_socialProjectsOpen) {
+        _cartOpen = false;
+        _ordersOpen = false;
+        _expensesOpen = false;
+        _prescriptionOpen = false;
+      }
+    });
+    if (_socialProjectsOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _socialProjectsPanelKey.currentState?.focusSearch();
       });
     }
   }
@@ -208,7 +239,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Auth card is visible when a drug row is selected OR cart is open.
   /// Hidden only on the dashboard view (no drug selected, cart closed).
-  bool get _showAuthCard => _cartOpen || _ordersOpen || _expensesOpen || _prescriptionOpen || _selectedDrug != null;
+  bool get _showAuthCard => _cartOpen || _ordersOpen || _expensesOpen || _prescriptionOpen || _socialProjectsOpen || _selectedDrug != null;
 
   // ── Customer loyalty (phone auth) ─────────────────────────────────────────
   final _loyaltyPhoneController = TextEditingController();
@@ -319,7 +350,25 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _togglePrescription();
         return true;
       }
+      // Esc: close detail → close panel (macOS TextField blocks Focus.onKeyEvent)
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        if (_prescriptionPanelKey.currentState?.isDetailOpen == true) {
+          _prescriptionPanelKey.currentState?.closeDetail();
+        } else {
+          _togglePrescription();
+        }
+        return true;
+      }
       return false; // everything else — completely transparent
+    }
+
+    if (_socialProjectsOpen) {
+      // Esc: close social projects panel
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        _toggleSocialProjects();
+        return true;
+      }
+      return false; // let text input work in search field
     }
 
     // Don't intercept keys when a dialog/overlay is open (e.g. pharmacist picker)
@@ -424,6 +473,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _expensesPanelKey.currentState?.closeDetail();
       } else if (_expensesOpen) {
         setState(() => _expensesOpen = false);
+      } else if (_socialProjectsOpen) {
+        setState(() => _socialProjectsOpen = false);
       } else if (_outOfStockPanelKey.currentState?.isEdkActive == true) {
         _outOfStockPanelKey.currentState?.dismissEdk();
       } else if (activeEdkOffer != null) {
@@ -1020,6 +1071,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _selectedSymptom = 'Всі';
       _cartOpen = false;
       _prescriptionOpen = false;
+      _socialProjectsOpen = false;
+      _selectedSocialProject = null;
       _isServerLookup = false;
       _resetLoyalty();
       clearEdkState();
@@ -1368,7 +1421,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                                                           drugCatalog: mockDrugs,
                                                           onAddToCart: _addPrescriptionToCart,
                                                         )
-                                                      : _buildRightPanel(),
+                                                      : _socialProjectsOpen
+                                                          ? SocialProjectsPanel(
+                                                              key: _socialProjectsPanelKey,
+                                                              onClose: _toggleSocialProjects,
+                                                              selectedProject: _selectedSocialProject,
+                                                              onProjectSelected: (p) =>
+                                                                  setState(() => _selectedSocialProject = p),
+                                                            )
+                                                          : _buildRightPanel(),
                                     ),
                                   ],
                                 ),
@@ -1414,6 +1475,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                     expensesActive: _expensesOpen,
                     onPrescriptionTap: _togglePrescription,
                     prescriptionActive: _prescriptionOpen,
+                    onSocialProjectsTap: _toggleSocialProjects,
+                    socialProjectsActive: _socialProjectsOpen,
                   ),
                 ],
               ),

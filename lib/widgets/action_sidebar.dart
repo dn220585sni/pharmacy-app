@@ -27,6 +27,12 @@ class ActionSidebar extends StatelessWidget {
   /// Whether the prescription panel is currently open (shows active state).
   final bool prescriptionActive;
 
+  /// Callback when "Соціальні проекти" button is tapped.
+  final VoidCallback? onSocialProjectsTap;
+
+  /// Whether the social projects panel is currently open.
+  final bool socialProjectsActive;
+
   const ActionSidebar({
     super.key,
     this.onOrdersTap,
@@ -36,6 +42,8 @@ class ActionSidebar extends StatelessWidget {
     this.expensesActive = false,
     this.onPrescriptionTap,
     this.prescriptionActive = false,
+    this.onSocialProjectsTap,
+    this.socialProjectsActive = false,
   });
 
   @override
@@ -62,8 +70,11 @@ class ActionSidebar extends StatelessWidget {
         hotkeyLabel: 'Ctrl R',
       ),
       _SidebarItem(
-        tooltip: 'Пакунок малюка',
-        customChild: const _SwaddledBabyIcon(),
+        icon: Icons.volunteer_activism_rounded,
+        tooltip: 'Соціальні проекти',
+        onTap: onSocialProjectsTap,
+        isActive: socialProjectsActive,
+        hotkeyLabel: 'Ctrl S',
       ),
       _SidebarItem(
         icon: Icons.receipt_long_outlined,

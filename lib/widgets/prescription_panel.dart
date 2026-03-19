@@ -166,9 +166,9 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
   void initState() {
     super.initState();
     _numberController.addListener(() {
-      if (_errorMessage != null) {
-        setState(() => _errorMessage = null);
-      }
+      setState(() {
+        if (_errorMessage != null) _errorMessage = null;
+      });
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _numberFocusNode.requestFocus();
@@ -468,18 +468,10 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
               const SizedBox(height: 20),
 
               // ── Mock numbers hint ─────────────────────────────────────
-              if (!_isPaperType)
-                Builder(builder: (_) {
-                  // Filter hints: 1303 → digit-only numbers; standard → 0000-XXXX format
-                  final hints = mockPrescriptions.entries
-                      .where((e) {
-                        final isDigitOnly =
-                            RegExp(r'^\d+$').hasMatch(e.key);
-                        return _is1303Type ? isDigitOnly : !isDigitOnly;
-                      })
-                      .map((e) => e.key)
-                      .toList();
-                  if (hints.isEmpty) return const SizedBox.shrink();
+              Builder(builder: (_) {
+                if (_isPaperType) {
+                  // Paper types: show example format hint
+                  final example = _is1303Type ? '123456' : 'ABCD-1234-EF56';
                   return Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
@@ -495,33 +487,84 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
                                 fontWeight: FontWeight.w600,
                                 color: Color(0xFF9CA3AF))),
                         const SizedBox(height: 4),
-                        ...hints.map((n) => Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: GestureDetector(
-                                onTap: () {
-                                  // For standard types, strip "0000-" prefix
-                                  final value = !_is1303Type &&
-                                          n.startsWith('0000-')
-                                      ? n.substring(5)
-                                      : n;
-                                  _numberController.text = value;
-                                  setState(() {});
-                                },
-                                child: Text(n,
-                                    style: const TextStyle(
-                                        fontSize: 11,
-                                        fontFamily: 'monospace',
-                                        color: Color(0xFF1E7DC8),
-                                        decoration:
-                                            TextDecoration.underline,
-                                        decorationColor:
-                                            Color(0xFF1E7DC8))),
-                              ),
-                            )),
+                        GestureDetector(
+                          onTap: () {
+                            _numberController.text = example;
+                            setState(() {});
+                          },
+                          child: Text(
+                              _is1303Type ? example : '0000-$example',
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  fontFamily: 'monospace',
+                                  color: Color(0xFF1E7DC8),
+                                  decoration: TextDecoration.underline,
+                                  decorationColor: Color(0xFF1E7DC8))),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Для паперових рецептів дані заповнюються вручну',
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey.shade500,
+                              fontStyle: FontStyle.italic),
+                        ),
                       ],
                     ),
                   );
-                }),
+                }
+                // Electronic / Program 1303: filter mock prescriptions
+                final hints = mockPrescriptions.entries
+                    .where((e) {
+                      final isDigitOnly =
+                          RegExp(r'^\d+$').hasMatch(e.key);
+                      return _is1303Type ? isDigitOnly : !isDigitOnly;
+                    })
+                    .map((e) => e.key)
+                    .toList();
+                if (hints.isEmpty) return const SizedBox.shrink();
+                return Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF4F5F8),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Тестові номери:',
+                          style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF9CA3AF))),
+                      const SizedBox(height: 4),
+                      ...hints.map((n) => Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: GestureDetector(
+                              onTap: () {
+                                // For standard types, strip "0000-" prefix
+                                final value = !_is1303Type &&
+                                        n.startsWith('0000-')
+                                    ? n.substring(5)
+                                    : n;
+                                _numberController.text = value;
+                                setState(() {});
+                              },
+                              child: Text(n,
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      color: Color(0xFF1E7DC8),
+                                      decoration:
+                                          TextDecoration.underline,
+                                      decorationColor:
+                                          Color(0xFF1E7DC8))),
+                            ),
+                          )),
+                    ],
+                  ),
+                );
+              }),
             ],
           ),
         ),
@@ -541,6 +584,10 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
         if (_is1303Type != was1303) {
           _numberController.clear();
         }
+        // Auto-focus the number input after type selection
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _numberFocusNode.requestFocus();
+        });
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),

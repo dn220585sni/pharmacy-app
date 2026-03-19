@@ -74,6 +74,105 @@ final Map<String, Prescription> mockPrescriptions = {
       ),
     ],
   ),
+
+  // ── Електронний: 100% реімбурсація ────────────────────────────────────
+  '0000-9WQ4-7LB3-2H68': Prescription(
+    number: '0000-9WQ4-7LB3-2H68',
+    type: PrescriptionType.electronic,
+    status: PrescriptionStatus.active,
+    issueDate: DateTime(2026, 3, 10),
+    medication: 'Лоратадин 10 MG таблетки',
+    quantity: 20,
+    patientName: 'Мельник О. Г.',
+    patientAge: 34,
+    clinicName: 'КНП «Амбулаторія ЗПСМ №7»',
+    doctorName: 'Савченко І.П.',
+    programName:
+        'Бронхіальна астма та ХОЗЛ — Доступні ліки',
+    uuid: 'c42d7e19-3b56-4af0-81c2-987654fedcba',
+    items: const [
+      PrescriptionItem(
+        helsiName: 'ЛОРАТАДИН-ТЕВА',
+        helsiQuantity: 2,
+        inn: 'Лоратадин',
+        reimbursementPrice: 45.20,
+      ),
+    ],
+  ),
+
+  // ── Електронний: частково використаний ─────────────────────────────────
+  '0000-2FN8-4KP1-7R53': Prescription(
+    number: '0000-2FN8-4KP1-7R53',
+    type: PrescriptionType.electronic,
+    status: PrescriptionStatus.partiallyUsed,
+    issueDate: DateTime(2026, 2, 20),
+    medication: 'Омепразол 20 MG капсули',
+    quantity: 28,
+    patientName: 'Бондаренко В. С.',
+    patientAge: 48,
+    clinicName: 'КНП «Міська лікарня №5»',
+    doctorName: 'Яковлєва Н.М.',
+    programName: 'Рецептурні лікарські засоби',
+    uuid: 'd56e3a72-8c14-4bf9-a0d1-abcdef123456',
+    items: const [
+      PrescriptionItem(
+        helsiName: 'ОМЕПРАЗОЛ-ТЕВА',
+        helsiQuantity: 2,
+        inn: 'Омепразол',
+        reimbursementPrice: 28.90,
+      ),
+    ],
+  ),
+
+  // ── Програма 1303: Бісопролол ─────────────────────────────────────────
+  '385201': Prescription(
+    number: '385201',
+    type: PrescriptionType.program1303,
+    status: PrescriptionStatus.active,
+    issueDate: DateTime(2026, 3, 5),
+    medication: 'Бісопролол 5 MG таблетки',
+    quantity: 30,
+    patientName: 'Шевченко Г. М.',
+    patientAge: 62,
+    clinicName: 'КНП «Поліклініка №2»',
+    doctorName: 'Литвиненко В.А.',
+    programName:
+        'Серцево-судинні захворювання — Доступні ліки (1303)',
+    uuid: 'e67f4b83-9d25-4ca0-b1e2-bcdef2345678',
+    items: const [
+      PrescriptionItem(
+        helsiName: 'БІСОПРОЛОЛ-РАТІОФАРМ',
+        helsiQuantity: 1,
+        inn: 'Бісопролол',
+        reimbursementPrice: 52.30,
+      ),
+    ],
+  ),
+
+  // ── Програма 1303: Еналаприл ──────────────────────────────────────────
+  '917432': Prescription(
+    number: '917432',
+    type: PrescriptionType.program1303,
+    status: PrescriptionStatus.active,
+    issueDate: DateTime(2026, 3, 12),
+    medication: 'Еналаприл 10 MG таблетки',
+    quantity: 60,
+    patientName: 'Ткаченко А. П.',
+    patientAge: 58,
+    clinicName: 'КНП «Амбулаторія ЗПСМ №12»',
+    doctorName: 'Марчук О.І.',
+    programName:
+        'Артеріальна гіпертензія — Доступні ліки (1303)',
+    uuid: 'f89a5c94-0e36-4db1-c2f3-cdefg3456789',
+    items: const [
+      PrescriptionItem(
+        helsiName: 'ЕНАЛАПРИЛ-ЗДОРОВ\'Я',
+        helsiQuantity: 2,
+        inn: 'Еналаприл',
+        reimbursementPrice: 18.50,
+      ),
+    ],
+  ),
 };
 
 /// Find local inventory drugs matching a prescription's items by INN.

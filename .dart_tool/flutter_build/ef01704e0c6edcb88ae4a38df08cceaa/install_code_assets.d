@@ -1,1 +1,0 @@
- /Users/mykolashcherbyna/Desktop/pharmacy_app/.dart_tool/flutter_build/ef01704e0c6edcb88ae4a38df08cceaa/native_assets.json: 

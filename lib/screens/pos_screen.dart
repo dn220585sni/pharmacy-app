@@ -31,6 +31,8 @@ import '../widgets/out_of_stock_panel.dart';
 import '../widgets/reservation_success_dialog.dart';
 import '../widgets/prescription_panel.dart';
 import '../widgets/social_projects_panel.dart';
+import '../widgets/messages_panel.dart';
+import '../data/mock_messages.dart';
 import '../models/prescription.dart';
 import '../data/mock_nearby_pharmacies.dart';
 import '../models/nearby_pharmacy.dart';
@@ -122,6 +124,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// Key for accessing SocialProjectsPanelState.
   final _socialProjectsPanelKey = GlobalKey<SocialProjectsPanelState>();
 
+  /// Whether the messages panel is shown in the right column.
+  bool _messagesOpen = false;
+
+  /// Key for accessing MessagesPanelState.
+  final _messagesPanelKey = GlobalKey<MessagesPanelState>();
+
   void _toggleCart() {
     setState(() {
       _cartOpen = !_cartOpen;
@@ -130,6 +138,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _expensesOpen = false;
         _prescriptionOpen = false;
         _socialProjectsOpen = false;
+        _messagesOpen = false;
       }
     });
     if (_cartOpen) _focusPhoneField();
@@ -143,6 +152,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _expensesOpen = false;
         _prescriptionOpen = false;
         _socialProjectsOpen = false;
+        _messagesOpen = false;
       }
     });
     if (_ordersOpen) {
@@ -160,6 +170,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _ordersOpen = false;
         _prescriptionOpen = false;
         _socialProjectsOpen = false;
+        _messagesOpen = false;
       }
     });
     if (_expensesOpen) {
@@ -177,6 +188,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _ordersOpen = false;
         _expensesOpen = false;
         _socialProjectsOpen = false;
+        _messagesOpen = false;
       }
     });
     if (_prescriptionOpen) {
@@ -195,11 +207,30 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _ordersOpen = false;
         _expensesOpen = false;
         _prescriptionOpen = false;
+        _messagesOpen = false;
       }
     });
     if (_socialProjectsOpen) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _socialProjectsPanelKey.currentState?.focusSearch();
+      });
+    }
+  }
+
+  void _toggleMessages() {
+    setState(() {
+      _messagesOpen = !_messagesOpen;
+      if (_messagesOpen) {
+        _cartOpen = false;
+        _ordersOpen = false;
+        _expensesOpen = false;
+        _prescriptionOpen = false;
+        _socialProjectsOpen = false;
+      }
+    });
+    if (_messagesOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _messagesPanelKey.currentState?.focusSearch();
       });
     }
   }
@@ -249,7 +280,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Auth card is visible when a drug row is selected OR cart is open.
   /// Hidden only on the dashboard view (no drug selected, cart closed).
-  bool get _showAuthCard => _cartOpen || _ordersOpen || _expensesOpen || _prescriptionOpen || _socialProjectsOpen || _selectedDrug != null;
+  bool get _showAuthCard => _cartOpen || _ordersOpen || _expensesOpen || _prescriptionOpen || _socialProjectsOpen || _messagesOpen || _selectedDrug != null;
 
   // ── Customer loyalty (phone auth) ─────────────────────────────────────────
   final _loyaltyPhoneController = TextEditingController();
@@ -381,6 +412,25 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return false; // let text input work in search field
     }
 
+    if (_messagesOpen) {
+      // Ctrl+M: toggle messages panel (close it)
+      if (HardwareKeyboard.instance.isControlPressed &&
+          event.logicalKey == LogicalKeyboardKey.keyM) {
+        _toggleMessages();
+        return true;
+      }
+      // Esc: close detail/compose → close panel
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        if (_messagesPanelKey.currentState?.isDetailOpen == true) {
+          _messagesPanelKey.currentState?.closeDetail();
+        } else {
+          _toggleMessages();
+        }
+        return true;
+      }
+      return false; // let text input work
+    }
+
     // Don't intercept keys when a dialog/overlay is open (e.g. pharmacist picker)
     if (ModalRoute.of(context)?.isCurrent != true) return false;
 
@@ -408,6 +458,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       // ── Ctrl+R: toggle e-Prescription panel ────────────────────────────
       if (event.logicalKey == LogicalKeyboardKey.keyR) {
         _togglePrescription();
+        return true;
+      }
+      // ── Ctrl+M: toggle messages panel ────────────────────────────────
+      if (event.logicalKey == LogicalKeyboardKey.keyM) {
+        _toggleMessages();
         return true;
       }
       return false; // other Ctrl combos — pass through
@@ -1551,7 +1606,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                                                               onProjectSelected: (p) =>
                                                                   setState(() => _selectedSocialProject = p),
                                                             )
-                                                          : _buildRightPanel(),
+                                                          : _messagesOpen
+                                                              ? MessagesPanel(
+                                                                  key: _messagesPanelKey,
+                                                                  onClose: _toggleMessages,
+                                                                )
+                                                              : _buildRightPanel(),
                                     ),
                                   ],
                                 ),
@@ -1599,6 +1659,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                     prescriptionActive: _prescriptionOpen,
                     onSocialProjectsTap: _toggleSocialProjects,
                     socialProjectsActive: _socialProjectsOpen,
+                    onMessagesTap: _toggleMessages,
+                    messagesActive: _messagesOpen,
+                    unreadMessageCount: mockMessages
+                        .where((m) => m.folder == 'inbox' && !m.isRead)
+                        .length,
                   ),
                 ],
               ),

@@ -33,6 +33,15 @@ class ActionSidebar extends StatelessWidget {
   /// Whether the social projects panel is currently open.
   final bool socialProjectsActive;
 
+  /// Callback when "Повідомлення" button is tapped.
+  final VoidCallback? onMessagesTap;
+
+  /// Whether the messages panel is currently open.
+  final bool messagesActive;
+
+  /// Number of unread messages (badge on button).
+  final int unreadMessageCount;
+
   const ActionSidebar({
     super.key,
     this.onOrdersTap,
@@ -44,6 +53,9 @@ class ActionSidebar extends StatelessWidget {
     this.prescriptionActive = false,
     this.onSocialProjectsTap,
     this.socialProjectsActive = false,
+    this.onMessagesTap,
+    this.messagesActive = false,
+    this.unreadMessageCount = 0,
   });
 
   @override
@@ -52,6 +64,9 @@ class ActionSidebar extends StatelessWidget {
       _SidebarItem(
         icon: Icons.mail_outline_rounded,
         tooltip: 'Повідомлення',
+        onTap: onMessagesTap,
+        isActive: messagesActive,
+        badgeCount: unreadMessageCount,
         hotkeyLabel: 'Ctrl M',
       ),
       _SidebarItem(

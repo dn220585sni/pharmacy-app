@@ -142,7 +142,7 @@ class LoyaltyService {
         return {'errorCode': 'HTTP_${response.statusCode}', 'msg': response.reasonPhrase ?? 'error'};
       }
 
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
     } catch (e) {
       return {'errorCode': 'NETWORK_ERROR', 'msg': e.toString()};
     }

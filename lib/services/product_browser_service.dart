@@ -32,10 +32,47 @@ class ProductBrowserService {
 
       if (response.statusCode != 200) return null;
 
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
       final result = ProductBrowserResult.fromJson(json);
       _cache[slug] = result;
       return result;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetch Ukrainian indications from full_description HTML.
+  /// Extracts text between <h2>Показання</h2> and the next <h2>.
+  static Future<String?> fetchIndicationsUa(String fullDescriptionUrl) async {
+    if (fullDescriptionUrl.isEmpty) return null;
+    try {
+      final response = await _client
+          .get(Uri.parse(fullDescriptionUrl))
+          .timeout(_timeout);
+      if (response.statusCode != 200) return null;
+
+      final html = utf8.decode(response.bodyBytes);
+      // Find "Показання" / "Показання до застосування" section
+      final headerPattern = RegExp(
+        r'<h2>\s*Показання[^<]*</h2>(.*?)(?=<h2>)',
+        dotAll: true,
+        caseSensitive: false,
+      );
+      final match = headerPattern.firstMatch(html);
+      if (match == null) return null;
+
+      // Strip HTML tags, decode entities, trim
+      var text = match.group(1) ?? '';
+      text = text
+          .replaceAll(RegExp(r'<[^>]+>'), '')
+          .replaceAll('&nbsp;', ' ')
+          .replaceAll('&amp;', '&')
+          .replaceAll('&lt;', '<')
+          .replaceAll('&gt;', '>')
+          .replaceAll('&quot;', '"')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      return text.isEmpty ? null : text;
     } catch (_) {
       return null;
     }
@@ -51,6 +88,87 @@ class ProductBrowserService {
   ) async {
     final slug = buildSlug(name, articleId);
     return fetchBySlug(slug);
+  }
+
+  /// Search for a product via search API and fetch full details.
+  ///
+  /// Search API returns slug + picture + instructions in one call,
+  /// then fetches full product detail (with tags) by slug.
+  /// Tries drug name first (most relevant), falls back to article ID.
+  static Future<ProductBrowserResult?> searchAndFetch({
+    String? articleId,
+    String? name,
+  }) async {
+    // Try name search first (more specific for matching exact product)
+    if (name != null && name.isNotEmpty) {
+      final slug = await _searchSlug(name);
+      if (slug != null) return fetchBySlug(slug);
+    }
+    // Fall back to article ID search
+    if (articleId != null && articleId.isNotEmpty) {
+      final slug = await _searchSlug(articleId);
+      if (slug != null) return fetchBySlug(slug);
+    }
+    return null;
+  }
+
+  /// Search products by query string. Returns lightweight search results.
+  ///
+  /// Use this for analogue search (by INN/active substance name).
+  /// Returns up to [limit] results.
+  static Future<List<ProductSearchResult>> searchProducts(
+    String query, {
+    int limit = 20,
+  }) async {
+    if (query.isEmpty) return [];
+    try {
+      final url = Uri.parse(
+        'https://anc.ua/productbrowser/v2/ua/search/products'
+        '?q=${Uri.encodeComponent(query)}&city=$_defaultCity',
+      );
+      final response = await _client.get(url, headers: {
+        'Accept': 'application/json',
+      }).timeout(_timeout);
+
+      if (response.statusCode != 200) return [];
+
+      final json = jsonDecode(utf8.decode(response.bodyBytes))
+          as Map<String, dynamic>;
+      final products = json['products'] as List? ?? [];
+
+      return products
+          .take(limit)
+          .map((p) =>
+              ProductSearchResult.fromJson(p as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Search endpoint → return slug of first matching product.
+  static Future<String?> _searchSlug(String query) async {
+    try {
+      final url = Uri.parse(
+        'https://anc.ua/productbrowser/v2/ua/search/products'
+        '?q=${Uri.encodeComponent(query)}&city=$_defaultCity',
+      );
+      final response = await _client.get(url, headers: {
+        'Accept': 'application/json',
+      }).timeout(_timeout);
+
+      if (response.statusCode != 200) return null;
+
+      final json = jsonDecode(utf8.decode(response.bodyBytes))
+          as Map<String, dynamic>;
+      final products = json['products'] as List?;
+      if (products == null || products.isEmpty) return null;
+
+      final first = products.first as Map<String, dynamic>;
+      return first['link']?.toString();
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Clear cache (e.g. on app restart or memory pressure).
@@ -127,6 +245,7 @@ class ProductBrowserResult {
   final String? description;
   final String? information; // показання
   final String? instructionsUrl;
+  final String? fullDescriptionUrl;
   final List<String> pictures;
   final List<ProductTag> tags;
   final bool isMedication;
@@ -141,6 +260,7 @@ class ProductBrowserResult {
     this.description,
     this.information,
     this.instructionsUrl,
+    this.fullDescriptionUrl,
     this.pictures = const [],
     this.tags = const [],
     this.isMedication = false,
@@ -168,6 +288,7 @@ class ProductBrowserResult {
       description: json['description']?.toString(),
       information: json['information']?.toString(),
       instructionsUrl: json['instructions']?.toString(),
+      fullDescriptionUrl: json['full_description']?.toString(),
       pictures: (json['pictures'] as List? ?? [])
           .map((p) => p.toString())
           .toList(),
@@ -286,4 +407,63 @@ class ProductTag {
   }
 
   bool get isSafetyTag => signType != null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lightweight search result (from /v2/ua/search/products)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class ProductSearchResult {
+  final String id;         // article code, e.g. "2321"
+  final String link;       // slug, e.g. "korvalol-krapli-oralni-flakon-25-ml-2321"
+  final String name;       // "Корвалол краплі оральні флакон 25 мл"
+  final double price;
+  final String? picture;   // product image URL
+  final String? producer;  // manufacturer name
+  final String? instructions; // instruction URL
+  final bool hasAnalogs;
+  final bool prescriptionOnly;
+  final List<String> categories;
+
+  const ProductSearchResult({
+    required this.id,
+    required this.link,
+    required this.name,
+    required this.price,
+    this.picture,
+    this.producer,
+    this.instructions,
+    this.hasAnalogs = false,
+    this.prescriptionOnly = false,
+    this.categories = const [],
+  });
+
+  factory ProductSearchResult.fromJson(Map<String, dynamic> json) {
+    final cats = (json['categories'] as List? ?? [])
+        .map((c) => (c as Map<String, dynamic>)['name']?.toString() ?? '')
+        .where((n) => n.isNotEmpty)
+        .toList();
+
+    // Picture URL: append .jpg if no extension
+    String? pic = json['picture']?.toString();
+    if (pic != null && !pic.contains(RegExp(r'\.\w{3,4}$'))) {
+      pic = '$pic.jpg';
+    }
+
+    return ProductSearchResult(
+      id: json['id']?.toString() ?? '',
+      link: json['link']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      price: (json['price'] as num?)?.toDouble() ?? 0,
+      picture: pic,
+      producer: (json['producer'] as Map?)?['name']?.toString(),
+      instructions: json['instructions']?.toString(),
+      hasAnalogs: json['hasAnalogs'] == true,
+      prescriptionOnly: json['prescription_only'] == true,
+      categories: cats,
+    );
+  }
+
+  /// Get image URL (with .jpg extension fix).
+  String? get imageUrl => picture;
 }

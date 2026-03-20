@@ -74,9 +74,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   Timer? _nameSearchTimer;
   bool _isServerLookup = false;
 
-  // ── Product Browser (drug safety tags) ──────────────────────────────────
+  // ── Product Browser (drug safety tags + external analogues) ─────────────
   /// Drug IDs we've already tried fetching from Product Browser.
   final _productBrowserFetched = <String>{};
+  /// External analogues from anc.ua search API (by INN/active substance).
+  List<ProductSearchResult> _externalAnalogues = [];
+  /// Drug ID for which external analogues are currently loaded.
+  String? _externalAnaloguesForDrugId;
 
   /// A digit character waiting to be injected into the qty field on the
   /// next frame after focus transfers from the search field.
@@ -699,9 +703,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
         _isServerLookup = false;
       });
-      // Fetch safety tags for the selected drug
+      // Fetch safety tags + external analogues for the selected drug
       if (_selectedDrug != null) {
         _fetchProductBrowserInfo(_selectedDrug!);
+        _fetchExternalAnalogues(_selectedDrug!);
       }
     } catch (_) {
       if (!mounted) return;
@@ -711,32 +716,49 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   // ── Product Browser: auto-fetch safety tags ──────────────────────────────
 
-  /// Fetch drug safety tags from Product Browser API (anc.ua).
-  /// Called when a drug is selected that doesn't have usageInfo yet.
+  /// Fetch drug info from Product Browser API (anc.ua).
+  /// Enriches drug with images, instructions, indications, usage info.
   void _fetchProductBrowserInfo(Drug drug) {
-    // Skip if already has usage info or already tried
-    if (drug.usageInfo != null) return;
+    // Skip if already tried this drug
     if (_productBrowserFetched.contains(drug.id)) return;
     _productBrowserFetched.add(drug.id);
 
-    // Build slug from drug name + article ID.
-    // Server drugs have id like "srv_12345" — extract the numeric part.
-    final articleId = drug.id.replaceFirst('srv_', '');
+    // Use pre-mapped slug if available, otherwise search by article ID / name
+    Future<ProductBrowserResult?> future;
+    if (drug.productBrowserSlug != null && drug.productBrowserSlug!.isNotEmpty) {
+      future = ProductBrowserService.fetchBySlug(drug.productBrowserSlug!);
+    } else {
+      // Server drugs have id like "srv_12345" — extract the numeric part.
+      final articleId = drug.id.replaceFirst('srv_', '');
+      // Search API finds slug by article ID or name, then fetches full details
+      future = ProductBrowserService.searchAndFetch(
+        articleId: articleId,
+        name: drug.name,
+      );
+    }
 
     // Fire-and-forget async fetch
-    ProductBrowserService.fetchByNameAndId(drug.name, articleId).then((result) {
+    future.then((result) async {
       if (!mounted || result == null) return;
 
       final usageInfo = result.toUsageInfo();
+
+      // Fetch Ukrainian indications from full_description or instructions HTML
+      String? indicationsUa;
+      final descUrl = result.fullDescriptionUrl ?? result.instructionsUrl;
+      if (descUrl != null) {
+        indicationsUa = await ProductBrowserService.fetchIndicationsUa(descUrl);
+      }
+
+      if (!mounted) return;
 
       // Update the drug in _searchResults and _selectedDrug
       setState(() {
         final updatedDrug = drug.copyWithProductBrowser(
           usageInfo: usageInfo,
           imageUrl: result.imageUrl,
-          indications: result.information,
+          indications: indicationsUa ?? result.information,
           instructionsUrl: result.instructionsUrl,
-          applicationMethod: result.applicationMethod,
           countryOfOrigin: result.countryOfOrigin,
         );
 
@@ -751,6 +773,27 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }).catchError((_) {
       // Silently ignore — product browser is optional enhancement
     });
+  }
+
+  /// Fetch external analogues from anc.ua by INN (active substance).
+  /// Fire-and-forget async: updates _externalAnalogues on success.
+  void _fetchExternalAnalogues(Drug drug) {
+    // Only fetch if drug has INN and we haven't loaded for this drug yet
+    if (drug.inn == null || drug.inn!.isEmpty) return;
+    if (_externalAnaloguesForDrugId == drug.id) return;
+
+    _externalAnaloguesForDrugId = drug.id;
+    setState(() => _externalAnalogues = []);
+
+    // Search by INN to find analogues from the entire market
+    ProductBrowserService.searchProducts(drug.inn!, limit: 15).then((results) {
+      if (!mounted) return;
+      if (_selectedDrug?.id != drug.id) return; // user changed selection
+
+      setState(() {
+        _externalAnalogues = results;
+      });
+    }).catchError((_) {});
   }
 
   /// Call Caché GetSKUprice by barcode; if found, insert Drug at top of results.
@@ -828,6 +871,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
         _scrollToIndex(0);
         _fetchProductBrowserInfo(drug);
+        _fetchExternalAnalogues(drug);
       } else {
         setState(() => _isServerLookup = false);
       }
@@ -857,6 +901,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
     _scrollToIndex(newIdx);
     _fetchProductBrowserInfo(newDrug);
+    _fetchExternalAnalogues(newDrug);
   }
 
   void _scrollToIndex(int index) {
@@ -1644,6 +1689,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                       key: const ValueKey('detail'),
                       drug: _selectedDrug,
                       analogues: _analogues,
+                      externalAnalogues: _externalAnalogues,
                       onSelectAnalogue: _selectAnalogue,
                       onStorageLocationChanged: _onStorageLocationChanged,
                       earnedAmount: _totalEarned,
@@ -1999,6 +2045,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
               activeEdkOffer = null;
             });
             _fetchProductBrowserInfo(drug);
+            _fetchExternalAnalogues(drug);
           },
           onQuantityChanged: (qty) => _setQuantity(drug, qty),
           onFractionalChanged: (blisters) =>

@@ -80,6 +80,7 @@ class Drug {
   final String? intakeWarning;     // e.g. "Вживайте тільки після їжі!" (from external service)
 
   // ── Product Browser fields (fetched from anc.ua API) ─────────────────────
+  final String? productBrowserSlug; // e.g. "korvalol-krapli-oralni-flakon-25-ml-2321"
   final String? indications;       // показання: "ангіна, фарингіт, стоматит..."
   final String? instructionsUrl;   // URL to full drug instruction HTML
   final String? applicationMethod; // спосіб застосування: "Для порожнини рота"
@@ -118,6 +119,7 @@ class Drug {
     this.imageUrl,
     this.unitsPerPackage,
     this.intakeWarning,
+    this.productBrowserSlug,
     this.indications,
     this.instructionsUrl,
     this.applicationMethod,
@@ -172,6 +174,7 @@ class Drug {
       imageUrl: imageUrl,
       unitsPerPackage: unitsPerPackage,
       intakeWarning: intakeWarning,
+      productBrowserSlug: productBrowserSlug,
       indications: indications,
       instructionsUrl: instructionsUrl,
       applicationMethod: applicationMethod,
@@ -217,6 +220,7 @@ class Drug {
       imageUrl: imageUrl ?? this.imageUrl,
       unitsPerPackage: unitsPerPackage,
       intakeWarning: intakeWarning,
+      productBrowserSlug: productBrowserSlug,
       indications: indications ?? this.indications,
       instructionsUrl: instructionsUrl ?? this.instructionsUrl,
       applicationMethod: applicationMethod ?? this.applicationMethod,

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../models/drug.dart';
+import '../services/product_browser_service.dart';
 import 'drug_list_item.dart'; // for kColBadge
+import 'instruction_dialog.dart';
 import 'shift_dashboard.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,9 +143,10 @@ class _LocationChip extends StatelessWidget {
 // DrugDetailPanel
 // ─────────────────────────────────────────────────────────────────────────────
 
-class DrugDetailPanel extends StatelessWidget {
+class DrugDetailPanel extends StatefulWidget {
   final Drug? drug;
   final List<Drug> analogues;
+  final List<ProductSearchResult> externalAnalogues;
   final void Function(Drug) onSelectAnalogue;
   final void Function(StorageLocationType type, String code, bool applyToCart)? onStorageLocationChanged;
   /// Passed through to ShiftDashboard when drug == null.
@@ -154,10 +156,31 @@ class DrugDetailPanel extends StatelessWidget {
     super.key,
     required this.drug,
     required this.analogues,
+    this.externalAnalogues = const [],
     required this.onSelectAnalogue,
     this.onStorageLocationChanged,
     this.earnedAmount = 0.0,
   });
+
+  @override
+  State<DrugDetailPanel> createState() => _DrugDetailPanelState();
+}
+
+class _DrugDetailPanelState extends State<DrugDetailPanel> {
+  bool _indicationsExpanded = false;
+  bool _usageExpanded = true;
+  bool _analoguesExpanded = true;
+
+  /// Reset collapse state when drug changes.
+  @override
+  void didUpdateWidget(DrugDetailPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.drug?.id != widget.drug?.id) {
+      _indicationsExpanded = false;
+      _usageExpanded = true;
+      _analoguesExpanded = true;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -174,19 +197,21 @@ class DrugDetailPanel extends StatelessWidget {
         ],
       ),
       clipBehavior: Clip.antiAlias,
-      child: drug == null ? _buildEmptyState() : _buildContent(drug!),
+      child: widget.drug == null
+          ? _buildEmptyState()
+          : _buildContent(widget.drug!, context),
     );
   }
 
   // ── Empty state ─────────────────────────────────────────────────────────────
 
   Widget _buildEmptyState() {
-    return ShiftDashboard(earnedAmount: earnedAmount);
+    return ShiftDashboard(earnedAmount: widget.earnedAmount);
   }
 
   // ── Main content ────────────────────────────────────────────────────────────
 
-  Widget _buildContent(Drug drug) {
+  Widget _buildContent(Drug drug, BuildContext context) {
     final hasStorage = drug.storageConditions != null ||
         drug.storageLocations != null ||
         (drug.locationType != null && drug.locationCode != null);
@@ -195,80 +220,96 @@ class DrugDetailPanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ── Fixed: header ───────────────────────────────────────────────────
-        _buildHeader(drug),
+        _buildHeader(drug, context),
         _buildDivider(),
 
-        // ── Показання (indications from Product Browser) ──────────────────
+        // ── Показання (always visible, 2-line preview, expandable) ─────────
         if (drug.indications != null && drug.indications!.isNotEmpty) ...[
-          _buildIndications(drug),
+          _buildIndicationsSection(drug),
           _buildDivider(),
         ],
 
-        // ── Fixed: usage properties ─────────────────────────────────────────
+        // ── Основні властивості (collapsible, collapsed by default) ─────────
         if (drug.usageInfo != null) ...[
-          _buildUsageProperties(drug),
+          _buildCollapsibleHeader(
+            'Основні властивості',
+            expanded: _usageExpanded,
+            onTap: () => setState(() =>
+                _usageExpanded = !_usageExpanded),
+          ),
+          if (_usageExpanded) _buildUsageProperties(drug),
           _buildDivider(),
         ],
 
-        // ── Fixed: analogues section label + column headers ─────────────────
-        _buildSectionHeader(
-            'Аналоги', count: analogues.isEmpty ? null : analogues.length),
+        // ── Аналоги (collapsible, expanded by default) ──────────────────────
+        _buildCollapsibleHeader(
+          'Аналоги',
+          expanded: _analoguesExpanded,
+          onTap: () => setState(() =>
+              _analoguesExpanded = !_analoguesExpanded),
+        ),
 
-        if (analogues.isEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline_rounded,
-                    size: 14, color: Color(0xFFD1D5DB)),
-                const SizedBox(width: 6),
-                Text(
-                  'Аналоги відсутні',
-                  style: TextStyle(
-                      color: Colors.grey.shade400, fontSize: 12.5),
-                ),
-              ],
+        if (_analoguesExpanded) ...[
+          if (widget.externalAnalogues.isEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline_rounded,
+                      size: 14, color: Color(0xFFD1D5DB)),
+                  const SizedBox(width: 6),
+                  Text(
+                    drug.inn != null
+                        ? 'Пошук аналогів...'
+                        : 'Аналоги відсутні',
+                    style: TextStyle(
+                        color: Colors.grey.shade400, fontSize: 12.5),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const Spacer(),
+            const Spacer(),
+          ] else ...[
+            // Fixed column headers
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
+              child: const Row(
+                children: [
+                  SizedBox(width: kColBadge),
+                  Expanded(
+                    child: Text('Назва',
+                        style: TextStyle(
+                            color: Color(0xFF9CA3AF),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500)),
+                  ),
+                  SizedBox(
+                    width: 72,
+                    child: Text('Ціна',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                            color: Color(0xFF9CA3AF),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500)),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, thickness: 1, color: Color(0xFFF3F4F6)),
+
+            // ── Scrollable: analogue rows from API ────────────────────────
+            Expanded(
+              child: ListView(
+                children: widget.externalAnalogues.asMap().entries.map((e) =>
+                    _ExternalAnalogueRow(
+                      product: e.value,
+                      isEven: e.key.isEven,
+                    )).toList(),
+              ),
+            ),
+          ],
         ] else ...[
-          // Fixed column headers
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
-            child: const Row(
-              children: [
-                SizedBox(width: kColBadge),
-                Expanded(
-                  child: Text('Назва',
-                      style: TextStyle(
-                          color: Color(0xFF9CA3AF),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500)),
-                ),
-                SizedBox(
-                  width: 72,
-                  child: Text('Ціна',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                          color: Color(0xFF9CA3AF),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500)),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1, thickness: 1, color: Color(0xFFF3F4F6)),
-
-          // ── Scrollable: only the analogue rows ──────────────────────────
-          Expanded(
-            child: ListView(
-              children: analogues.asMap().entries.map((e) => _AnalogueDetailRow(
-                    drug: e.value,
-                    isEven: e.key.isEven,
-                    onTap: () => onSelectAnalogue(e.value),
-                  )).toList(),
-            ),
-          ),
+          const Spacer(),
         ],
 
         // ── Fixed bottom: storage location ──────────────────────────────────
@@ -276,7 +317,7 @@ class DrugDetailPanel extends StatelessWidget {
           _buildDivider(),
           _StorageSection(
             drug: drug,
-            onChanged: onStorageLocationChanged,
+            onChanged: widget.onStorageLocationChanged,
           ),
         ],
       ],
@@ -334,7 +375,7 @@ class DrugDetailPanel extends StatelessWidget {
 
   // ── Header: photo + name + meta + instruction link ──────────────────────────
 
-  Widget _buildHeader(Drug drug) {
+  Widget _buildHeader(Drug drug, BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
       child: IntrinsicHeight(
@@ -367,7 +408,7 @@ class DrugDetailPanel extends StatelessWidget {
                       const SizedBox(width: 6),
                       GestureDetector(
                         onTap: drug.instructionsUrl != null
-                            ? () => _openInstruction(drug.instructionsUrl!)
+                            ? () => _openInstruction(context, drug.instructionsUrl!)
                             : null,
                         child: Tooltip(
                           message: 'Переглянути інструкцію',
@@ -426,51 +467,100 @@ class DrugDetailPanel extends StatelessWidget {
     if (drug.category.isNotEmpty) parts.add(drug.category);
     if (drug.manufacturer.isNotEmpty) parts.add(drug.manufacturer);
     if (drug.countryOfOrigin != null) parts.add(drug.countryOfOrigin!);
-    if (drug.applicationMethod != null) parts.add(drug.applicationMethod!);
     return parts.join('  ·  ');
   }
 
-  // ── Open instruction URL ──────────────────────────────────────────────────
+  // ── Collapsible section header ────────────────────────────────────────────
 
-  void _openInstruction(String url) {
-    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-  }
-
-  // ── Indications section ───────────────────────────────────────────────────
-
-  Widget _buildIndications(Drug drug) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.medical_information_outlined,
-                  size: 14, color: Color(0xFF1E7DC8)),
-              SizedBox(width: 6),
-              Text(
-                'Показання',
-                style: TextStyle(
+  Widget _buildCollapsibleHeader(
+    String title, {
+    required bool expanded,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
                   color: Color(0xFF1C1C2E),
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            drug.indications!,
-            style: const TextStyle(
-              color: Color(0xFF6B7280),
-              fontSize: 12,
-              height: 1.4,
             ),
-            maxLines: 4,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+            Icon(
+              expanded
+                  ? Icons.keyboard_arrow_up_rounded
+                  : Icons.keyboard_arrow_down_rounded,
+              size: 18,
+              color: const Color(0xFF9CA3AF),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Open instruction URL ──────────────────────────────────────────────────
+
+  void _openInstruction(BuildContext context, String url) {
+    showInstructionDialog(context, url);
+  }
+
+  // ── Indications body (shown when expanded) ───────────────────────────────
+
+  Widget _buildIndicationsSection(Drug drug) {
+    return GestureDetector(
+      onTap: () => setState(() =>
+          _indicationsExpanded = !_indicationsExpanded),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Показання',
+                    style: TextStyle(
+                      color: Color(0xFF1C1C2E),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Icon(
+                  _indicationsExpanded
+                      ? Icons.keyboard_arrow_up_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                  size: 18,
+                  color: const Color(0xFF9CA3AF),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              drug.indications!,
+              maxLines: _indicationsExpanded ? null : 2,
+              overflow: _indicationsExpanded
+                  ? TextOverflow.visible
+                  : TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -558,11 +648,7 @@ class DrugDetailPanel extends StatelessWidget {
           dispensingText, dispensingStatus),
     ];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader('Основні властивості'),
-        Padding(
+    return Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
           child: Column(
             children: [
@@ -579,8 +665,6 @@ class DrugDetailPanel extends StatelessWidget {
                 ),
             ],
           ),
-        ),
-      ],
     );
   }
 
@@ -1150,107 +1234,97 @@ class _UsagePropCell extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Analogue row (inline in detail panel)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// Analogue row (from API search)
+// ═══════════════════════════════════════════════════════════════════════════
 
-class _AnalogueDetailRow extends StatelessWidget {
-  final Drug drug;
+class _ExternalAnalogueRow extends StatelessWidget {
+  final ProductSearchResult product;
   final bool isEven;
-  final VoidCallback onTap;
 
-  const _AnalogueDetailRow({
-    required this.drug,
+  const _ExternalAnalogueRow({
+    required this.product,
     required this.isEven,
-    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isDimmed = (drug.stock == 0 && !drug.isInTransit) || drug.isExpired;
-    final textColor =
-        isDimmed ? const Color(0xFFB0B7C3) : const Color(0xFF1C1C2E);
-
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        color: isEven ? Colors.white : const Color(0xFFF8F9FB),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Row(
-          children: [
-            SizedBox(width: kColBadge, child: _buildBadge()),
-            Expanded(
-              child: Text(
-                drug.name,
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
+    return Container(
+      color: isEven ? const Color(0xFFFAFBFC) : const Color(0xFFF5F6F8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      child: Row(
+        children: [
+          // Small product image
+          SizedBox(
+            width: kColBadge,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: product.imageUrl != null
+                  ? Image.network(
+                      product.imageUrl!,
+                      width: 26,
+                      height: 26,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _placeholder(),
+                    )
+                  : _placeholder(),
+            ),
+          ),
+          // Product name + producer
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  product.name,
+                  style: const TextStyle(
+                    color: Color(0xFF6B7280),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
-                overflow: TextOverflow.ellipsis,
+                if (product.producer != null)
+                  Text(
+                    product.producer!,
+                    style: const TextStyle(
+                      color: Color(0xFFB0B7C3),
+                      fontSize: 10,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          // Price
+          SizedBox(
+            width: 72,
+            child: Text(
+              '${product.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
               ),
             ),
-            SizedBox(
-              width: 72,
-              child: Text(
-                '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildBadge() {
-    if (drug.isInTransit) {
-      return _badgeBox(
-        const Color(0xFFF4F5F8),
-        const Icon(Icons.local_shipping_outlined,
-            size: 14, color: Color(0xFF9CA3AF)),
-      );
-    }
-    if (drug.isExpired || drug.isExpiringSoon) {
-      final color =
-          drug.isExpired ? const Color(0xFFEF4444) : const Color(0xFFF59E0B);
-      return _badgeBox(
-        color.withValues(alpha: 0.1),
-        Icon(Icons.hourglass_bottom_rounded, size: 14, color: color),
-      );
-    }
-    if (drug.pharmacistBonus != null) {
-      return _badgeBox(
-        const Color(0xFFFFF8E7),
-        Text(
-          '${drug.pharmacistBonus}',
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Color(0xFFB8860B),
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      );
-    }
-    return const SizedBox(width: kColBadge);
-  }
-
-  Widget _badgeBox(Color bg, Widget child) {
+  Widget _placeholder() {
     return Container(
-      width: 28,
-      height: 28,
+      width: 26,
+      height: 26,
       decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(6),
+        color: const Color(0xFFEEF2FF),
+        borderRadius: BorderRadius.circular(4),
       ),
-      alignment: Alignment.center,
-      child: child,
+      child: const Icon(Icons.medication_outlined, size: 14, color: Color(0xFFB0B7C3)),
     );
   }
 }
+

@@ -129,6 +129,7 @@ final List<Drug> mockDrugs = [
     barcode: '4820191580014',
     imageUrl: 'asset:assets/images/paracetamol.jpg',
     unitsPerPackage: 2,
+    productBrowserSlug: 'paratsetamol-darnitsya-tabletki-500-mg-10-46996',
     usageInfo: DrugUsageInfo(
       adults: UsageStatus.ok,
       children: UsageStatus.ok,
@@ -166,6 +167,7 @@ final List<Drug> mockDrugs = [
     serialNumber: '9876543210',
     barcode: '4820009510328',
     unitsPerPackage: 3,
+    productBrowserSlug: 'ibuprofen-400-tabletki-400-mg-20-tehnolog-1062792',
     usageInfo: _uiNsaid,
     intakeWarning: 'Вживайте тільки після їжі!',
   ),
@@ -221,6 +223,7 @@ final List<Drug> mockDrugs = [
     serialNumber: '3021948576',
     barcode: '4820025500048',
     unitsPerPackage: 2,
+    productBrowserSlug: 'amoksil-tabletki-500-mg-20-229',
     usageInfo: _uiAntibiotics,
   ),
   const Drug(
@@ -247,6 +250,7 @@ final List<Drug> mockDrugs = [
     series: '157',
     serialNumber: '7839201465',
     barcode: '4820191581011',
+    productBrowserSlug: 'loratadin-tabletki-10-mg-blister-10-2791',
     usageInfo: _uiAntihistamine,
   ),
   const Drug(
@@ -270,6 +274,7 @@ final List<Drug> mockDrugs = [
     series: '203',
     serialNumber: '4501239876',
     barcode: '4820009511432',
+    productBrowserSlug: 'omeprazol-darnitsya-kapsuli-20-mg-10-3438',
     usageInfo: _uiGastro,
     intakeWarning: 'Вживайте за 30 хв до їжі, не розжовуючи!',
   ),
@@ -356,6 +361,7 @@ final List<Drug> mockDrugs = [
     series: '672',
     serialNumber: '8903412567',
     barcode: '5000158073799',
+    productBrowserSlug: 'nurofen-forte-tabletki-vkriti-obolonkoyu-400-mg-blister-12-27482',
     usageInfo: DrugUsageInfo(
       adults: UsageStatus.ok,
       children: UsageStatus.caution,
@@ -387,6 +393,7 @@ final List<Drug> mockDrugs = [
     series: '318',
     serialNumber: '3300567812',
     barcode: '5997001302286',
+    productBrowserSlug: 'no-shpa-tabletki-40-mg-flakon-100-25379',
     usageInfo: _uiSpasmolytics,
   ),
   const Drug(
@@ -408,6 +415,7 @@ final List<Drug> mockDrugs = [
     series: '129',
     serialNumber: '7700234561',
     barcode: '4820025512090',
+    productBrowserSlug: 'validol-darnitsya-tabletki-60-mg-10-902',
     usageInfo: DrugUsageInfo(
       adults: UsageStatus.ok,
       children: UsageStatus.unknown,
@@ -437,6 +445,7 @@ final List<Drug> mockDrugs = [
     series: '556',
     serialNumber: '5511223344',
     barcode: '4820191583016',
+    productBrowserSlug: 'korvalol-krapli-oralni-flakon-25-ml-2321',
     usageInfo: DrugUsageInfo(
       adults: UsageStatus.ok,
       children: UsageStatus.unknown,
@@ -1162,6 +1171,7 @@ final List<Drug> mockDrugs = [
     series: '683',
     serialNumber: '6781234590',
     barcode: '4820025509019',
+    productBrowserSlug: 'amoksil-tabletki-500-mg-20-229',
     usageInfo: _uiAntibiotics,
   ),
   const Drug(

@@ -152,6 +152,14 @@ class DrugDetailPanel extends StatefulWidget {
   /// Passed through to ShiftDashboard when drug == null.
   final double earnedAmount;
 
+  // ── Рука допомоги ──────────────────────────────────────────────────────
+  final bool isCustomerAuthorized;
+  final int helpingHandRemaining;
+  final double? helpingHandPrice; // discounted price (null = not yet checked)
+  final VoidCallback? onRequestHelpingHand;
+  final VoidCallback? onFocusPhone;
+  final void Function(String phone, double discountPrice, int? fractionalQty)? onHelpingHandAddToCart;
+
   const DrugDetailPanel({
     super.key,
     required this.drug,
@@ -160,6 +168,12 @@ class DrugDetailPanel extends StatefulWidget {
     required this.onSelectAnalogue,
     this.onStorageLocationChanged,
     this.earnedAmount = 0.0,
+    this.isCustomerAuthorized = false,
+    this.helpingHandRemaining = 10,
+    this.helpingHandPrice,
+    this.onRequestHelpingHand,
+    this.onFocusPhone,
+    this.onHelpingHandAddToCart,
   });
 
   @override
@@ -167,7 +181,9 @@ class DrugDetailPanel extends StatefulWidget {
 }
 
 class _DrugDetailPanelState extends State<DrugDetailPanel> {
-  bool _indicationsExpanded = false;
+  // ── Feature flag: set to false to hide the price from the header ────────
+  static const bool _showPriceInHeader = true;
+
   bool _usageExpanded = true;
   bool _analoguesExpanded = true;
 
@@ -176,7 +192,6 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
   void didUpdateWidget(DrugDetailPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.drug?.id != widget.drug?.id) {
-      _indicationsExpanded = false;
       _usageExpanded = true;
       _analoguesExpanded = true;
     }
@@ -223,18 +238,9 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
         _buildHeader(drug, context),
         _buildDivider(),
 
-        // ── Показання (skeleton while loading, then content) ────────────
-        _buildIndicationsSection(drug),
-        _buildDivider(),
-
         // ── Основні властивості (collapsible, collapsed by default) ─────────
         if (drug.usageInfo != null) ...[
-          _buildCollapsibleHeader(
-            'Основні властивості',
-            expanded: _usageExpanded,
-            onTap: () => setState(() =>
-                _usageExpanded = !_usageExpanded),
-          ),
+          _buildUsageHeader(drug, context),
           if (_usageExpanded) _buildUsageProperties(drug),
           _buildDivider(),
         ],
@@ -340,82 +346,78 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          drug.name,
-                          style: const TextStyle(
-                            color: Color(0xFF1C1C2E),
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                            height: 1.3,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      GestureDetector(
-                        onTap: drug.instructionsUrl != null
-                            ? () => _openInstruction(context, drug.instructionsUrl!)
-                            : null,
-                        child: Tooltip(
-                          message: 'Переглянути інструкцію',
-                          child: Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: drug.instructionsUrl != null
-                                  ? const Color(0xFFEEF2FF)
-                                  : const Color(0xFFF4F5F8),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: drug.instructionsUrl != null
-                                    ? const Color(0xFFD6DEFF)
-                                    : const Color(0xFFE5E7EB),
-                                width: 1,
-                              ),
-                            ),
-                            child: Icon(
-                              Icons.description_rounded,
-                              size: 18,
-                              color: drug.instructionsUrl != null
-                                  ? const Color(0xFF1E7DC8)
-                                  : const Color(0xFFD1D5DB),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
                   Text(
-                    _buildMetaLine(drug),
+                    drug.name,
                     style: const TextStyle(
-                      color: Color(0xFF9CA3AF),
-                      fontSize: 11.5,
+                      color: Color(0xFF1C1C2E),
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 6),
-                  _buildBatchInfo(drug),
+                  _buildMetaColumn(drug),
                 ],
               ),
             ),
+
+            // ── Price (toggle: _showPriceInHeader) ───────────────────────────
+            if (_showPriceInHeader && drug.price > 0) ...[
+              const SizedBox(width: 8),
+              Center(
+                child: Text(
+                  '${drug.price.toStringAsFixed(2)} ₴',
+                  style: const TextStyle(
+                    color: Color(0xFF1E7DC8),
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
     );
   }
 
-  // ── Meta line: category · manufacturer · country ──────────────────────────
+  // ── Meta column: category / manufacturer / country (vertical) ──────────────
 
-  String _buildMetaLine(Drug drug) {
-    final parts = <String>[];
-    if (drug.category.isNotEmpty) parts.add(drug.category);
-    if (drug.manufacturer.isNotEmpty) parts.add(drug.manufacturer);
-    if (drug.countryOfOrigin != null) parts.add(drug.countryOfOrigin!);
-    return parts.join('  ·  ');
+  Widget _buildMetaColumn(Drug drug) {
+    final items = <(IconData, String)>[
+      if (drug.category.isNotEmpty)
+        (Icons.local_pharmacy_outlined, drug.category),
+      if (drug.manufacturer.isNotEmpty)
+        (Icons.business_outlined, drug.manufacturer),
+      if (drug.countryOfOrigin != null)
+        (Icons.flag_outlined, drug.countryOfOrigin!),
+    ];
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: items.map((item) => Padding(
+        padding: const EdgeInsets.only(bottom: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(item.$1, size: 12, color: const Color(0xFFB0B5BF)),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                item.$2,
+                style: const TextStyle(
+                  color: Color(0xFF9CA3AF),
+                  fontSize: 11.5,
+                  height: 1.2,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      )).toList(),
+    );
   }
 
   // ── Collapsible section header ────────────────────────────────────────────
@@ -519,133 +521,81 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
     );
   }
 
+  // ── Основні властивості header with instruction icon ──────────────────────
+
+  Widget _buildUsageHeader(Drug drug, BuildContext context) {
+    return GestureDetector(
+      onTap: () => setState(() => _usageExpanded = !_usageExpanded),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Основні властивості',
+                style: const TextStyle(
+                  color: Color(0xFF1C1C2E),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            // Instruction icon
+            GestureDetector(
+              onTap: drug.instructionsUrl != null
+                  ? () => _openInstruction(context, drug.instructionsUrl!)
+                  : null,
+              child: Tooltip(
+                message: 'Інструкція',
+                child: Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: drug.instructionsUrl != null
+                        ? const Color(0xFFEEF2FF)
+                        : const Color(0xFFF4F5F8),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: drug.instructionsUrl != null
+                          ? const Color(0xFFD6DEFF)
+                          : const Color(0xFFE5E7EB),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.description_rounded,
+                    size: 14,
+                    color: drug.instructionsUrl != null
+                        ? const Color(0xFF1E7DC8)
+                        : const Color(0xFFD1D5DB),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              _usageExpanded
+                  ? Icons.keyboard_arrow_up_rounded
+                  : Icons.keyboard_arrow_down_rounded,
+              size: 18,
+              color: const Color(0xFF9CA3AF),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── Open instruction URL ──────────────────────────────────────────────────
 
   void _openInstruction(BuildContext context, String url) {
     showInstructionDialog(context, url);
   }
 
-  // ── Indications body (shown when expanded) ───────────────────────────────
-
-  Widget _buildIndicationsSection(Drug drug) {
-    final hasData = drug.indications != null && drug.indications!.isNotEmpty;
-
-    return GestureDetector(
-      onTap: hasData
-          ? () => setState(() =>
-              _indicationsExpanded = !_indicationsExpanded)
-          : null,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Показання',
-                    style: TextStyle(
-                      color: Color(0xFF1C1C2E),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (hasData)
-                  Icon(
-                    _indicationsExpanded
-                        ? Icons.keyboard_arrow_up_rounded
-                        : Icons.keyboard_arrow_down_rounded,
-                    size: 18,
-                    color: const Color(0xFF9CA3AF),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            if (hasData)
-              Text(
-                drug.indications!,
-                maxLines: _indicationsExpanded ? null : 2,
-                overflow: _indicationsExpanded
-                    ? TextOverflow.visible
-                    : TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF6B7280),
-                  fontSize: 12,
-                  height: 1.4,
-                ),
-              )
-            else
-              // Skeleton placeholder — fixed height, no layout jump
-              Column(
-                children: [
-                  _skeletonLine(widthFraction: 1.0),
-                  const SizedBox(height: 5),
-                  _skeletonLine(widthFraction: 0.75),
-                ],
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _skeletonLine({required double widthFraction}) {
-    return FractionallySizedBox(
-      widthFactor: widthFraction,
-      alignment: Alignment.centerLeft,
-      child: Container(
-        height: 12,
-        decoration: BoxDecoration(
-          color: const Color(0xFFE5E7EB),
-          borderRadius: BorderRadius.circular(4),
-        ),
-      ),
-    );
-  }
-
   // ── Batch / serial info (under drug name in header) ────────────────────────
 
-  Widget _buildBatchInfo(Drug drug) {
-    final rows = <_InfoRow>[
-      if (drug.series != null)
-        _InfoRow('Серія', drug.series!),
-      if (drug.serialNumber != null)
-        _InfoRow('Сер. номер', drug.serialNumber!),
-      if (drug.barcode != null)
-        _InfoRow('Штрих-код', drug.barcode!),
-    ];
-
-    if (rows.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: rows.map((r) => Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: Row(
-          children: [
-            Text(
-              '${r.label}: ',
-              style: const TextStyle(
-                color: Color(0xFF9CA3AF),
-                fontSize: 11.5,
-              ),
-            ),
-            Text(
-              r.value,
-              style: const TextStyle(
-                color: Color(0xFF374151),
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      )).toList(),
-    );
-  }
+  // _buildBatchInfo moved to _StorageSectionState
 
   // ── Usage properties grid ───────────────────────────────────────────────────
 
@@ -853,25 +803,77 @@ class _StorageSectionState extends State<_StorageSection> {
 
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-          child: Column(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Robot chip (always read-only)
-              if (_robotLocation != null) ...[
-                _LocationChip(
-                  type: StorageLocationType.robot,
-                  code: _robotLocation!.code,
-                  qty: _robotLocation!.qty,
-                ),
-                const SizedBox(height: 8),
-              ],
+              // Left: location chips + edit
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Robot chip (always read-only)
+                    if (_robotLocation != null) ...[
+                      _LocationChip(
+                        type: StorageLocationType.robot,
+                        code: _robotLocation!.code,
+                        qty: _robotLocation!.qty,
+                      ),
+                      const SizedBox(height: 8),
+                    ],
 
-              // Editable non-robot location
-              _isEditing ? _buildEditRow() : _buildReadOnlyRow(),
+                    // Editable non-robot location
+                    _isEditing ? _buildEditRow() : _buildReadOnlyRow(),
+                  ],
+                ),
+              ),
+
+              // Right: batch info (Серія, Сер. номер, Штрих-код)
+              if (!_isEditing) _buildBatchInfo(),
             ],
           ),
         ),
       ],
+    );
+  }
+
+  // ── Batch info (right side of storage section) ──────────────────────────
+  Widget _buildBatchInfo() {
+    final drug = widget.drug;
+    final rows = <(String, String)>[
+      if (drug.series != null) ('Серія', drug.series!),
+      if (drug.serialNumber != null) ('Сер. №', drug.serialNumber!),
+      if (drug.barcode != null) ('Штрих-код', drug.barcode!),
+    ];
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: rows.map((r) => Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${r.$1}: ',
+                style: const TextStyle(
+                  color: Color(0xFF9CA3AF),
+                  fontSize: 11,
+                ),
+              ),
+              Text(
+                r.$2,
+                style: const TextStyle(
+                  color: Color(0xFF374151),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        )).toList(),
+      ),
     );
   }
 
@@ -1361,6 +1363,620 @@ class _ExternalAnalogueRow extends StatelessWidget {
       ),
     );
   }
-
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Heart icon button for "Рука допомоги"
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _HelpingHandButton extends StatelessWidget {
+  final Drug drug;
+  final bool isAuthorized;
+  final int remaining;
+  final double? discountPrice;
+  final VoidCallback? onRequest;
+  final void Function(String phone, double discountPrice, int? fractionalQty)? onAddToCart;
+
+  const _HelpingHandButton({
+    required this.drug,
+    required this.isAuthorized,
+    required this.remaining,
+    this.discountPrice,
+    this.onRequest,
+    this.onAddToCart,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final active = isAuthorized;
+    final color = active ? const Color(0xFFD4637A) : const Color(0xFFD1D5DB);
+
+    return GestureDetector(
+      onTap: remaining > 0 ? () => _onTap(context) : null,
+      child: Tooltip(
+        message: 'Рука допомоги',
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: active ? const Color(0xFFFDF2F4) : const Color(0xFFF4F5F8),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: active ? const Color(0xFFF5D0D8) : const Color(0xFFE5E7EB),
+              width: 1,
+            ),
+          ),
+          child: Icon(Icons.favorite_rounded, size: 16, color: color),
+        ),
+      ),
+    );
+  }
+
+  void _onTap(BuildContext context) {
+    if (!isAuthorized) {
+      // Not authorized → open full dialog with phone input
+      showDialog(
+        context: context,
+        builder: (ctx) => HelpingHandDialog(
+          drug: drug,
+          remaining: remaining,
+          onConfirm: (phone, price, fractionalQty) {
+            onAddToCart?.call(phone, price, fractionalQty);
+          },
+        ),
+      );
+    } else if (discountPrice == null) {
+      // Authorized but discount not yet revealed → reveal it
+      onRequest?.call();
+    } else {
+      // Discount already revealed → show popover with price
+      _showPricePopover(context);
+    }
+  }
+
+  void _showPricePopover(BuildContext context) {
+    final RenderBox box = context.findRenderObject() as RenderBox;
+    final Offset offset = box.localToGlobal(Offset.zero);
+    final Size size = box.size;
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (ctx) => Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () => Navigator.pop(ctx),
+              behavior: HitTestBehavior.opaque,
+              child: const SizedBox.expand(),
+            ),
+          ),
+          Positioned(
+            top: offset.dy + size.height + 6,
+            left: (offset.dx + size.width / 2 - 130)
+                .clamp(8.0, MediaQuery.of(ctx).size.width - 268),
+            child: Material(
+              elevation: 8,
+              shadowColor: const Color(0x1A000000),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: 260,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFEEEFF2)),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                      style: const TextStyle(
+                        color: Color(0xFF9CA3AF),
+                        fontSize: 12,
+                        decoration: TextDecoration.lineThrough,
+                        decorationColor: Color(0xFFD1D5DB),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.arrow_forward_rounded,
+                        size: 13, color: Color(0xFFD4637A)),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${discountPrice!.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                      style: const TextStyle(
+                        color: Color(0xFFD4637A),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFECFDF5),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '-${(drug.price - discountPrice!).toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                        style: const TextStyle(
+                          color: Color(0xFF10B981),
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full-screen centered dialog for "Рука допомоги" (when not authorized)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class HelpingHandDialog extends StatefulWidget {
+  final Drug drug;
+  final int remaining;
+  /// phone, discountPrice, fractionalQty (null = whole package)
+  final void Function(String phone, double discountPrice, int? fractionalQty) onConfirm;
+
+  const HelpingHandDialog({
+    super.key,
+    required this.drug,
+    required this.remaining,
+    required this.onConfirm,
+  });
+
+  @override
+  State<HelpingHandDialog> createState() => _HelpingHandDialogState();
+}
+
+class _HelpingHandDialogState extends State<HelpingHandDialog> {
+  final _phoneCtrl = TextEditingController();
+  final _phoneFocus = FocusNode();
+  double? _discountPrice;
+  bool _isLoading = false;
+
+  /// true = whole package, false = blister (fractional).
+  bool _wholePackage = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneCtrl.addListener(_onPhoneChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _phoneFocus.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _phoneCtrl.removeListener(_onPhoneChanged);
+    _phoneCtrl.dispose();
+    _phoneFocus.dispose();
+    super.dispose();
+  }
+
+  void _onPhoneChanged() {
+    final digits = _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+    if (digits.length >= 9 && _discountPrice == null && !_isLoading) {
+      _checkDiscount(digits);
+    }
+  }
+
+  Future<void> _checkDiscount(String digits) async {
+    setState(() => _isLoading = true);
+    await Future.delayed(const Duration(milliseconds: 400));
+    if (!mounted) return;
+
+    final price = widget.drug.price;
+    final pct = price > 100 ? 0.20 : price > 50 ? 0.18 : 0.15;
+    setState(() {
+      _discountPrice = (price * (1 - pct)).roundToDouble();
+      _isLoading = false;
+    });
+  }
+
+  void _confirm() {
+    if (_discountPrice == null) return;
+    final digits = _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+    Navigator.pop(context);
+    final fractionalQty = (!_wholePackage && widget.drug.unitsPerPackage != null)
+        ? 1
+        : null;
+    widget.onConfirm(digits, _discountPrice!, fractionalQty);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 380,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE8F3FB),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.favorite_rounded,
+                      size: 18, color: Color(0xFF1E7DC8)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Рука допомоги',
+                        style: TextStyle(
+                          color: Color(0xFF1C1C2E),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        widget.drug.name,
+                        style: const TextStyle(
+                          color: Color(0xFF9CA3AF),
+                          fontSize: 12,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F3FB),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    'Залишилось: ${widget.remaining}',
+                    style: const TextStyle(
+                      color: Color(0xFF1E7DC8),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 20),
+
+            // Phone input
+            const Text(
+              'Номер телефону клієнта',
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _phoneCtrl,
+              focusNode: _phoneFocus,
+              keyboardType: TextInputType.phone,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1C1C2E),
+                letterSpacing: 0.5,
+              ),
+              decoration: InputDecoration(
+                hintText: '050 123 45 67',
+                hintStyle: const TextStyle(
+                  color: Color(0xFFD1D5DB),
+                  fontWeight: FontWeight.w400,
+                ),
+                prefixText: '+380 ',
+                prefixStyle: const TextStyle(
+                  color: Color(0xFF9CA3AF),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+                suffixIcon: _isLoading
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFF1E7DC8),
+                          ),
+                        ),
+                      )
+                    : _discountPrice != null
+                        ? const Icon(Icons.check_circle_rounded,
+                            color: Color(0xFF22C55E))
+                        : null,
+                filled: true,
+                fillColor: const Color(0xFFF9FAFB),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide:
+                      const BorderSide(color: Color(0xFF1E7DC8), width: 1.5),
+                ),
+              ),
+              onSubmitted: (_) {
+                if (_discountPrice != null) _confirm();
+              },
+            ),
+
+            // Price section (appears after discount is calculated)
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut,
+              alignment: Alignment.topCenter,
+              child: _discountPrice != null
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 16),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF4F7FA),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFFE5E7EB),
+                            width: 0.5,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            // Old price
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Звичайна ціна',
+                                  style: TextStyle(
+                                    color: Color(0xFF9CA3AF),
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${widget.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                                  style: const TextStyle(
+                                    color: Color(0xFF9CA3AF),
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    decoration: TextDecoration.lineThrough,
+                                    decorationColor: Color(0xFFD1D5DB),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(width: 14),
+                            const Icon(Icons.arrow_forward_rounded,
+                                size: 16, color: Color(0xFF1E7DC8)),
+                            const SizedBox(width: 14),
+                            // New price
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Зі знижкою',
+                                  style: TextStyle(
+                                    color: Color(0xFF1E7DC8),
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${_discountPrice!.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                                  style: const TextStyle(
+                                    color: Color(0xFF1C1C2E),
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Spacer(),
+                            // Savings
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFECFDF5),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '-${(widget.drug.price - _discountPrice!).toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                                style: const TextStyle(
+                                  color: Color(0xFF10B981),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+
+            // Blister / Package toggle (only for splittable drugs, after discount revealed)
+            if (widget.drug.unitsPerPackage != null && _discountPrice != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 14),
+                child: Row(
+                  children: [
+                    _QtyModeButton(
+                      label: 'Упаковка',
+                      isSelected: _wholePackage,
+                      onTap: () => setState(() => _wholePackage = true),
+                    ),
+                    const SizedBox(width: 8),
+                    _QtyModeButton(
+                      label: 'Блістер',
+                      isSelected: !_wholePackage,
+                      onTap: () => setState(() => _wholePackage = false),
+                    ),
+                  ],
+                ),
+              ),
+
+            const SizedBox(height: 20),
+
+            // Buttons
+            Row(
+              children: [
+                // Cancel
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF4F5F8),
+                        borderRadius: BorderRadius.circular(10),
+                        border:
+                            Border.all(color: const Color(0xFFE5E7EB)),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Відмінити',
+                            style: TextStyle(
+                              color: Color(0xFF6B7280),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          SizedBox(width: 6),
+                          Text(
+                            'Esc',
+                            style: TextStyle(
+                              color: Color(0xFFD1D5DB),
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Add to cart
+                Expanded(
+                  child: GestureDetector(
+                    onTap: _discountPrice != null ? _confirm : null,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      decoration: BoxDecoration(
+                        color: _discountPrice != null
+                            ? const Color(0xFF1E7DC8)
+                            : const Color(0xFFE5E7EB),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.add_shopping_cart_rounded,
+                            size: 16,
+                            color: _discountPrice != null
+                                ? Colors.white
+                                : const Color(0xFF9CA3AF),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Додати в чек',
+                            style: TextStyle(
+                              color: _discountPrice != null
+                                  ? Colors.white
+                                  : const Color(0xFF9CA3AF),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Toggle button for Упаковка / Блістер ──────────────────────────────────
+class _QtyModeButton extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _QtyModeButton({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? const Color(0xFF1E7DC8) : const Color(0xFFF4F5F8),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isSelected ? const Color(0xFF1E7DC8) : const Color(0xFFE5E7EB),
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? Colors.white : const Color(0xFF6B7280),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

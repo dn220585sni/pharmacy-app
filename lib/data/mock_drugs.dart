@@ -140,6 +140,7 @@ final List<Drug> mockDrugs = [
       pregnant: UsageStatus.caution,
       drivers: UsageStatus.ok,
     ),
+    hasHelpingHand: true,
   ),
   const Drug(
     id: '002',
@@ -200,6 +201,7 @@ final List<Drug> mockDrugs = [
       pregnantNote: 'протипоказано у I та III триместрі',
       drivers: UsageStatus.ok,
     ),
+    hasHelpingHand: true,
   ),
   const Drug(
     id: '004',
@@ -277,6 +279,7 @@ final List<Drug> mockDrugs = [
     productBrowserSlug: 'omeprazol-darnitsya-kapsuli-20-mg-10-3438',
     usageInfo: _uiGastro,
     intakeWarning: 'Вживайте за 30 хв до їжі, не розжовуючи!',
+    hasHelpingHand: true,
   ),
   const Drug(
     id: '007',
@@ -395,6 +398,7 @@ final List<Drug> mockDrugs = [
     barcode: '5997001302286',
     productBrowserSlug: 'no-shpa-tabletki-40-mg-flakon-100-25379',
     usageInfo: _uiSpasmolytics,
+    hasHelpingHand: true,
   ),
   const Drug(
     id: '011',
@@ -480,6 +484,7 @@ final List<Drug> mockDrugs = [
     serialNumber: '9900112233',
     barcode: '4820009514434',
     usageInfo: _uiDiuretics,
+    hasHelpingHand: true,
   ),
   const Drug(
     id: '014',
@@ -536,6 +541,7 @@ final List<Drug> mockDrugs = [
       pregnant: UsageStatus.contraindicated,
       drivers: UsageStatus.caution,
     ),
+    hasHelpingHand: true,
   ),
   const Drug(
     id: '016',
@@ -588,6 +594,7 @@ final List<Drug> mockDrugs = [
     serialNumber: '8899001122',
     barcode: '4620006081234',
     usageInfo: _uiPulmonology,
+    hasHelpingHand: true,
   ),
   const Drug(
     id: '018',
@@ -684,6 +691,7 @@ final List<Drug> mockDrugs = [
       pregnant: UsageStatus.caution,
       drivers: UsageStatus.ok,
     ),
+    hasHelpingHand: true,
   ),
   const Drug(
     id: '022',

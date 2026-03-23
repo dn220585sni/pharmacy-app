@@ -294,6 +294,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// Whether the customer has been authorized via loyalty phone.
   bool get _isCustomerAuthorized => _customerLoyalty != null;
 
+  // ── Рука допомоги (social discount program) ─────────────────────────────
+  int _helpingHandRemaining = 10;
+  final Map<String, double> _helpingHandPrices = {}; // drugId → discounted price
+  bool _showHelpingHandMarkers = false;
+  Timer? _helpingHandTimer;
+
   @override
   void initState() {
     super.initState();
@@ -360,6 +366,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void dispose() {
     _barcodeLookupTimer?.cancel();
     _nameSearchTimer?.cancel();
+    _helpingHandTimer?.cancel();
     HardwareKeyboard.instance.removeHandler(_handleGlobalKey);
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -676,6 +683,18 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _selectedDrug = null;
       }
     });
+
+    // ── Рука допомоги: show after 3s pause, hide when search cleared ─────
+    _helpingHandTimer?.cancel();
+    if (query.isEmpty) {
+      if (_showHelpingHandMarkers) {
+        setState(() => _showHelpingHandMarkers = false);
+      }
+    } else if (!_showHelpingHandMarkers) {
+      _helpingHandTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _showHelpingHandMarkers = true);
+      });
+    }
 
     // ── Server barcode lookup ──────────────────────────────────────────────
     // If the query looks like a barcode (8-13 digits), ask the live server.
@@ -1221,6 +1240,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
     _barcodeLookupTimer?.cancel();
     _nameSearchTimer?.cancel();
+    _helpingHandTimer?.cancel();
     setState(() {
       _cart.clear();
       _selectedDrug = null;
@@ -1229,9 +1249,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _cartOpen = false;
       _prescriptionOpen = false;
       _socialProjectsOpen = false;
+      _showHelpingHandMarkers = false;
       _selectedSocialProject = null;
       _isServerLookup = false;
       _resetLoyalty();
+      _helpingHandPrices.clear();
       clearEdkState();
     });
 
@@ -1340,6 +1362,87 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
   }
 
+  // ── Рука допомоги: reveal discounted price ─────────────────────────────
+  void _requestHelpingHand() {
+    final drug = _selectedDrug;
+    if (drug == null || !drug.hasHelpingHand) return;
+    if (_helpingHandRemaining <= 0) return;
+    if (_helpingHandPrices.containsKey(drug.id)) return; // already revealed
+
+    // Mock: discount 15-25% depending on drug price bracket
+    final discountPct = drug.price > 100 ? 0.20 : drug.price > 50 ? 0.18 : 0.15;
+    final discounted = (drug.price * (1 - discountPct)).roundToDouble();
+
+    setState(() {
+      _helpingHandPrices[drug.id] = discounted;
+      _helpingHandRemaining--;
+    });
+  }
+
+  // ── Рука допомоги: open dialog from table A ────────────────────────────
+  void _showHelpingHandDialog(Drug drug) {
+    showDialog(
+      context: context,
+      builder: (ctx) => HelpingHandDialog(
+        drug: drug,
+        remaining: _helpingHandRemaining,
+        onConfirm: (phone, price, fractionalQty) {
+          _onHelpingHandAddToCart(phone, price, fractionalQty, drug);
+        },
+      ),
+    );
+  }
+
+  // ── Рука допомоги: dialog confirmed with phone + discount ────────────────
+  void _onHelpingHandAddToCart(String phone, double discountPrice, int? fractionalQty, [Drug? overrideDrug]) {
+    final drug = overrideDrug ?? _selectedDrug;
+    if (drug == null) return;
+
+    setState(() {
+      // Store discount price
+      _helpingHandPrices[drug.id] = discountPrice;
+      _helpingHandRemaining--;
+
+      // Mock-authorize customer if not yet authorized
+      if (_customerLoyalty == null) {
+        final masked = '+380${phone.substring(0, 2)}***${phone.substring(phone.length - 4)}';
+        _customerLoyalty = CustomerLoyalty(
+          phone: '+380$phone',
+          bonusBalance: 0,
+          cardNo: 'HH-${phone.substring(phone.length - 4)}',
+        );
+        // Update phone field to show masked number
+        _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
+        _loyaltyPhoneController.removeListener(_guardPhoneCursor);
+        _loyaltyPhoneController.text = '$_loyaltyPhonePrefix$masked';
+        _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
+        _loyaltyPhoneController.addListener(_guardPhoneCursor);
+      }
+
+      // Add 1 unit to cart if not already there
+      final existing = _cart.indexWhere((c) => c.drug.id == drug.id);
+      if (existing < 0) {
+        _cart.add(CartItem(
+          drug: drug,
+          quantity: fractionalQty != null ? 1 : 1,
+          fractionalQty: fractionalQty,
+          discountPrice: discountPrice,
+        ));
+      } else {
+        // Update existing item with discount if it didn't have one
+        if (!_cart[existing].hasDiscount) {
+          _cart[existing] = CartItem(
+            drug: drug,
+            quantity: _cart[existing].quantity,
+            fractionalQty: fractionalQty ?? _cart[existing].fractionalQty,
+            prescriptionData: _cart[existing].prescriptionData,
+            discountPrice: discountPrice,
+          );
+        }
+      }
+    });
+  }
+
   void _confirmPhone() {
     final digits = _loyaltyPhoneController.text
         .substring(_loyaltyPhonePrefix.length)
@@ -1406,6 +1509,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _searchController.removeListener(_filterDrugs);
     _searchController.clear();
     _searchController.addListener(_filterDrugs);
+    _helpingHandTimer?.cancel();
     setState(() {
       _totalEarned += amount;
       _ordersOpen = false;
@@ -1413,6 +1517,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _selectedDrug = null;
       _searchResults = mockDrugs;
       _selectedSymptom = 'Всі';
+      _showHelpingHandMarkers = false;
+      _helpingHandPrices.clear();
       _resetLoyalty();
       clearEdkState();
     });
@@ -1758,6 +1864,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                       onSelectAnalogue: _selectAnalogue,
                       onStorageLocationChanged: _onStorageLocationChanged,
                       earnedAmount: _totalEarned,
+                      isCustomerAuthorized: _isCustomerAuthorized,
+                      helpingHandRemaining: _helpingHandRemaining,
+                      helpingHandPrice: _selectedDrug != null
+                          ? _helpingHandPrices[_selectedDrug!.id]
+                          : null,
+                      onRequestHelpingHand: _requestHelpingHand,
+                      onFocusPhone: () => _loyaltyPhoneFocusNode.requestFocus(),
+                      onHelpingHandAddToCart: (phone, price, frac) => _onHelpingHandAddToCart(phone, price, frac),
                     ),
     );
   }
@@ -2102,6 +2216,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           cartQuantity: cartItem?.quantity ?? 0,
           cartFractionalQty: cartItem?.fractionalQty,
           pendingInput: isSelected ? _pendingQtyInput : null,
+          showHelpingHandMarker: _showHelpingHandMarkers,
+          onHelpingHandTap: () => _showHelpingHandDialog(drug),
           onTap: () {
             setState(() {
               _selectedDrug = drug;

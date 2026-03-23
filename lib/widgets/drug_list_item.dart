@@ -18,6 +18,8 @@ class DrugListItem extends StatefulWidget {
   final int cartQuantity;
   final int? cartFractionalQty; // null = whole package mode
   final String? pendingInput; // digit to inject when qty field gets focused
+  final bool showHelpingHandMarker;
+  final VoidCallback? onHelpingHandTap;
   final VoidCallback onTap;
   final ValueChanged<int> onQuantityChanged;
   final ValueChanged<int>? onFractionalChanged; // Ctrl+digit → blisters
@@ -33,6 +35,8 @@ class DrugListItem extends StatefulWidget {
     required this.cartQuantity,
     this.cartFractionalQty,
     this.pendingInput,
+    this.showHelpingHandMarker = false,
+    this.onHelpingHandTap,
     required this.onTap,
     required this.onQuantityChanged,
     this.onFractionalChanged,
@@ -421,19 +425,49 @@ class _DrugListItemState extends State<DrugListItem> {
                         : const SizedBox(),
                   ),
 
-                  // Price
+                  // Price (+ helping hand tap zone)
                   SizedBox(
                     width: kColPrice,
-                    child: Text(
-                      drug.price > 0
-                          ? drug.price.toStringAsFixed(2).replaceAll('.', ',')
-                          : '—',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        color:
-                            isDimmed ? textSecondary : const Color(0xFF1C1C2E),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                    child: MouseRegion(
+                      cursor: drug.hasHelpingHand && !isDimmed && widget.showHelpingHandMarker
+                          ? SystemMouseCursors.click
+                          : SystemMouseCursors.basic,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: drug.hasHelpingHand && !isDimmed && widget.showHelpingHandMarker
+                            ? widget.onHelpingHandTap
+                            : null,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (drug.hasHelpingHand && !isDimmed && widget.showHelpingHandMarker)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 3),
+                                child: AnimatedOpacity(
+                                  opacity: 1.0,
+                                  duration: const Duration(milliseconds: 400),
+                                  child: Icon(
+                                    Icons.favorite_rounded,
+                                    size: 10,
+                                    color: const Color(0xFFE8A0B4),
+                                  ),
+                                ),
+                              ),
+                            Text(
+                              drug.price > 0
+                                  ? drug.price.toStringAsFixed(2).replaceAll('.', ',')
+                                  : '—',
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                color:
+                                    isDimmed ? textSecondary : const Color(0xFF1C1C2E),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),

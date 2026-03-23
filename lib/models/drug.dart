@@ -94,6 +94,9 @@ class Drug {
   // ── Availability (for out-of-stock drugs) ───────────────────────────────
   final DrugAvailabilityStatus? availabilityStatus;
 
+  // ── Рука допомоги (social discount program) ────────────────────────────
+  final bool hasHelpingHand;
+
   const Drug({
     required this.id,
     required this.name,
@@ -128,6 +131,7 @@ class Drug {
     this.serialNumber,
     this.barcode,
     this.availabilityStatus,
+    this.hasHelpingHand = false,
   });
 
   bool get isOutOfStock => stock == 0;
@@ -183,6 +187,7 @@ class Drug {
       serialNumber: serialNumber,
       barcode: barcode,
       availabilityStatus: availabilityStatus,
+      hasHelpingHand: hasHelpingHand,
     );
   }
 
@@ -229,6 +234,7 @@ class Drug {
       serialNumber: serialNumber,
       barcode: barcode,
       availabilityStatus: availabilityStatus,
+      hasHelpingHand: hasHelpingHand,
     );
   }
 

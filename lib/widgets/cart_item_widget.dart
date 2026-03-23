@@ -96,6 +96,37 @@ class CartItemWidget extends StatelessWidget {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
+                ] else if (item.hasDiscount) ...[
+                  Row(
+                    children: [
+                      // Heart icon
+                      const Icon(Icons.favorite_rounded, size: 10, color: Color(0xFFE8A0B4)),
+                      const SizedBox(width: 4),
+                      // Original price crossed out
+                      Text(
+                        '${item.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                        style: const TextStyle(
+                          color: Color(0xFFD1D5DB),
+                          fontSize: 10.5,
+                          decoration: TextDecoration.lineThrough,
+                          decorationColor: Color(0xFFD1D5DB),
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      // Arrow
+                      const Icon(Icons.arrow_forward_rounded, size: 10, color: Color(0xFF9CA3AF)),
+                      const SizedBox(width: 5),
+                      // Discount price
+                      Text(
+                        '${item.effectivePrice.toStringAsFixed(2).replaceAll('.', ',')} ₴ × ${item.displayQty}',
+                        style: const TextStyle(
+                          color: Color(0xFF1E7DC8),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
                 ] else
                   Text(
                     '${item.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴ × ${item.displayQty}',

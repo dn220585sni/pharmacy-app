@@ -51,6 +51,10 @@ class CacheApiClient {
 
   final http.Client _client = http.Client();
 
+  /// CSP session cookies — зберігаємо CSPSESSIONID + CSPWSERVERID
+  /// і передаємо в кожному наступному запиті.
+  String? _sessionCookie;
+
   /// Кодек windows-1251 для декодування кирилиці.
   /// Caché може віддавати в цьому кодуванні (залежить від настройки).
   static const _win1251 = 'windows-1251';
@@ -80,9 +84,17 @@ class CacheApiClient {
 
     for (var attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
+        final headers = <String, String>{};
+        if (_sessionCookie != null) {
+          headers['Cookie'] = _sessionCookie!;
+        }
+
         final response = await _client
-            .get(uri)
+            .get(uri, headers: headers)
             .timeout(Duration(seconds: ApiConfig.timeoutSeconds));
+
+        // Зберігаємо CSP session cookies з SET-COOKIE заголовків
+        _updateSessionCookies(response);
 
         // Retry on 503 Service Unavailable (Caché CSP gateway перевантажений)
         if (response.statusCode == 503 && attempt < _maxRetries) {
@@ -120,6 +132,44 @@ class CacheApiClient {
       }
     }
     return CacheResponse.error('Сервер недоступний після $_maxRetries спроб');
+  }
+
+  /// Витягує CSPSESSIONID та CSPWSERVERID з SET-COOKIE заголовків
+  /// і зберігає їх для передачі в наступних запитах.
+  void _updateSessionCookies(http.Response response) {
+    // http package об'єднує всі set-cookie в один рядок через ', '
+    final setCookie = response.headers['set-cookie'];
+    if (setCookie == null) return;
+
+    final cookies = <String, String>{};
+
+    // Parse existing session cookie to preserve values
+    if (_sessionCookie != null) {
+      for (final part in _sessionCookie!.split('; ')) {
+        final eq = part.indexOf('=');
+        if (eq > 0) {
+          cookies[part.substring(0, eq)] = part.substring(eq + 1);
+        }
+      }
+    }
+
+    // Extract cookie name=value from each SET-COOKIE entry
+    // Format: "NAME=VALUE; path=...; httpOnly;"
+    for (final entry in setCookie.split(RegExp(r',\s*(?=[A-Z])'))) {
+      final nameValue = entry.split(';').first.trim();
+      final eq = nameValue.indexOf('=');
+      if (eq > 0) {
+        final name = nameValue.substring(0, eq);
+        if (name.startsWith('CSPSESSIONID') || name == 'CSPWSERVERID') {
+          cookies[name] = nameValue.substring(eq + 1);
+        }
+      }
+    }
+
+    if (cookies.isNotEmpty) {
+      _sessionCookie =
+          cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
+    }
   }
 
   /// Декодує тіло HTTP-відповіді з урахуванням кодування.

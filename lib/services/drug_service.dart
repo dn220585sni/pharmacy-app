@@ -216,6 +216,97 @@ class SKUDetailResult {
     final s = v?.toString();
     return (s != null && s.isNotEmpty) ? s : null;
   }
+
+  // ── Parse intakeWarning → DrugUsageInfo ──────────────────────────────────
+  //
+  // Format from Caché:
+  //   "Можна:1:Дорослим_Тільки при...:2:Дітям_Не можна:3:Вагітним_..."
+  // Each segment: "Text:signType:Category_"
+  // signType: 1=ok, 2=caution, 3=contraindicated
+  //
+  // Category keywords → DrugUsageInfo fields:
+  //   Дорослим→adults, Дітям→children, Вагітним→pregnant,
+  //   Годуючим→nursing, Алергікам→allergics, Водіям→drivers,
+  //   Діабетикам→diabetics
+
+  DrugUsageInfo? toUsageInfo() {
+    if (intakeWarning == null || intakeWarning!.isEmpty) return null;
+
+    // Split by underscore to get segments per category
+    final segments = intakeWarning!.split('_');
+    final Map<String, _IntakeEntry> entries = {};
+
+    for (final seg in segments) {
+      if (seg.trim().isEmpty) continue;
+      // Each segment has parts separated by colons
+      // Pattern: ...text:signType:CategoryName  (last two colon-parts are signType + category)
+      final parts = seg.split(':');
+      if (parts.length < 2) continue;
+
+      // Last part is category name, second-to-last is signType
+      final category = parts.last.trim();
+      final signTypeStr = parts[parts.length - 2].trim();
+      final signType = int.tryParse(signTypeStr);
+      // Everything before signType:category is the description text
+      final text = parts.sublist(0, parts.length - 2).join(':').trim();
+
+      if (category.isNotEmpty && signType != null) {
+        entries[category] = _IntakeEntry(signType: signType, text: text);
+      }
+    }
+
+    if (entries.isEmpty) return null;
+
+    // Parse children age from text like "Тільки при наявності..." or "З 6 років"
+    String? childrenAge;
+    final childEntry = entries['Дітям'];
+    if (childEntry != null && childEntry.signType == 2) {
+      final match = RegExp(r'(\d[,.\d]*)').firstMatch(childEntry.text);
+      if (match != null) {
+        childrenAge = match.group(1)?.replaceAll(',', '.');
+      }
+    }
+
+    // Pregnant note for caution cases with extended text
+    String? pregnantNote;
+    final pregEntry = entries['Вагітним'];
+    if (pregEntry != null && pregEntry.signType == 2 && pregEntry.text.length > 15) {
+      pregnantNote = pregEntry.text;
+    }
+
+    return DrugUsageInfo(
+      adults: _signTypeToStatus(entries['Дорослим']?.signType),
+      children: entries.containsKey('Дітям')
+          ? _signTypeToStatus(childEntry?.signType)
+          : null,
+      childrenFromAge: childrenAge,
+      nursing: _signTypeToStatus(entries['Годуючим']?.signType),
+      diabetics: _signTypeToStatus(entries['Діабетикам']?.signType),
+      allergics: _signTypeToStatus(entries['Алергікам']?.signType),
+      pregnant: _signTypeToStatus(pregEntry?.signType),
+      pregnantNote: pregnantNote,
+      drivers: _signTypeToStatus(entries['Водіям']?.signType),
+    );
+  }
+
+  static UsageStatus _signTypeToStatus(int? signType) {
+    switch (signType) {
+      case 1:
+        return UsageStatus.ok;
+      case 2:
+        return UsageStatus.caution;
+      case 3:
+        return UsageStatus.contraindicated;
+      default:
+        return UsageStatus.unknown;
+    }
+  }
+}
+
+class _IntakeEntry {
+  final int signType;
+  final String text;
+  const _IntakeEntry({required this.signType, required this.text});
 }
 
 /// Сервіс для роботи з довідником препаратів.

@@ -903,7 +903,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           orElse: () => drug,
         );
         final updatedDrug = currentDrug.copyWithProductBrowser(
-          usageInfo: usageInfo,
+          // SKUDetail (internal) has priority for usageInfo over Product Browser
+          usageInfo: currentDrug.usageInfo == null ? usageInfo : null,
           imageUrl: result.imageUrl,
           indications: indicationsUa ?? result.information,
           instructionsUrl: result.instructionsUrl,
@@ -961,6 +962,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           analogueGroup: detail.analogueGroup,
           imageUrl: detail.imageUrl,
           intakeWarning: detail.intakeWarning,
+          usageInfo: detail.toUsageInfo(),
           skuCode: detail.skuCode,
           comingPrice: detail.comingPrice,
           comingCode: detail.comingCode,

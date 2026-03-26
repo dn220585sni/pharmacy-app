@@ -238,8 +238,10 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
         // ── Fixed: header ───────────────────────────────────────────────────
         _buildHeader(drug, context),
 
-        // ── Intake warning banner ─────────────────────────────────────────
-        if (drug.intakeWarning != null && drug.intakeWarning!.isNotEmpty)
+        // ── Intake warning banner (only if no usageInfo grid) ────────────
+        if (drug.usageInfo == null &&
+            drug.intakeWarning != null &&
+            drug.intakeWarning!.isNotEmpty)
           _buildWarningBanner(drug.intakeWarning!),
 
         _buildDivider(),

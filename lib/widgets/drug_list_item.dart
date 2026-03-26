@@ -56,7 +56,7 @@ class _DrugListItemState extends State<DrugListItem> {
   void initState() {
     super.initState();
     final frac = widget.cartFractionalQty;
-    final initText = (frac != null && widget.drug.unitsPerPackage != null)
+    final initText = (frac != null && widget.drug.canSplitByBlister)
         ? '$frac/${widget.drug.unitsPerPackage}'
         : (widget.cartQuantity > 0 ? '${widget.cartQuantity}' : '');
     _qtyController = TextEditingController(text: initText);
@@ -78,7 +78,7 @@ class _DrugListItemState extends State<DrugListItem> {
         if (HardwareKeyboard.instance.isControlPressed) {
           final digit = _ctrlDigit(event.logicalKey);
           if (digit != null) {
-            if (widget.drug.unitsPerPackage != null) {
+            if (widget.drug.canSplitByBlister) {
               widget.onFractionalChanged?.call(digit);
             } else {
               widget.onFractionalUnavailable?.call();
@@ -164,7 +164,7 @@ class _DrugListItemState extends State<DrugListItem> {
   void _syncQtyText() {
     final frac = widget.cartFractionalQty;
     final String newText;
-    if (frac != null && widget.drug.unitsPerPackage != null) {
+    if (frac != null && widget.drug.canSplitByBlister) {
       newText = '$frac/${widget.drug.unitsPerPackage}';
     } else {
       newText = widget.cartQuantity > 0 ? '${widget.cartQuantity}' : '';
@@ -477,7 +477,7 @@ class _DrugListItemState extends State<DrugListItem> {
                   SizedBox(
                     width: kColExpiry,
                     child: Text(
-                      drug.expiryDate ?? '—',
+                      drug.expiryShort ?? '—',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: drug.isExpired

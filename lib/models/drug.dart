@@ -60,7 +60,7 @@ class Drug {
   final int stock;
   final String unit;
   final bool requiresPrescription;
-  final String? expiryDate; // "MM/YY"
+  final String? expiryDate; // "DD.MM.YYYY" (e.g. "01.08.2027")
   final int? pharmacistBonus; // null = no badge
   final bool isInTransit;
   final bool isOwnBrand;
@@ -86,9 +86,8 @@ class Drug {
   final String? applicationMethod; // спосіб застосування: "Для порожнини рота"
   final String? countryOfOrigin;   // країна виробництва: "Франція"
 
-  // ── Batch / serialisation fields ──────────────────────────────────────────
-  final String? series;        // e.g. "036"
-  final String? serialNumber;  // e.g. "1234734678"
+  // ── Batch fields ─────────────────────────────────────────────────────────
+  final String? series;        // e.g. "DN50825"
   final String? barcode;       // e.g. "712467853"
 
   // ── Availability (for out-of-stock drugs) ───────────────────────────────
@@ -96,6 +95,12 @@ class Drug {
 
   // ── Рука допомоги (social discount program) ────────────────────────────
   final bool hasHelpingHand;
+
+  // ── Caché codes ──────────────────────────────────────────────────────
+  final String? ukod;          // u-код товару (код довідника, напр. "762*1*47*6****")
+  final String? skuCode;       // s-код або числовий код товару
+  final String? comingPrice;   // ціна приходу товару
+  final String? comingCode;    // код приходу товару
 
   const Drug({
     required this.id,
@@ -128,24 +133,38 @@ class Drug {
     this.applicationMethod,
     this.countryOfOrigin,
     this.series,
-    this.serialNumber,
     this.barcode,
     this.availabilityStatus,
     this.hasHelpingHand = false,
+    this.ukod,
+    this.skuCode,
+    this.comingPrice,
+    this.comingCode,
   });
 
   bool get isOutOfStock => stock == 0;
 
+  /// Чи можна продати товар поблістерно.
+  /// true тільки якщо в упаковці більше 1 блістера/одиниці.
+  bool get canSplitByBlister => unitsPerPackage != null && unitsPerPackage! > 1;
+
+  /// Parse expiryDate in "DD.MM.YYYY" format to DateTime.
+  /// Returns null if format is invalid.
+  DateTime? get parsedExpiry {
+    if (expiryDate == null) return null;
+    final parts = expiryDate!.split('.');
+    if (parts.length != 3) return null;
+    final day = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final year = int.tryParse(parts[2]);
+    if (day == null || month == null || year == null) return null;
+    return DateTime(year, month, day);
+  }
+
   bool get isExpired {
-    if (expiryDate == null) return false;
-    final parts = expiryDate!.split('/');
-    if (parts.length != 2) return false;
-    final month = int.tryParse(parts[0]);
-    final year = int.tryParse(parts[1]);
-    if (month == null || year == null) return false;
-    final fullYear = 2000 + year;
-    final now = DateTime.now();
-    return DateTime(fullYear, month + 1).isBefore(DateTime(now.year, now.month, 1));
+    final expiry = parsedExpiry;
+    if (expiry == null) return false;
+    return expiry.isBefore(DateTime.now());
   }
 
   Drug copyWithStorage({
@@ -184,10 +203,14 @@ class Drug {
       applicationMethod: applicationMethod,
       countryOfOrigin: countryOfOrigin,
       series: series,
-      serialNumber: serialNumber,
+
       barcode: barcode,
       availabilityStatus: availabilityStatus,
       hasHelpingHand: hasHelpingHand,
+      ukod: ukod,
+      skuCode: skuCode,
+      comingPrice: comingPrice,
+      comingCode: comingCode,
     );
   }
 
@@ -231,23 +254,103 @@ class Drug {
       applicationMethod: applicationMethod ?? this.applicationMethod,
       countryOfOrigin: countryOfOrigin ?? this.countryOfOrigin,
       series: series,
-      serialNumber: serialNumber,
+
       barcode: barcode,
       availabilityStatus: availabilityStatus,
       hasHelpingHand: hasHelpingHand,
+      ukod: ukod,
+      skuCode: skuCode,
+      comingPrice: comingPrice,
+      comingCode: comingCode,
+    );
+  }
+
+  /// Create copy enriched with data from GetSKUdetail API.
+  Drug copyWithSKUDetail({
+    String? inn,
+    String? dosageForm,
+    String? dosage,
+    String? manufacturer,
+    String? category,
+    String? expiryDate,
+    int? unitsPerPackage,
+    int? pharmacistBonus,
+    String? barcode,
+    String? series,
+    String? storageConditions,
+    bool? requiresPrescription,
+    bool? isOwnBrand,
+    String? analogueGroup,
+    String? imageUrl,
+    String? intakeWarning,
+    String? skuCode,
+    String? comingPrice,
+    String? comingCode,
+  }) {
+    // hasHelpingHand = true if server provides comingPrice + comingCode
+    final hh = (comingPrice ?? this.comingPrice) != null &&
+        (comingCode ?? this.comingCode) != null;
+
+    return Drug(
+      id: id,
+      name: name,
+      manufacturer: (manufacturer != null && this.manufacturer.isEmpty)
+          ? manufacturer
+          : this.manufacturer,
+      category: (category != null && this.category.isEmpty)
+          ? category
+          : this.category,
+      price: price,
+      stock: stock,
+      unit: unit,
+      requiresPrescription: requiresPrescription ?? this.requiresPrescription,
+      expiryDate: expiryDate ?? this.expiryDate,
+      pharmacistBonus: pharmacistBonus ?? this.pharmacistBonus,
+      isInTransit: isInTransit,
+      isOwnBrand: isOwnBrand ?? this.isOwnBrand,
+      analogueGroup: analogueGroup ?? this.analogueGroup,
+      dosageForm: dosageForm ?? this.dosageForm,
+      inn: inn ?? this.inn,
+      dosage: dosage ?? this.dosage,
+      storageConditions: storageConditions ?? this.storageConditions,
+      locationType: locationType,
+      locationCode: locationCode,
+      storageLocations: storageLocations,
+      usageInfo: usageInfo,
+      imageUrl: imageUrl ?? this.imageUrl,
+      unitsPerPackage: unitsPerPackage ?? this.unitsPerPackage,
+      intakeWarning: intakeWarning ?? this.intakeWarning,
+      productBrowserSlug: productBrowserSlug,
+      indications: indications,
+      instructionsUrl: instructionsUrl,
+      applicationMethod: applicationMethod,
+      countryOfOrigin: countryOfOrigin,
+      series: series ?? this.series,
+      barcode: barcode ?? this.barcode,
+      availabilityStatus: availabilityStatus,
+      hasHelpingHand: hh || hasHelpingHand,
+      ukod: ukod,
+      skuCode: skuCode ?? this.skuCode,
+      comingPrice: comingPrice ?? this.comingPrice,
+      comingCode: comingCode ?? this.comingCode,
     );
   }
 
   bool get isExpiringSoon {
-    if (expiryDate == null || isExpired) return false;
-    final parts = expiryDate!.split('/');
-    if (parts.length != 2) return false;
-    final month = int.tryParse(parts[0]);
-    final year = int.tryParse(parts[1]);
-    if (month == null || year == null) return false;
-    final fullYear = 2000 + year;
-    final expiry = DateTime(fullYear, month + 1);
+    if (isExpired) return false;
+    final expiry = parsedExpiry;
+    if (expiry == null) return false;
     final threeMonthsFromNow = DateTime.now().add(const Duration(days: 91));
     return expiry.isBefore(threeMonthsFromNow);
+  }
+
+  /// Short display format for table: "MM.YY" (e.g. "08.27")
+  String? get expiryShort {
+    if (expiryDate == null) return null;
+    final parts = expiryDate!.split('.');
+    if (parts.length != 3) return expiryDate;
+    final month = parts[1];
+    final year = parts[2].length == 4 ? parts[2].substring(2) : parts[2];
+    return '$month.$year';
   }
 }

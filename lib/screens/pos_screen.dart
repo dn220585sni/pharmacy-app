@@ -6,6 +6,7 @@ import '../data/edk_offers.dart';
 import '../data/mock_drugs.dart';
 import '../services/auth_service.dart';
 import '../services/drug_service.dart';
+import '../services/farmasell_service.dart';
 import '../services/loyalty_service.dart';
 import '../services/product_browser_service.dart';
 import '../data/symptom_categories.dart';
@@ -83,6 +84,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   List<ProductSearchResult> _externalAnalogues = [];
   /// Drug ID for which external analogues are currently loaded.
   String? _externalAnaloguesForDrugId;
+
+  // ── SKU Detail (Caché GetSKUdetail) ────────────────────────────────────
+  /// Drug IDs we've already tried fetching from GetSKUdetail.
+  final _skuDetailFetched = <String>{};
 
   /// A digit character waiting to be injected into the qty field on the
   /// next frame after focus transfers from the search field.
@@ -445,7 +450,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (HardwareKeyboard.instance.isControlPressed) {
       final digit = _ctrlDigitFromKey(event.logicalKey);
       if (digit != null && _selectedDrug != null && _selectedDrug!.stock > 0) {
-        if (_selectedDrug!.unitsPerPackage != null) {
+        if (_selectedDrug!.canSplitByBlister) {
           _setFractionalQuantity(_selectedDrug!, digit);
         } else {
           _showFractionalUnavailable();
@@ -650,14 +655,18 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final query = _searchController.text.trim();
     final targetCats = symptomCategories[_selectedSymptom] ?? [];
     setState(() {
+      // Preserve existing server results (srv_ prefix) while re-filtering mocks.
+      final existingServerDrugs =
+          _searchResults.where((d) => d.id.startsWith('srv_')).toList();
+
       if (query.isEmpty) {
-        // No query — show all (filtered by symptom only).
+        // No query — show all mocks (filtered by symptom only), no server drugs.
         _searchResults = mockDrugs.where((drug) {
           return _selectedSymptom == 'Всі' ||
               targetCats.contains(drug.category);
         }).toList();
       } else {
-        // Score every drug with fuzzy matching, filter & sort.
+        // Score every mock drug with fuzzy matching, filter & sort.
         final scored = <MapEntry<Drug, double>>[];
         for (final drug in mockDrugs) {
           final matchesSymptom = _selectedSymptom == 'Всі' ||
@@ -667,7 +676,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           if (score > 0) scored.add(MapEntry(drug, score));
         }
         scored.sort((a, b) => b.value.compareTo(a.value));
-        _searchResults = scored.map((e) => e.key).toList();
+        final mockResults = scored.map((e) => e.key).toList();
+        // Keep server drugs at top, mocks below
+        _searchResults = [...existingServerDrugs, ...mockResults];
       }
 
       // Keep current selection if it's still in results;
@@ -720,8 +731,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     setState(() => _isServerLookup = true);
 
     try {
-      final items = await DrugService.searchByName(query);
+      // Run both searches in parallel:
+      // - SearchByNameSKU: s-codes with prices, expiry, comingPrice (in-stock only)
+      // - SearchByName: u-codes including out-of-stock items
+      final results = await Future.wait([
+        DrugService.searchByName(query),
+        DrugService.searchByNameUcodes(query),
+      ]);
       if (!mounted) return;
+
+      final skuItems = results[0]; // s-codes (in-stock with prices)
+      final uItems = results[1];   // u-codes (all, including zero stock)
 
       // Ignore if user already changed the search query.
       if (_searchController.text.trim() != query) {
@@ -729,20 +749,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         return;
       }
 
-      if (items.isEmpty) {
+      if (skuItems.isEmpty && uItems.isEmpty) {
         setState(() => _isServerLookup = false);
         return;
       }
 
-      // Sort: in-stock first, then by name.
-      items.sort((a, b) {
-        if (a.qty > 0 && b.qty <= 0) return -1;
-        if (a.qty <= 0 && b.qty > 0) return 1;
-        return a.name.compareTo(b.name);
-      });
+      // Build Drug objects from s-codes (with full pricing data)
+      final serverDrugs = <Drug>[];
+      final seenUkods = <String>{};
 
-      // Convert server items to Drug objects.
-      final serverDrugs = items.map((item) {
+      for (final item in skuItems) {
+        if (item.ukod.isNotEmpty) seenUkods.add(item.ukod);
         final locations = <StorageLocation>[];
         if (item.shelf.isNotEmpty) {
           locations.add(StorageLocation(
@@ -751,7 +768,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             qty: item.qty,
           ));
         }
-        return Drug(
+        final hasHH = item.comingPrice != null && item.comingCode != null;
+        serverDrugs.add(Drug(
           id: 'srv_${item.ids}',
           name: item.name,
           manufacturer: item.manufacturer,
@@ -761,22 +779,73 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           unit: 'шт',
           locationCode: item.shelf.isNotEmpty ? item.shelf : null,
           storageLocations: locations.isNotEmpty ? locations : null,
-        );
-      }).toList();
+          expiryDate: item.expiryDate,
+          comingPrice: item.comingPrice,
+          comingCode: item.comingCode,
+          ukod: item.ukod.isNotEmpty ? item.ukod : null,
+          skuCode: item.ids,
+          hasHelpingHand: hasHH,
+        ));
+      }
+
+      // Add out-of-stock items from u-codes (not already covered by s-codes)
+      for (final item in uItems) {
+        if (item.ids.isEmpty) continue;
+        if (seenUkods.contains(item.ids)) continue; // u-code already has s-codes
+        if (item.qty > 0) continue; // skip in-stock (already in s-codes)
+        serverDrugs.add(Drug(
+          id: 'srv_u_${item.ids}',
+          name: item.name,
+          manufacturer: item.manufacturer,
+          category: '',
+          price: item.price,
+          stock: 0,
+          unit: 'шт',
+          locationCode: item.shelf.isNotEmpty ? item.shelf : null,
+          ukod: item.ids, // u-code ids IS the ukod
+        ));
+      }
+
+      // Sort: in-stock first → FEFO (shortest expiry first) → by name.
+      serverDrugs.sort((a, b) {
+        // 1. In-stock before out-of-stock
+        if (a.stock > 0 && b.stock <= 0) return -1;
+        if (a.stock <= 0 && b.stock > 0) return 1;
+
+        // 2. Same name group: sort by expiry date (FEFO — shortest expiry first)
+        final nameCmp = a.name.compareTo(b.name);
+        if (nameCmp == 0) {
+          final aExp = a.parsedExpiry;
+          final bExp = b.parsedExpiry;
+          if (aExp != null && bExp != null) return aExp.compareTo(bExp);
+          if (aExp != null) return -1; // has expiry before no-expiry
+          if (bExp != null) return 1;
+        }
+
+        // 3. Different names: alphabetical
+        return nameCmp;
+      });
 
       setState(() {
         // Remove old server drugs, prepend new ones before mock results.
         final mockResults =
             _searchResults.where((d) => !d.id.startsWith('srv_')).toList();
         _searchResults = [...serverDrugs, ...mockResults];
-        // Select first result if nothing selected.
-        if (_selectedDrug == null ||
+        // Always select first server drug when results arrive
+        // (server drugs are more relevant than mocks).
+        if (serverDrugs.isNotEmpty) {
+          _selectedDrug = serverDrugs.first;
+        } else if (_selectedDrug == null ||
             !_searchResults.any((d) => d.id == _selectedDrug!.id)) {
           _selectedDrug =
               _searchResults.isNotEmpty ? _searchResults.first : null;
         }
         _isServerLookup = false;
       });
+      // Fetch SKU detail for ALL server drugs
+      for (final drug in serverDrugs) {
+        _fetchSKUDetail(drug);
+      }
       // Fetch safety tags + external analogues for the selected drug
       if (_selectedDrug != null) {
         _fetchProductBrowserInfo(_selectedDrug!);
@@ -828,7 +897,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
       // Update the drug in _searchResults and _selectedDrug
       setState(() {
-        final updatedDrug = drug.copyWithProductBrowser(
+        // Use CURRENT version of drug (may have been enriched by SKUDetail)
+        final currentDrug = _searchResults.firstWhere(
+          (d) => d.id == drug.id,
+          orElse: () => drug,
+        );
+        final updatedDrug = currentDrug.copyWithProductBrowser(
           usageInfo: usageInfo,
           imageUrl: result.imageUrl,
           indications: indicationsUa ?? result.information,
@@ -846,6 +920,80 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       });
     }).catchError((_) {
       // Silently ignore — product browser is optional enhancement
+    });
+  }
+
+  // ── Caché GetSKUdetail: auto-fetch drug detail ──────────────────────────
+
+  /// Fetch drug detail from Caché GetSKUdetail API.
+  /// Enriches drug with inn, dosageForm, dosage, expiryDate, unitsPerPackage, etc.
+  void _fetchSKUDetail(Drug drug) {
+    if (_skuDetailFetched.contains(drug.id)) return;
+    _skuDetailFetched.add(drug.id);
+
+    // Use ukod (u-code) for GetSKUdetail; fall back to s-code from id
+    final ids = drug.ukod ?? drug.id.replaceFirst('srv_', '');
+    if (ids.isEmpty) return;
+
+    DrugService.fetchSKUDetail(ids).then((detail) {
+      if (!mounted || detail == null) return;
+
+      setState(() {
+        // Use CURRENT version of drug (may have been enriched by ProductBrowser)
+        final currentDrug = _searchResults.firstWhere(
+          (d) => d.id == drug.id,
+          orElse: () => drug,
+        );
+        final updatedDrug = currentDrug.copyWithSKUDetail(
+          inn: detail.inn,
+          dosageForm: detail.dosageForm,
+          dosage: detail.dosage,
+          manufacturer: detail.manufacturer,
+          category: detail.category,
+          expiryDate: detail.expiryDate,
+          unitsPerPackage: detail.unitsPerPackage,
+          pharmacistBonus: detail.pharmacistBonus,
+          barcode: detail.barcode,
+          series: detail.series,
+          storageConditions: detail.storageConditions,
+          requiresPrescription: detail.requiresPrescription,
+          isOwnBrand: detail.isOwnBrand,
+          analogueGroup: detail.analogueGroup,
+          imageUrl: detail.imageUrl,
+          intakeWarning: detail.intakeWarning,
+          skuCode: detail.skuCode,
+          comingPrice: detail.comingPrice,
+          comingCode: detail.comingCode,
+        );
+
+        _searchResults = _searchResults.map((d) {
+          return d.id == drug.id ? updatedDrug : d;
+        }).toList();
+
+        if (_selectedDrug?.id == drug.id) {
+          _selectedDrug = updatedDrug;
+        }
+
+        // Update cart item if already added
+        final cartIdx = _cart.indexWhere((item) => item.drug.id == drug.id);
+        if (cartIdx >= 0) {
+          _cart[cartIdx] = CartItem(
+            drug: updatedDrug,
+            quantity: _cart[cartIdx].quantity,
+            fractionalQty: _cart[cartIdx].fractionalQty,
+          );
+        }
+      });
+
+      // If INN was just populated, try fetching external analogues
+      if (detail.inn != null && detail.inn!.isNotEmpty) {
+        final updated = _selectedDrug;
+        if (updated != null && updated.id == drug.id) {
+          _fetchExternalAnalogues(updated);
+        }
+      }
+    }).catchError((_) {
+      // Silently ignore — SKU detail is optional enhancement
     });
   }
 
@@ -946,6 +1094,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _scrollToIndex(0);
         _fetchProductBrowserInfo(drug);
         _fetchExternalAnalogues(drug);
+        _fetchSKUDetail(drug);
       } else {
         setState(() => _isServerLookup = false);
       }
@@ -976,6 +1125,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _scrollToIndex(newIdx);
     _fetchProductBrowserInfo(newDrug);
     _fetchExternalAnalogues(newDrug);
+    _fetchSKUDetail(newDrug);
   }
 
   void _scrollToIndex(int index) {
@@ -1027,7 +1177,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   void _setFractionalQuantity(Drug drug, int blisters) {
-    if (drug.unitsPerPackage == null) return;
+    if (!drug.canSplitByBlister) return;
     final wasInCart = _cart.any((item) => item.drug.id == drug.id);
     setState(() {
       final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
@@ -1104,7 +1254,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (activeEdkOffer == null) return;
     final replacement = activeEdkOffer!.drug;
     final donorId = activeEdkOffer!.donorDrugId;
-    if (replacement.unitsPerPackage == null) return;
+    if (!replacement.canSplitByBlister) return;
     setState(() {
       dismissedEdkIds.add(donorId);
       activeEdkOffer = null;
@@ -1152,7 +1302,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final offer = _edkOffers[oosDrug.id];
     if (offer == null) return;
     final replacement = offer.drug;
-    if (replacement.unitsPerPackage == null) return;
+    if (!replacement.canSplitByBlister) return;
     setState(() {
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
@@ -1369,14 +1519,52 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (_helpingHandRemaining <= 0) return;
     if (_helpingHandPrices.containsKey(drug.id)) return; // already revealed
 
-    // Mock: discount 15-25% depending on drug price bracket
-    final discountPct = drug.price > 100 ? 0.20 : drug.price > 50 ? 0.18 : 0.15;
-    final discounted = (drug.price * (1 - discountPct)).roundToDouble();
+    final phone = _customerLoyalty?.phone;
 
-    setState(() {
-      _helpingHandPrices[drug.id] = discounted;
-      _helpingHandRemaining--;
-    });
+    // If we have FarmaSell data, call real API
+    if (drug.comingPrice != null && drug.comingCode != null && phone != null) {
+      _fetchHelpingHandPrice(drug, phone);
+    } else {
+      // Fallback: mock discount
+      final discountPct = drug.price > 100 ? 0.20 : drug.price > 50 ? 0.18 : 0.15;
+      final discounted = (drug.price * (1 - discountPct)).roundToDouble();
+      setState(() {
+        _helpingHandPrices[drug.id] = discounted;
+        _helpingHandRemaining--;
+      });
+    }
+  }
+
+  /// Call FarmaSell API to get real Helping Hand discount.
+  Future<void> _fetchHelpingHandPrice(Drug drug, String phone) async {
+    final comingPrice = double.tryParse(drug.comingPrice ?? '');
+    if (comingPrice == null || drug.comingCode == null) return;
+
+    final sku = drug.skuCode ?? drug.id.replaceFirst('srv_', '');
+
+    final result = await FarmaSellService.getHelpingHandDiscount(
+      clientPhone: phone,
+      sku: sku,
+      comingPrice: comingPrice,
+      comingCode: drug.comingCode!,
+    );
+
+    if (!mounted) return;
+
+    if (result.success && result.discountPrice != null) {
+      setState(() {
+        _helpingHandPrices[drug.id] = result.discountPrice!;
+        _helpingHandRemaining--;
+      });
+    } else {
+      // Fallback to mock on API error
+      final discountPct = drug.price > 100 ? 0.20 : drug.price > 50 ? 0.18 : 0.15;
+      final discounted = (drug.price * (1 - discountPct)).roundToDouble();
+      setState(() {
+        _helpingHandPrices[drug.id] = discounted;
+        _helpingHandRemaining--;
+      });
+    }
   }
 
   // ── Рука допомоги: open dialog from table A ────────────────────────────
@@ -1471,7 +1659,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   void _addOfferBlisterToCart(Drug drug) {
-    if (drug.unitsPerPackage == null) return;
+    if (!drug.canSplitByBlister) return;
     setState(() {
       final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
       if (idx >= 0) {
@@ -1485,21 +1673,81 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     });
   }
 
-  void _processPayment() {
+  void _processPayment({double paidByPoints = 0}) {
     if (_cart.isEmpty) return;
-    // Accumulate earnings BEFORE clearing the cart
-    final saleAmount = _cartTotal;
+
+    // ── Calculate pharmacist earnings BEFORE clearing cart ────────────────
+    // 1% of the amount actually paid by the client (total minus bonus write-off)
+    final actualPaid = _cartTotal - paidByPoints;
+    final percentEarning = actualPaid * 0.01;
+
+    // Sum of pharmacist bonus badges from all cart items
+    final bonusBadgesTotal = _cart.fold<double>(0, (sum, item) {
+      final bonus = item.drug.pharmacistBonus ?? 0;
+      final qty = item.isFractional ? 1 : item.quantity;
+      return sum + bonus * qty;
+    });
+
+    final earned = percentEarning + bonusBadgesTotal;
+
+    // ── ЛАЙК: fire-and-forget sale registration ──────────────────────────
+    if (_customerLoyalty != null && _customerLoyalty!.cardNo != null) {
+      _registerLoyaltySale(paidByPoints: paidByPoints);
+    }
+
     // Bypass the listener so _filterDrugs doesn't auto-select a drug,
     // then reset everything including _selectedDrug → ShiftDashboard appears.
     _searchController.removeListener(_filterDrugs);
     _searchController.clear();
     _searchController.addListener(_filterDrugs);
     setState(() {
-      _totalEarned += saleAmount;
+      _totalEarned += earned;
       _cart.clear();
       _selectedDrug = null;   // show ShiftDashboard after payment
       _searchResults = mockDrugs;
       _resetLoyalty();
+    });
+  }
+
+  /// Register sale with Sparta Loyalty (ЛАЙК) — fire-and-forget.
+  ///
+  /// Formats cart items into Sparta basket format and calls sale API.
+  /// Runs asynchronously; failures are logged but don't block the user.
+  void _registerLoyaltySale({double paidByPoints = 0}) {
+    final loyalty = _customerLoyalty;
+    if (loyalty == null || loyalty.cardNo == null) return;
+
+    // Format cart → Sparta basket
+    final basket = _cart.map((item) {
+      final qty = item.isFractional
+          ? item.fractionalQty! / item.drug.unitsPerPackage!
+          : item.quantity.toDouble();
+      return <String, dynamic>{
+        'sku': item.drug.id.replaceFirst('srv_', ''),
+        'price': item.effectivePrice,
+        'qty': qty,
+        'sum': item.total,
+      };
+    }).toList();
+
+    // Generate receipt number: timestamp-based for uniqueness
+    final receiptNo = 'POS-${DateTime.now().millisecondsSinceEpoch}';
+
+    LoyaltyService.sale(
+      receiptNo: receiptNo,
+      basket: basket,
+      cardNo: loyalty.cardNo,
+      paidByPoints: paidByPoints,
+      cashierName: _currentPharmacist?.user,
+    ).then((result) {
+      if (result.success) {
+        debugPrint('[ЛАЙК] Sale OK: earned=${result.balanceEarn}, '
+            'burned=${result.balanceBurn}, after=${result.balanceAfter}');
+      } else {
+        debugPrint('[ЛАЙК] Sale FAILED: ${result.errorMsg}');
+      }
+    }).catchError((e) {
+      debugPrint('[ЛАЙК] Sale ERROR: $e');
     });
   }
 
@@ -1830,7 +2078,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                   offer: activeEdkOffer!,
                   onAddPackage: _addEdkToCart,
                   onAddBlister:
-                      activeEdkOffer!.drug.unitsPerPackage != null
+                      activeEdkOffer!.drug.canSplitByBlister
                           ? _addEdkBlisterToCart
                           : null,
                   onDismiss: _dismissEdk,
@@ -1843,10 +2091,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                       onAddPackage: () =>
                           _addOosEdkPackage(_selectedDrug!),
                       onAddBlister:
-                          _edkOffers[_selectedDrug!.id]
+                          (_edkOffers[_selectedDrug!.id]
                                       ?.drug
-                                      .unitsPerPackage !=
-                                  null
+                                      .canSplitByBlister ??
+                                  false)
                               ? () => _addOosEdkBlister(_selectedDrug!)
                               : null,
                       onDismissEdk: () {},
@@ -2227,6 +2475,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             });
             _fetchProductBrowserInfo(drug);
             _fetchExternalAnalogues(drug);
+            _fetchSKUDetail(drug);
           },
           onQuantityChanged: (qty) => _setQuantity(drug, qty),
           onFractionalChanged: (blisters) =>

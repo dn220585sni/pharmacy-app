@@ -23,7 +23,7 @@ class OrderEdkCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final drug = offer.drug;
     final bonus = drug.pharmacistBonus;
-    final hasBlister = drug.unitsPerPackage != null;
+    final hasBlister = drug.canSplitByBlister;
 
     return Container(
       key: ValueKey('order_edk_${offer.donorDrugId}'),

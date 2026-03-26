@@ -6,7 +6,6 @@ import '../models/customer_loyalty.dart';
 import '../models/drug.dart';
 import '../models/payment_method.dart';
 import '../models/prescription.dart';
-import '../services/bonus_service.dart';
 import 'cart_item_widget.dart';
 import 'cart_offer_card.dart';
 import 'checkout/bonus_discount_block.dart';
@@ -25,7 +24,7 @@ class CartPanel extends StatefulWidget {
   final void Function(int index) onIncrease;
   final void Function(int index) onDecrease;
   final void Function(int index) onRemove;
-  final VoidCallback onPay;
+  final void Function({double paidByPoints}) onPay;
   final VoidCallback onClose;
   final void Function(Drug drug) onAddOffer;
   final void Function(Drug drug) onAddOfferBlister;
@@ -286,56 +285,18 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   // ── Payment ───────────────────────────────────────────────────────────────
 
-  Future<void> _processPayment() async {
+  void _processPayment() {
     if (!_canProcessPayment || _isProcessingPayment) return;
 
-    final bonusAmount = effectiveBonusAmount;
-    final hasBonusWriteOff = useBonuses && bonusAmount > 0 && widget.loyalty != null;
-
-    // ── Step 1: write off bonuses on the server ──────────────────────────
-    if (hasBonusWriteOff) {
-      setState(() => _isProcessingPayment = true);
-      try {
-        final result = await BonusService.writeOff(
-          clientCode: widget.loyalty!.phone,
-          amount: bonusAmount,
-        );
-        if (!mounted) return;
-        if (!result.success) {
-          setState(() => _isProcessingPayment = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result.error ?? 'Не вдалося списати бонуси'),
-              backgroundColor: const Color(0xFFEF4444),
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-          return;
-        }
-      } catch (e) {
-        if (!mounted) return;
-        setState(() => _isProcessingPayment = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Помилка зʼєднання: $e'),
-            backgroundColor: const Color(0xFFEF4444),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-        return;
-      }
-    }
-
-    // ── Step 2: complete payment ─────────────────────────────────────────
+    // Bonus write-off is handled by Sparta LoyaltyService.sale()
+    // in POS._processPayment() — fire-and-forget, no blocking here.
     // Capture prescription state BEFORE onPay (which clears the cart).
     final hadPrescription = _hasPrescriptionItems;
     final neededRedemption = _needsRedemptionCode;
     final rxDataSnapshot = _prescriptionData;
     final wasFullyReimbursed = _isFullyReimbursed;
 
-    widget.onPay();
+    widget.onPay(paidByPoints: effectiveBonusAmount);
     setState(() {
       _isProcessingPayment = false;
       showPaymentSuccess = true;
@@ -1158,7 +1119,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
     // For fully reimbursed: trigger onPay callback now (no prior payment)
     if (_isFullyReimbursed && !showPaymentSuccess) {
-      widget.onPay();
+      widget.onPay(paidByPoints: 0);
     }
 
     // Close cart after a short pause so the user sees the "Погашено" state

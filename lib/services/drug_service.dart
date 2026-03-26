@@ -32,25 +32,39 @@ class StockBatch {
 
 /// Елемент результату пошуку за назвою (з SearchByName).
 class DrugSearchItem {
-  final String ids;
+  final String ids;         // s-код (унікальний код приходу)
+  final String ukod;        // u-код (код товару в цілому, для GetSKUdetail)
   final String name;
   final String manufacturer;
   final String shelf;
   final int qty;
   final double price;
+  final String? expiryDate;  // термін придатності
+  final String? comingPrice; // ціна приходу (для FarmaSell)
+  final String? comingCode;  // код приходу (для FarmaSell)
 
   DrugSearchItem({
     required this.ids,
+    this.ukod = '',
     required this.name,
     required this.manufacturer,
     required this.shelf,
     required this.qty,
     required this.price,
+    this.expiryDate,
+    this.comingPrice,
+    this.comingCode,
   });
+
+  static String? _nonEmpty(dynamic v) {
+    final s = v?.toString();
+    return (s != null && s.isNotEmpty) ? s : null;
+  }
 
   factory DrugSearchItem.fromJson(Map<String, dynamic> json) {
     return DrugSearchItem(
       ids: json['ids']?.toString() ?? '',
+      ukod: json['ukod']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       manufacturer: json['manufacturer']?.toString() ?? '',
       shelf: json['shelf']?.toString() ?? '',
@@ -62,6 +76,9 @@ class DrugSearchItem {
             json['price']?.toString().replaceAll(',', '.') ?? '0',
           ) ??
           0.0,
+      expiryDate: _nonEmpty(json['expiryDate']),
+      comingPrice: _nonEmpty(json['comingPrice']),
+      comingCode: _nonEmpty(json['comingCode']),
     );
   }
 }
@@ -116,6 +133,89 @@ class DrugPriceResult {
 
   /// Чи є товар в наявності.
   bool get isAvailable => totalStock > 0;
+}
+
+/// Детальна інформація по товару (з GetSKUdetail).
+class SKUDetailResult {
+  final String? name;
+  final String? manufacturer;
+  final String? category;
+  final String? inn;
+  final String? dosageForm;
+  final String? dosage;
+  final bool requiresPrescription;
+  final String? expiryDate;
+  final int? unitsPerPackage;
+  final int? pharmacistBonus;
+  final String? barcode;
+  final String? series;
+  final String? storageConditions;
+  final bool isOwnBrand;
+  final String? analogueGroup;
+  final String? imageUrl;
+  final String? intakeWarning;
+  final String? skuCode;      // числовий код товару (ids з відповіді API)
+  final String? comingPrice;  // ціна приходу (for FarmaSell Helping Hand)
+  final String? comingCode;   // код приходу (for FarmaSell Helping Hand)
+
+  SKUDetailResult({
+    this.name,
+    this.manufacturer,
+    this.category,
+    this.inn,
+    this.dosageForm,
+    this.dosage,
+    this.requiresPrescription = false,
+    this.expiryDate,
+    this.unitsPerPackage,
+    this.pharmacistBonus,
+    this.barcode,
+    this.series,
+    this.storageConditions,
+    this.isOwnBrand = false,
+    this.analogueGroup,
+    this.imageUrl,
+    this.intakeWarning,
+    this.skuCode,
+    this.comingPrice,
+    this.comingCode,
+  });
+
+  factory SKUDetailResult.fromJson(Map<String, dynamic> json) {
+    final unitsRaw = json['unitsPerPackage']?.toString() ?? '';
+    final units = int.tryParse(unitsRaw);
+    final bonusRaw = json['pharmacistBonus']?.toString() ?? '';
+    final bonus = int.tryParse(bonusRaw);
+
+    return SKUDetailResult(
+      name: _nonEmpty(json['name']),
+      manufacturer: _nonEmpty(json['manufacturer']),
+      category: _nonEmpty(json['category']),
+      inn: _nonEmpty(json['inn']),
+      dosageForm: _nonEmpty(json['dosageForm']),
+      dosage: _nonEmpty(json['dosage']),
+      requiresPrescription: json['requiresPrescription']?.toString() == '1',
+      expiryDate: _nonEmpty(json['expiryDate']),
+      unitsPerPackage: (units != null && units > 0) ? units : null,
+      pharmacistBonus: (bonus != null && bonus > 0) ? bonus : null,
+      barcode: _nonEmpty(json['barcode']),
+      series: _nonEmpty(json['series']),
+
+      storageConditions: _nonEmpty(json['storageConditions']),
+      isOwnBrand: json['isOwnBrand']?.toString() == '1',
+      analogueGroup: _nonEmpty(json['analogueGroup']),
+      imageUrl: _nonEmpty(json['imageUrl']),
+      intakeWarning: _nonEmpty(json['intakeWarning']),
+      skuCode: _nonEmpty(json['ids']),
+      comingPrice: _nonEmpty(json['comingPrice']),
+      comingCode: _nonEmpty(json['comingCode']),
+    );
+  }
+
+  static String? _nonEmpty(dynamic v) {
+    final s = v?.toString();
+    return (s != null && s.isNotEmpty) ? s : null;
+  }
 }
 
 /// Сервіс для роботи з довідником препаратів.
@@ -239,6 +339,30 @@ class DrugService {
     if (ApiConfig.useMock) return [];
 
     try {
+      final response = await _api.call('SearchByNameSKU', params: {
+        'name': name,
+      });
+
+      if (!response.isOk) return [];
+
+      final itemsJson = response.data['items'];
+      if (itemsJson is! List) return [];
+
+      return itemsJson
+          .whereType<Map<String, dynamic>>()
+          .map((j) => DrugSearchItem.fromJson(j))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Search by u-codes (includes out-of-stock items).
+  /// Used in parallel with [searchByName] to show zero-stock drugs.
+  static Future<List<DrugSearchItem>> searchByNameUcodes(String name) async {
+    if (ApiConfig.useMock) return [];
+
+    try {
       final response = await _api.call('SearchByName', params: {
         'name': name,
       });
@@ -274,6 +398,33 @@ class DrugService {
     if (!response.isOk) return 0;
 
     return int.tryParse(response.data['Result']?.toString() ?? '0') ?? 0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Деталі товару (GetSKUdetail)
+  // ---------------------------------------------------------------------------
+
+  /// Отримати детальну інформацію по товару.
+  ///
+  /// Caché: `GET ?ServiceName=GetSKUdetail&ids={ids}`
+  /// Повертає: name, manufacturer, category, inn, dosageForm, dosage,
+  /// requiresPrescription, expiryDate, unitsPerPackage, pharmacistBonus,
+  /// barcode, series, storageConditions, isOwnBrand,
+  /// analogueGroup, imageUrl, intakeWarning
+  static Future<SKUDetailResult?> fetchSKUDetail(String ids) async {
+    if (ApiConfig.useMock) return null;
+
+    try {
+      final response = await _api.call('GetSKUdetail', params: {
+        'ids': ids,
+      });
+
+      if (!response.isOk) return null;
+
+      return SKUDetailResult.fromJson(response.data);
+    } catch (_) {
+      return null;
+    }
   }
 
   // ---------------------------------------------------------------------------

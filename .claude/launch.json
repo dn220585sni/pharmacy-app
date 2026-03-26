@@ -6,6 +6,12 @@
       "runtimeExecutable": "flutter",
       "runtimeArgs": ["run", "-d", "macos"],
       "port": 0
+    },
+    {
+      "name": "pharmacy_web",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": ["-m", "http.server", "8090", "--directory", "/Users/mykolashcherbyna/Desktop/pharmacy_app/build/web"],
+      "port": 8090
     }
   ]
 }

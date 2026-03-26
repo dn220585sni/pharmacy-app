@@ -61,44 +61,65 @@ class CacheApiClient {
   /// [params] — додаткові параметри запиту
   ///
   /// Повертає [CacheResponse] з розпарсеним JSON.
+  /// Максимальна кількість повторних спроб при 503 Service Unavailable.
+  static const _maxRetries = 2;
+  static const _retryDelay = Duration(seconds: 2);
+
   Future<CacheResponse> call(
     String serviceName, {
     Map<String, String>? params,
   }) async {
-    try {
-      final queryParams = {
-        'ServiceName': serviceName,
-        ...?params,
-      };
+    final queryParams = {
+      'ServiceName': serviceName,
+      ...?params,
+    };
 
-      final uri = Uri.parse(ApiConfig.baseUrl).replace(
-        queryParameters: queryParams,
-      );
+    final uri = Uri.parse(ApiConfig.baseUrl).replace(
+      queryParameters: queryParams,
+    );
 
-      final response = await _client
-          .get(uri)
-          .timeout(Duration(seconds: ApiConfig.timeoutSeconds));
+    for (var attempt = 0; attempt <= _maxRetries; attempt++) {
+      try {
+        final response = await _client
+            .get(uri)
+            .timeout(Duration(seconds: ApiConfig.timeoutSeconds));
 
-      if (response.statusCode != 200) {
-        return CacheResponse.error(
-          'HTTP ${response.statusCode}: ${response.reasonPhrase}',
-        );
+        // Retry on 503 Service Unavailable (Caché CSP gateway перевантажений)
+        if (response.statusCode == 503 && attempt < _maxRetries) {
+          await Future.delayed(_retryDelay);
+          continue;
+        }
+
+        if (response.statusCode != 200) {
+          return CacheResponse.error(
+            'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+          );
+        }
+
+        // Декодуємо тіло відповіді.
+        // Спочатку пробуємо UTF-8, якщо не виходить — windows-1251.
+        final bodyString = _decodeBody(response);
+
+        // Парсимо JSON.
+        final json = jsonDecode(bodyString) as Map<String, dynamic>;
+        return CacheResponse.fromJson(json);
+      } on FormatException catch (e) {
+        return CacheResponse.error('Помилка формату відповіді: $e');
+      } on http.ClientException catch (e) {
+        if (attempt < _maxRetries) {
+          await Future.delayed(_retryDelay);
+          continue;
+        }
+        return CacheResponse.error('Помилка з\'єднання: $e');
+      } catch (e) {
+        if (attempt < _maxRetries) {
+          await Future.delayed(_retryDelay);
+          continue;
+        }
+        return CacheResponse.error('Помилка: $e');
       }
-
-      // Декодуємо тіло відповіді.
-      // Спочатку пробуємо UTF-8, якщо не виходить — windows-1251.
-      final bodyString = _decodeBody(response);
-
-      // Парсимо JSON.
-      final json = jsonDecode(bodyString) as Map<String, dynamic>;
-      return CacheResponse.fromJson(json);
-    } on FormatException catch (e) {
-      return CacheResponse.error('Помилка формату відповіді: $e');
-    } on http.ClientException catch (e) {
-      return CacheResponse.error('Помилка з\'єднання: $e');
-    } catch (e) {
-      return CacheResponse.error('Помилка: $e');
     }
+    return CacheResponse.error('Сервер недоступний після $_maxRetries спроб');
   }
 
   /// Декодує тіло HTTP-відповіді з урахуванням кодування.

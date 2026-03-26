@@ -254,7 +254,7 @@ class CartOfferCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               child: Row(
                 children: [
-                  if (drug.unitsPerPackage != null) ...[
+                  if (drug.canSplitByBlister) ...[
                     Expanded(
                       child: GestureDetector(
                         onTap: () => onAddBlister(drug),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/drug.dart';
+import '../services/farmasell_service.dart';
 import '../services/product_browser_service.dart';
 import 'drug_list_item.dart'; // for kColBadge
 import 'instruction_dialog.dart';
@@ -236,6 +237,11 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
       children: [
         // ── Fixed: header ───────────────────────────────────────────────────
         _buildHeader(drug, context),
+
+        // ── Intake warning banner ─────────────────────────────────────────
+        if (drug.intakeWarning != null && drug.intakeWarning!.isNotEmpty)
+          _buildWarningBanner(drug.intakeWarning!),
+
         _buildDivider(),
 
         // ── Основні властивості (collapsible, collapsed by default) ─────────
@@ -419,6 +425,39 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
       )).toList(),
     );
   }
+
+  // ── Intake warning banner ──────────────────────────────────────────────
+
+  Widget _buildWarningBanner(String warning) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7ED),
+        border: Border.all(color: const Color(0xFFFDBA74)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded,
+              size: 16, color: Color(0xFFF59E0B)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              warning,
+              style: const TextStyle(
+                color: Color(0xFF92400E),
+                fontSize: 11.5,
+                fontWeight: FontWeight.w500,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   // ── Collapsible section header ────────────────────────────────────────────
 
@@ -841,7 +880,6 @@ class _StorageSectionState extends State<_StorageSection> {
     final drug = widget.drug;
     final rows = <(String, String)>[
       if (drug.series != null) ('Серія', drug.series!),
-      if (drug.serialNumber != null) ('Сер. №', drug.serialNumber!),
       if (drug.barcode != null) ('Штрих-код', drug.barcode!),
     ];
     if (rows.isEmpty) return const SizedBox.shrink();
@@ -1574,10 +1612,36 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
 
   Future<void> _checkDiscount(String digits) async {
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 400));
-    if (!mounted) return;
 
-    final price = widget.drug.price;
+    final drug = widget.drug;
+    final comingPrice = double.tryParse(drug.comingPrice ?? '');
+
+    // Try real FarmaSell API if data available
+    if (comingPrice != null && drug.comingCode != null) {
+      final sku = drug.skuCode ?? drug.id.replaceFirst('srv_', '');
+      final result = await FarmaSellService.getHelpingHandDiscount(
+        clientPhone: '+380$digits',
+        sku: sku,
+        comingPrice: comingPrice,
+        comingCode: drug.comingCode!,
+      );
+      if (!mounted) return;
+
+      if (result.success && result.discountPrice != null) {
+        setState(() {
+          _discountPrice = result.discountPrice;
+          _isLoading = false;
+        });
+        return;
+      }
+    } else {
+      // Small delay for mock to feel natural
+      await Future.delayed(const Duration(milliseconds: 400));
+      if (!mounted) return;
+    }
+
+    // Fallback: mock discount
+    final price = drug.price;
     final pct = price > 100 ? 0.20 : price > 50 ? 0.18 : 0.15;
     setState(() {
       _discountPrice = (price * (1 - pct)).roundToDouble();
@@ -1589,7 +1653,7 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
     if (_discountPrice == null) return;
     final digits = _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
     Navigator.pop(context);
-    final fractionalQty = (!_wholePackage && widget.drug.unitsPerPackage != null)
+    final fractionalQty = (!_wholePackage && widget.drug.canSplitByBlister)
         ? 1
         : null;
     widget.onConfirm(digits, _discountPrice!, fractionalQty);
@@ -1830,109 +1894,166 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
                   : const SizedBox.shrink(),
             ),
 
-            // Blister / Package toggle (only for splittable drugs, after discount revealed)
-            if (widget.drug.unitsPerPackage != null && _discountPrice != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 14),
-                child: Row(
-                  children: [
-                    _QtyModeButton(
-                      label: 'Упаковка',
-                      isSelected: _wholePackage,
-                      onTap: () => setState(() => _wholePackage = true),
-                    ),
-                    const SizedBox(width: 8),
-                    _QtyModeButton(
-                      label: 'Блістер',
-                      isSelected: !_wholePackage,
-                      onTap: () => setState(() => _wholePackage = false),
-                    ),
-                  ],
-                ),
-              ),
-
             const SizedBox(height: 20),
 
-            // Buttons
-            Row(
-              children: [
-                // Cancel
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF4F5F8),
-                        borderRadius: BorderRadius.circular(10),
-                        border:
-                            Border.all(color: const Color(0xFFE5E7EB)),
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'Відмінити',
-                            style: TextStyle(
-                              color: Color(0xFF6B7280),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
+            // Buttons row
+            if (widget.drug.canSplitByBlister && _discountPrice != null) ...[
+              // Splittable drug — two add-to-cart buttons: Блістер + Упаковку
+              Row(
+                children: [
+                  // Блістер
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() => _wholePackage = false);
+                        _confirm();
+                      },
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE5E7EB)),
                           ),
-                          SizedBox(width: 6),
-                          Text(
-                            'Esc',
-                            style: TextStyle(
-                              color: Color(0xFFD1D5DB),
-                              fontSize: 10,
-                            ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.grid_view_rounded, size: 16, color: Color(0xFF6B7280)),
+                              SizedBox(width: 8),
+                              Text(
+                                'Блістер',
+                                style: TextStyle(
+                                  color: Color(0xFF374151),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                // Add to cart
-                Expanded(
-                  child: GestureDetector(
-                    onTap: _discountPrice != null ? _confirm : null,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                      decoration: BoxDecoration(
-                        color: _discountPrice != null
-                            ? const Color(0xFF1E7DC8)
-                            : const Color(0xFFE5E7EB),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.add_shopping_cart_rounded,
-                            size: 16,
-                            color: _discountPrice != null
-                                ? Colors.white
-                                : const Color(0xFF9CA3AF),
+                  const SizedBox(width: 10),
+                  // Упаковку
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() => _wholePackage = true);
+                        _confirm();
+                      },
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF4A7FC4),
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Додати в чек',
-                            style: TextStyle(
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.shopping_cart_rounded, size: 16, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                'Упаковку',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ] else ...[
+              // Non-splittable or discount not yet revealed — Cancel + Додати в чек
+              Row(
+                children: [
+                  // Cancel
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE5E7EB)),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              'Відмінити',
+                              style: TextStyle(
+                                color: Color(0xFF6B7280),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            SizedBox(width: 6),
+                            Text(
+                              'Esc',
+                              style: TextStyle(
+                                color: Color(0xFFD1D5DB),
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  // Add to cart (whole package)
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: _discountPrice != null ? _confirm : null,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        decoration: BoxDecoration(
+                          color: _discountPrice != null
+                              ? const Color(0xFF4A7FC4)
+                              : const Color(0xFFE5E7EB),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.shopping_cart_rounded,
+                              size: 16,
                               color: _discountPrice != null
                                   ? Colors.white
                                   : const Color(0xFF9CA3AF),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 6),
+                            Text(
+                              'Упаковку',
+                              style: TextStyle(
+                                color: _discountPrice != null
+                                    ? Colors.white
+                                    : const Color(0xFF9CA3AF),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -1940,43 +2061,3 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
   }
 }
 
-// ── Toggle button for Упаковка / Блістер ──────────────────────────────────
-class _QtyModeButton extends StatelessWidget {
-  final String label;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _QtyModeButton({
-    required this.label,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFF1E7DC8) : const Color(0xFFF4F5F8),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: isSelected ? const Color(0xFF1E7DC8) : const Color(0xFFE5E7EB),
-            ),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? Colors.white : const Color(0xFF6B7280),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}

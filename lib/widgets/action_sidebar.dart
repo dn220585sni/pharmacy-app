@@ -42,6 +42,15 @@ class ActionSidebar extends StatelessWidget {
   /// Number of unread messages (badge on button).
   final int unreadMessageCount;
 
+  /// Callback when "Робот" button is tapped.
+  final VoidCallback? onRobotTap;
+
+  /// Whether the robot panel is currently open.
+  final bool robotActive;
+
+  /// Whether the pharmacy has a robot (hides button if false).
+  final bool hasRobot;
+
   const ActionSidebar({
     super.key,
     this.onOrdersTap,
@@ -56,6 +65,9 @@ class ActionSidebar extends StatelessWidget {
     this.onMessagesTap,
     this.messagesActive = false,
     this.unreadMessageCount = 0,
+    this.onRobotTap,
+    this.robotActive = false,
+    this.hasRobot = false,
   });
 
   @override
@@ -98,6 +110,14 @@ class ActionSidebar extends StatelessWidget {
         isActive: expensesActive,
         hotkeyLabel: 'Ctrl E',
       ),
+      if (hasRobot)
+        _SidebarItem(
+          icon: Icons.smart_toy_outlined,
+          tooltip: 'Робот',
+          onTap: onRobotTap,
+          isActive: robotActive,
+          hotkeyLabel: 'Ctrl B',
+        ),
       _SidebarItem(icon: Icons.explore_outlined, tooltip: 'Путівник'),
       _SidebarItem(
         tooltip: 'АНЦДок',

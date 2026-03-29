@@ -30,8 +30,17 @@ class ExpensesPanelState extends State<ExpensesPanel> {
   late List<CashExpense> _filteredExpenses;
   int _highlightedIndex = -1;
   String _selectedFilter = 'Всі';
+  DateTime? _dateFrom;
+  DateTime? _dateTo;
+  String? _selectedRegister;
 
   bool get _hasQuery => _searchController.text.trim().isNotEmpty;
+
+  List<String> get _availableRegisters {
+    final regs = _allExpenses.map((e) => e.register).toSet().toList();
+    regs.sort();
+    return regs;
+  }
 
   static const _primaryFilters = [
     'Всі',
@@ -110,6 +119,22 @@ class ExpensesPanelState extends State<ExpensesPanel> {
               return true;
           }
         }).toList();
+      }
+
+      // Date range filter
+      if (_dateFrom != null) {
+        final from = DateTime(_dateFrom!.year, _dateFrom!.month, _dateFrom!.day);
+        list = list.where((e) => !e.dateTime.isBefore(from)).toList();
+      }
+      if (_dateTo != null) {
+        final to = DateTime(_dateTo!.year, _dateTo!.month, _dateTo!.day)
+            .add(const Duration(days: 1));
+        list = list.where((e) => e.dateTime.isBefore(to)).toList();
+      }
+
+      // Register filter
+      if (_selectedRegister != null) {
+        list = list.where((e) => e.register == _selectedRegister).toList();
       }
 
       // Text search
@@ -196,6 +221,7 @@ class ExpensesPanelState extends State<ExpensesPanel> {
         _buildListHeader(),
         const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
         _buildSearchField(),
+        _buildDateAndRegisterRow(),
         _buildFilterChips(),
         const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
         Expanded(child: _buildExpensesList()),
@@ -299,6 +325,165 @@ class ExpensesPanelState extends State<ExpensesPanel> {
                 : null,
           ),
         ),
+      ),
+    );
+  }
+
+  // ── Date range & register filter row ──────────────────────────────────────
+
+  Future<void> _pickDate({required bool isFrom}) async {
+    final initial = isFrom ? _dateFrom : _dateTo;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial ?? DateTime.now(),
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now(),
+      locale: const Locale('uk'),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: Color(0xFF1E7DC8),
+            onPrimary: Colors.white,
+            surface: Colors.white,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (isFrom) {
+        _dateFrom = picked;
+      } else {
+        _dateTo = picked;
+      }
+    });
+    _applyFilters();
+  }
+
+  Widget _buildDateChip(String label, DateTime? value, {required bool isFrom}) {
+    final hasValue = value != null;
+    final text = hasValue
+        ? '${value.day.toString().padLeft(2, '0')}.${value.month.toString().padLeft(2, '0')}.${value.year}'
+        : label;
+    return GestureDetector(
+      onTap: () => _pickDate(isFrom: isFrom),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: hasValue ? const Color(0xFFE8F3FB) : const Color(0xFFF4F5F8),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: hasValue ? const Color(0xFF1E7DC8) : const Color(0xFFE5E7EB),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.calendar_today_rounded,
+                size: 12,
+                color: hasValue
+                    ? const Color(0xFF1E7DC8)
+                    : const Color(0xFF9CA3AF)),
+            const SizedBox(width: 4),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: hasValue ? FontWeight.w600 : FontWeight.w400,
+                color: hasValue
+                    ? const Color(0xFF1E7DC8)
+                    : const Color(0xFF9CA3AF),
+              ),
+            ),
+            if (hasValue) ...[
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    if (isFrom) {
+                      _dateFrom = null;
+                    } else {
+                      _dateTo = null;
+                    }
+                  });
+                  _applyFilters();
+                },
+                child: const Icon(Icons.close_rounded,
+                    size: 12, color: Color(0xFF1E7DC8)),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDateAndRegisterRow() {
+    final registers = _availableRegisters;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+      child: Row(
+        children: [
+          _buildDateChip('від', _dateFrom, isFrom: true),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4),
+            child: Text('—',
+                style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
+          ),
+          _buildDateChip('до', _dateTo, isFrom: false),
+          const SizedBox(width: 8),
+          if (registers.length > 1)
+            Expanded(
+              child: Container(
+                height: 28,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  color: _selectedRegister != null
+                      ? const Color(0xFFE8F3FB)
+                      : const Color(0xFFF4F5F8),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _selectedRegister != null
+                        ? const Color(0xFF1E7DC8)
+                        : const Color(0xFFE5E7EB),
+                  ),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String?>(
+                    value: _selectedRegister,
+                    isExpanded: true,
+                    isDense: true,
+                    icon: const Icon(Icons.expand_more_rounded,
+                        size: 16, color: Color(0xFF9CA3AF)),
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF374151)),
+                    hint: const Text('Всі каси',
+                        style: TextStyle(
+                            fontSize: 11, color: Color(0xFF9CA3AF))),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Всі каси',
+                            style: TextStyle(
+                                fontSize: 11, color: Color(0xFF9CA3AF))),
+                      ),
+                      ...registers.map((r) => DropdownMenuItem<String?>(
+                            value: r,
+                            child: Text(
+                              r.length > 18 ? '${r.substring(0, 18)}…' : r,
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                          )),
+                    ],
+                    onChanged: (value) {
+                      setState(() => _selectedRegister = value);
+                      _applyFilters();
+                    },
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

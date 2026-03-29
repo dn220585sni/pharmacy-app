@@ -33,6 +33,9 @@ import '../widgets/reservation_success_dialog.dart';
 import '../widgets/prescription_panel.dart';
 import '../widgets/social_projects_panel.dart';
 import '../widgets/messages_panel.dart';
+import '../widgets/barcode_input_dialog.dart';
+import '../widgets/robot_panel.dart';
+import '../services/api_config.dart';
 import '../data/mock_messages.dart';
 import '../models/prescription.dart';
 import '../data/mock_nearby_pharmacies.dart';
@@ -131,9 +134,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Whether the messages panel is shown in the right column.
   bool _messagesOpen = false;
+  bool _robotOpen = false;
 
   /// Key for accessing MessagesPanelState.
   final _messagesPanelKey = GlobalKey<MessagesPanelState>();
+  final _robotPanelKey = GlobalKey<RobotPanelState>();
 
   void _toggleCart() {
     setState(() {
@@ -144,6 +149,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _prescriptionOpen = false;
         _socialProjectsOpen = false;
         _messagesOpen = false;
+        _robotOpen = false;
       }
     });
     if (_cartOpen) _focusPhoneField();
@@ -158,6 +164,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _prescriptionOpen = false;
         _socialProjectsOpen = false;
         _messagesOpen = false;
+        _robotOpen = false;
       }
     });
     if (_ordersOpen) {
@@ -176,6 +183,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _prescriptionOpen = false;
         _socialProjectsOpen = false;
         _messagesOpen = false;
+        _robotOpen = false;
       }
     });
     if (_expensesOpen) {
@@ -185,18 +193,24 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
   }
 
-  void _togglePrescription() {
-    setState(() {
-      _prescriptionOpen = !_prescriptionOpen;
-      if (_prescriptionOpen) {
+  void _togglePrescription() async {
+    if (_prescriptionOpen) {
+      // Closing — check for refusal reason
+      final canClose =
+          await _prescriptionPanelKey.currentState?.tryCloseWithRefusal() ??
+              true;
+      if (!canClose) return;
+      setState(() => _prescriptionOpen = false);
+    } else {
+      setState(() {
+        _prescriptionOpen = true;
         _cartOpen = false;
         _ordersOpen = false;
         _expensesOpen = false;
         _socialProjectsOpen = false;
         _messagesOpen = false;
-      }
-    });
-    if (_prescriptionOpen) {
+        _robotOpen = false;
+      });
       _searchFocusNode.unfocus();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _prescriptionPanelKey.currentState?.focusSearch();
@@ -213,6 +227,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _expensesOpen = false;
         _prescriptionOpen = false;
         _messagesOpen = false;
+        _robotOpen = false;
       }
     });
     if (_socialProjectsOpen) {
@@ -231,6 +246,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _expensesOpen = false;
         _prescriptionOpen = false;
         _socialProjectsOpen = false;
+        _robotOpen = false;
       }
     });
     if (_messagesOpen) {
@@ -238,6 +254,20 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _messagesPanelKey.currentState?.focusSearch();
       });
     }
+  }
+
+  void _toggleRobot() {
+    setState(() {
+      _robotOpen = !_robotOpen;
+      if (_robotOpen) {
+        _cartOpen = false;
+        _ordersOpen = false;
+        _expensesOpen = false;
+        _prescriptionOpen = false;
+        _socialProjectsOpen = false;
+        _messagesOpen = false;
+      }
+    });
   }
 
   void _addPrescriptionToCart(
@@ -467,6 +497,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _toggleExpenses();
         return true;
       }
+      // ── Ctrl+B: toggle robot panel ────────────────────────────────────
+      if (event.logicalKey == LogicalKeyboardKey.keyB &&
+          ApiConfig.hasRobot) {
+        _toggleRobot();
+        return true;
+      }
       // ── Ctrl+R: toggle e-Prescription panel ────────────────────────────
       if (event.logicalKey == LogicalKeyboardKey.keyR) {
         _togglePrescription();
@@ -489,6 +525,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // ── F2: toggle cart panel (focus handled inside _toggleCart) ────────────
     if (event.logicalKey == LogicalKeyboardKey.f2) {
       _toggleCart();
+      return true;
+    }
+
+    // ── F4: manual barcode input ──────────────────────────────────────────
+    if (event.logicalKey == LogicalKeyboardKey.f4) {
+      _showManualBarcodeDialog();
       return true;
     }
 
@@ -550,6 +592,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _expensesPanelKey.currentState?.closeDetail();
       } else if (_expensesOpen) {
         setState(() => _expensesOpen = false);
+      } else if (_robotOpen) {
+        setState(() => _robotOpen = false);
       } else if (_socialProjectsOpen) {
         setState(() => _socialProjectsOpen = false);
       } else if (_outOfStockPanelKey.currentState?.isEdkActive == true) {
@@ -1018,6 +1062,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _externalAnalogues = results;
       });
     }).catchError((_) {});
+  }
+
+  // ── Manual barcode input (F4) ───────────────────────────────────────────
+  Future<void> _showManualBarcodeDialog() async {
+    final barcode = await showBarcodeInputDialog(context: context);
+    if (barcode != null && barcode.isNotEmpty && mounted) {
+      _searchController.text = barcode;
+      _lookupBarcodeOnServer(barcode);
+    }
   }
 
   /// Call Caché GetSKUprice by barcode; if found, insert Drug at top of results.
@@ -1967,7 +2020,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                                                                   key: _messagesPanelKey,
                                                                   onClose: _toggleMessages,
                                                                 )
-                                                              : _buildRightPanel(),
+                                                              : _robotOpen
+                                                                  ? RobotPanel(
+                                                                      key: _robotPanelKey,
+                                                                      onClose: _toggleRobot,
+                                                                      cart: _cart,
+                                                                    )
+                                                                  : _buildRightPanel(),
                                     ),
                                   ],
                                 ),
@@ -2020,6 +2079,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                     unreadMessageCount: mockMessages
                         .where((m) => m.folder == 'inbox' && !m.isRead)
                         .length,
+                    onRobotTap: _toggleRobot,
+                    robotActive: _robotOpen,
+                    hasRobot: ApiConfig.hasRobot,
                   ),
                 ],
               ),

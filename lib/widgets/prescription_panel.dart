@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/prescription.dart';
 import '../models/drug.dart';
 import '../data/mock_prescriptions.dart';
+import 'prescription_refusal_dialog.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // PRESCRIPTION PANEL — right-panel widget for e-Prescription flow.
@@ -36,6 +37,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
   // ── Step 2: results ───────────────────────────────────────────────────────
   Prescription? _prescription;
   List<PrescriptionMatch> _matches = [];
+  bool _prescriptionWasLoaded = false;
 
   // ── Paper prescription editable fields ──────────────────────────────────
   final _paperMedicationCtr = TextEditingController();
@@ -140,6 +142,18 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
     _numberFocusNode.requestFocus();
   }
 
+  /// Try to close the panel. If a prescription was loaded during this session,
+  /// show a refusal reason dialog first. Returns true if the panel can close.
+  Future<bool> tryCloseWithRefusal() async {
+    if (!_prescriptionWasLoaded) return true;
+    final reason = await showPrescriptionRefusalDialog(context: context);
+    if (reason == null) return false; // user cancelled — stay on panel
+    // TODO: send refusal reason to server when API is ready
+    debugPrint('[Rx refusal] $reason');
+    _prescriptionWasLoaded = false;
+    return true;
+  }
+
   bool get _is1303Type =>
       _selectedType == PrescriptionType.program1303 ||
       _selectedType == PrescriptionType.paper1303;
@@ -202,6 +216,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
         _paperProgramCtr.text = 'Програма 1303';
       }
       setState(() {
+        _prescriptionWasLoaded = true;
         _prescription = Prescription(
           number: number,
           type: _selectedType,
@@ -229,6 +244,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
 
     final matches = findPrescriptionMatches(rx, widget.drugCatalog);
     setState(() {
+      _prescriptionWasLoaded = true;
       _prescription = rx;
       _matches = matches;
       _errorMessage = null;

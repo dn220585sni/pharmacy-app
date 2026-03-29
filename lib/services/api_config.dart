@@ -15,4 +15,9 @@ class ApiConfig {
 
   /// Таймаут запиту в секундах.
   static const int timeoutSeconds = 10;
+
+  /// Чи має аптека робот для автоматичної подачі ліків.
+  /// true  = кнопка «Робот» видима, per-item привезення активне
+  /// false = функціонал робота прихований
+  static const bool hasRobot = true;
 }

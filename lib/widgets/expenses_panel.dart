@@ -338,7 +338,6 @@ class ExpensesPanelState extends State<ExpensesPanel> {
       initialDate: initial ?? DateTime.now(),
       firstDate: DateTime(2024),
       lastDate: DateTime.now(),
-      locale: const Locale('uk'),
       builder: (context, child) => Theme(
         data: Theme.of(context).copyWith(
           colorScheme: const ColorScheme.light(

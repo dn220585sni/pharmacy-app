@@ -319,7 +319,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Auth card is visible when a drug row is selected OR cart is open.
   /// Hidden only on the dashboard view (no drug selected, cart closed).
-  bool get _showAuthCard => _cartOpen || _ordersOpen || _expensesOpen || _prescriptionOpen || _socialProjectsOpen || _messagesOpen || _selectedDrug != null;
+  bool get _showAuthCard => _cartOpen || _ordersOpen || _expensesOpen || _prescriptionOpen || _socialProjectsOpen || _messagesOpen || _robotOpen || _selectedDrug != null;
 
   // ── Customer loyalty (phone auth) ─────────────────────────────────────────
   final _loyaltyPhoneController = TextEditingController();

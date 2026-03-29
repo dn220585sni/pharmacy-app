@@ -283,6 +283,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             copayment: match.copayment,
             programName: rx.programName,
             prescriptionType: rx.type,
+            quantityUnit: rx.quantityUnit,
+            concentration: rx.concentration,
+            diseaseCategory: rx.diseaseCategory,
+            medicalInstitution: rx.medicalInstitution,
           ),
         ));
       }

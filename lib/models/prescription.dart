@@ -83,6 +83,12 @@ class Prescription {
   final List<PrescriptionItem> items;
   final String? redemptionCode;
 
+  // ── Paper 1303 extra fields ──────────────────────────────────────────────
+  final String? concentration; // концентрація діючої речовини
+  final String? quantityUnit; // таблетки, дози, мл, шт, упаковки
+  final String? diseaseCategory; // категорія захворювання
+  final String? medicalInstitution; // медичний заклад
+
   const Prescription({
     required this.number,
     required this.type,
@@ -98,6 +104,10 @@ class Prescription {
     required this.uuid,
     required this.items,
     this.redemptionCode,
+    this.concentration,
+    this.quantityUnit,
+    this.diseaseCategory,
+    this.medicalInstitution,
   });
 }
 
@@ -111,6 +121,12 @@ class PrescriptionCartData {
   final PrescriptionType prescriptionType;
   final String? redemptionCode;
 
+  // ── Paper 1303 extra fields ──────────────────────────────────────────────
+  final String? quantityUnit; // таблетки, дози, мл, шт, упаковки
+  final String? concentration; // концентрація діючої речовини
+  final String? diseaseCategory; // категорія захворювання
+  final String? medicalInstitution; // медичний заклад
+
   const PrescriptionCartData({
     required this.prescriptionNumber,
     required this.reimbursementPrice,
@@ -118,6 +134,10 @@ class PrescriptionCartData {
     required this.programName,
     required this.prescriptionType,
     this.redemptionCode,
+    this.quantityUnit,
+    this.concentration,
+    this.diseaseCategory,
+    this.medicalInstitution,
   });
 
   /// Paper 1303 prescriptions don't need a redemption code.

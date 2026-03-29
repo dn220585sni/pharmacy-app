@@ -41,12 +41,18 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
 
   // ── Paper prescription editable fields ──────────────────────────────────
   final _paperMedicationCtr = TextEditingController();
+  final _paperConcentrationCtr = TextEditingController();
   final _paperQtyCtr = TextEditingController();
+  String _paperQtyUnit = 'таблетки';
   final _paperPatientCtr = TextEditingController();
   final _paperDoctorCtr = TextEditingController();
   final _paperProgramCtr = TextEditingController();
   final _paperCompensationCtr = TextEditingController();
+  final _paperDiseaseCategoryCtr = TextEditingController();
+  final _paperMedInstitutionCtr = TextEditingController();
   DateTime _paperDate = DateTime.now();
+
+  static const _qtyUnits = ['таблетки', 'дози', 'мл', 'шт', 'упаковки'];
 
   bool get _isPaperType =>
       _selectedType == PrescriptionType.paper ||
@@ -64,11 +70,15 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
 
   void _resetPaperFields() {
     _paperMedicationCtr.clear();
+    _paperConcentrationCtr.clear();
     _paperQtyCtr.clear();
+    _paperQtyUnit = 'таблетки';
     _paperPatientCtr.clear();
     _paperDoctorCtr.clear();
     _paperProgramCtr.clear();
     _paperCompensationCtr.clear();
+    _paperDiseaseCategoryCtr.clear();
+    _paperMedInstitutionCtr.clear();
     _paperDate = DateTime.now();
   }
 
@@ -194,11 +204,14 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
     _numberController.dispose();
     _numberFocusNode.dispose();
     _paperMedicationCtr.dispose();
+    _paperConcentrationCtr.dispose();
     _paperQtyCtr.dispose();
     _paperPatientCtr.dispose();
     _paperDoctorCtr.dispose();
     _paperProgramCtr.dispose();
     _paperCompensationCtr.dispose();
+    _paperDiseaseCategoryCtr.dispose();
+    _paperMedInstitutionCtr.dispose();
     super.dispose();
   }
 
@@ -940,13 +953,16 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
           _paperField('Призначення *', _paperMedicationCtr,
               hint: 'МНН або назва препарату',
               onChanged: (_) => _updatePaperMatches()),
-          _paperField('Кількість *', _paperQtyCtr,
-              hint: 'шт',
-              keyboard: TextInputType.number,
-              onChanged: (_) => _updatePaperMatches()),
+          _paperField('Концентрація', _paperConcentrationCtr,
+              hint: 'напр. 500 мг'),
+          _paperQtyWithUnitField(),
           _paperField('Пацієнт *', _paperPatientCtr, hint: 'ПІБ пацієнта'),
           _paperDateField(),
           _paperField('Лікар *', _paperDoctorCtr, hint: 'ПІБ лікаря'),
+          _paperField('Мед. заклад', _paperMedInstitutionCtr,
+              hint: 'Назва закладу'),
+          _paperField('Категорія', _paperDiseaseCategoryCtr,
+              hint: 'Категорія захворювання'),
           _paperField('Програма *', _paperProgramCtr,
               hint: 'Назва програми'),
           _paperField('% компенс. *', _paperCompensationCtr,
@@ -961,6 +977,107 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
               style: TextStyle(fontSize: 9.5, color: Color(0xFFEF4444)),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _paperQtyWithUnitField() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 80,
+            child: RichText(
+              text: const TextSpan(
+                text: 'Кількість',
+                style: TextStyle(
+                    fontSize: 10.5,
+                    color: Color(0xFF9CA3AF),
+                    fontWeight: FontWeight.w500),
+                children: [
+                  TextSpan(
+                      text: ' *',
+                      style: TextStyle(color: Color(0xFFEF4444))),
+                ],
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 60,
+            height: 28,
+            child: TextField(
+              controller: _paperQtyCtr,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF1C1C2E)),
+              onChanged: (v) {
+                setState(() {});
+                _updatePaperMatches();
+              },
+              decoration: InputDecoration(
+                hintText: '0',
+                hintStyle:
+                    TextStyle(fontSize: 11, color: Colors.grey.shade400),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 6),
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide:
+                      const BorderSide(color: Color(0xFFE5E7EB)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide:
+                      const BorderSide(color: Color(0xFFE5E7EB)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: const BorderSide(
+                      color: Color(0xFFD97706), width: 1.5),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: SizedBox(
+              height: 28,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _paperQtyUnit,
+                    isExpanded: true,
+                    isDense: true,
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF1C1C2E)),
+                    icon: const Icon(Icons.arrow_drop_down, size: 16),
+                    items: _qtyUnits
+                        .map((u) => DropdownMenuItem(
+                            value: u,
+                            child: Text(u,
+                                style: const TextStyle(fontSize: 11))))
+                        .toList(),
+                    onChanged: (v) => setState(() => _paperQtyUnit = v!),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1500,7 +1617,34 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
               height: 38,
               child: ElevatedButton.icon(
                 onPressed: canAdd
-                    ? () => widget.onAddToCart(_selected, _prescription!)
+                    ? () {
+                        // Update prescription with paper form fields
+                        final rx = _isPaperType
+                            ? Prescription(
+                                number: _prescription!.number,
+                                type: _prescription!.type,
+                                status: _prescription!.status,
+                                issueDate: _paperDate,
+                                medication: _paperMedicationCtr.text.trim(),
+                                quantity: int.tryParse(_paperQtyCtr.text.trim()) ?? 1,
+                                patientName: _paperPatientCtr.text.trim(),
+                                doctorName: _paperDoctorCtr.text.trim(),
+                                clinicName: _paperMedInstitutionCtr.text.trim().isEmpty
+                                    ? null : _paperMedInstitutionCtr.text.trim(),
+                                programName: _paperProgramCtr.text.trim(),
+                                uuid: _prescription!.uuid,
+                                items: _prescription!.items,
+                                concentration: _paperConcentrationCtr.text.trim().isEmpty
+                                    ? null : _paperConcentrationCtr.text.trim(),
+                                quantityUnit: _paperQtyUnit,
+                                diseaseCategory: _paperDiseaseCategoryCtr.text.trim().isEmpty
+                                    ? null : _paperDiseaseCategoryCtr.text.trim(),
+                                medicalInstitution: _paperMedInstitutionCtr.text.trim().isEmpty
+                                    ? null : _paperMedInstitutionCtr.text.trim(),
+                              )
+                            : _prescription!;
+                        widget.onAddToCart(_selected, rx);
+                      }
                     : null,
                 icon: const Icon(Icons.add_shopping_cart, size: 16),
                 label: const Text('Додати до чеку',

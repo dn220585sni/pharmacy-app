@@ -92,6 +92,9 @@ class OrdersPanelState extends State<OrdersPanel>
   /// Whether orders are loading from API.
   bool _isLoading = false;
 
+  /// Selected date for orders (defaults to today).
+  DateTime _ordersDate = DateTime.now();
+
   // ── CheckoutMixin overrides ─────────────────────────────────────────────
 
   @override
@@ -166,8 +169,13 @@ class OrdersPanelState extends State<OrdersPanel>
       return;
     }
     setState(() => _isLoading = true);
+    final dateStr =
+        '${_ordersDate.day.toString().padLeft(2, '0')}.${_ordersDate.month.toString().padLeft(2, '0')}.${_ordersDate.year}';
     try {
-      final orders = await OrderService.fetchOrders();
+      final orders = await OrderService.fetchOrders(
+        dateFrom: dateStr,
+        dateTo: dateStr,
+      );
       if (!mounted) return;
       setState(() {
         _orders = orders;
@@ -176,10 +184,9 @@ class OrdersPanelState extends State<OrdersPanel>
       });
     } catch (e) {
       if (!mounted) return;
-      // Fallback to mock on network error
       setState(() {
-        _orders = List<InternetOrder>.from(mockOrders);
-        _filteredOrders = _sorted(_orders);
+        _orders = [];
+        _filteredOrders = [];
         _isLoading = false;
       });
     }
@@ -187,6 +194,28 @@ class OrdersPanelState extends State<OrdersPanel>
 
   /// Public — reload orders from API (pull-to-refresh / manual).
   void refreshOrders() => _loadOrders();
+
+  Future<void> _pickOrdersDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _ordersDate,
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now(),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: Color(0xFF1E7DC8),
+            onPrimary: Colors.white,
+            surface: Colors.white,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _ordersDate = picked);
+    _loadOrders();
+  }
 
   @override
   void didUpdateWidget(covariant OrdersPanel oldWidget) {
@@ -676,6 +705,35 @@ class OrdersPanelState extends State<OrdersPanel>
             ),
           ),
           const Spacer(),
+          // Date picker button
+          GestureDetector(
+            onTap: _pickOrdersDate,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF4F5F8),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.calendar_today_rounded,
+                      size: 12, color: Color(0xFF6B7280)),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${_ordersDate.day.toString().padLeft(2, '0')}.${_ordersDate.month.toString().padLeft(2, '0')}.${_ordersDate.year}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF374151),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
           // Refresh button
           if (!_isLoading)
             HoverIconButton(

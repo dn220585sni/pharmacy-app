@@ -9,6 +9,8 @@ import '../models/drug.dart';
 import '../data/mock_orders.dart';
 import '../data/edk_offers.dart';
 import '../data/mock_drugs.dart';
+import '../services/api_config.dart';
+import '../services/order_service.dart';
 import 'checkout/bonus_discount_block.dart';
 import 'checkout/cash_change_section.dart';
 import 'checkout/payment_method_toggle.dart';
@@ -69,13 +71,15 @@ class OrdersPanelState extends State<OrdersPanel>
   bool _showDisbandedOrders = false;
 
   /// Active filter chip labels (multi-select, OR logic).
-  Set<String> _activeFilters = {'Термінові', 'Зібрані'};
+  Set<String> _activeFilters = {'Нові', 'В обробці', 'Зібрані'};
 
   /// All available filter labels.
   static const List<String> _filterLabels = [
     'Всі',
-    'Термінові',
+    'Нові',
+    'В обробці',
     'Зібрані',
+    'Термінові',
     'Відпущені',
     'Розформовані',
     'Відмова клієнта',
@@ -84,6 +88,9 @@ class OrdersPanelState extends State<OrdersPanel>
 
   /// Whether the search field has non-empty text (drives highlight).
   bool get _hasQuery => _searchController.text.trim().isNotEmpty;
+
+  /// Whether orders are loading from API.
+  bool _isLoading = false;
 
   // ── CheckoutMixin overrides ─────────────────────────────────────────────
 
@@ -143,10 +150,43 @@ class OrdersPanelState extends State<OrdersPanel>
   @override
   void initState() {
     super.initState();
-    _orders = List<InternetOrder>.from(mockOrders);
-    _filteredOrders = _sorted(_orders);
+    _orders = [];
+    _filteredOrders = [];
     _searchController.addListener(_filterOrders);
+    _loadOrders();
   }
+
+  /// Load orders from GetOrders API (or mock fallback).
+  Future<void> _loadOrders() async {
+    if (ApiConfig.useMock) {
+      setState(() {
+        _orders = List<InternetOrder>.from(mockOrders);
+        _filteredOrders = _sorted(_orders);
+      });
+      return;
+    }
+    setState(() => _isLoading = true);
+    try {
+      final orders = await OrderService.fetchOrders();
+      if (!mounted) return;
+      setState(() {
+        _orders = orders;
+        _filteredOrders = _sorted(_orders);
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      // Fallback to mock on network error
+      setState(() {
+        _orders = List<InternetOrder>.from(mockOrders);
+        _filteredOrders = _sorted(_orders);
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// Public — reload orders from API (pull-to-refresh / manual).
+  void refreshOrders() => _loadOrders();
 
   @override
   void didUpdateWidget(covariant OrdersPanel oldWidget) {
@@ -172,6 +212,10 @@ class OrdersPanelState extends State<OrdersPanel>
     if (_activeFilters.contains('Всі')) return true;
     for (final f in _activeFilters) {
       switch (f) {
+        case 'Нові':
+          if (o.status == OrderStatus.newOrder) return true;
+        case 'В обробці':
+          if (o.status == OrderStatus.inProgress) return true;
         case 'Термінові':
           if (o.isUrgent) return true;
         case 'Зібрані':
@@ -632,6 +676,19 @@ class OrdersPanelState extends State<OrdersPanel>
             ),
           ),
           const Spacer(),
+          // Refresh button
+          if (!_isLoading)
+            HoverIconButton(
+              icon: Icons.refresh_rounded,
+              tooltip: 'Оновити замовлення',
+              onTap: () => _loadOrders(),
+            )
+          else
+            const SizedBox(
+              width: 16, height: 16,
+              child: CircularProgressIndicator(strokeWidth: 1.5),
+            ),
+          const SizedBox(width: 4),
           // Close button
           HoverIconButton(
             icon: Icons.close_rounded,
@@ -737,6 +794,28 @@ class OrdersPanelState extends State<OrdersPanel>
   }
 
   Widget _buildOrdersList() {
+    if (_isLoading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(height: 12),
+              Text(
+                'Завантаження замовлень...',
+                style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     if (_filteredOrders.isEmpty) {
       return const Center(
         child: Padding(
@@ -923,7 +1002,7 @@ class OrdersPanelState extends State<OrdersPanel>
                     ),
                   ),
                 ),
-                if (order.lockerCell != null) ...[
+                if (order.isLockerEligible) ...[
                   const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -933,21 +1012,38 @@ class OrdersPanelState extends State<OrdersPanel>
                       borderRadius: BorderRadius.circular(4),
                       border: Border.all(color: const Color(0xFFBFDBFE)),
                     ),
-                    child: Row(
+                    child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.inventory_2_outlined,
+                        Icon(Icons.lock_outline_rounded,
                             size: 11, color: Color(0xFF1E7DC8)),
-                        const SizedBox(width: 4),
+                        SizedBox(width: 4),
                         Text(
-                          '${order.lockerCell}',
-                          style: const TextStyle(
+                          'Лікомат',
+                          style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
                             color: Color(0xFF1E7DC8),
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                ],
+                // Customer info
+                if (order.customerPhone != null || order.customerName != null) ...[
+                  const Spacer(),
+                  Icon(Icons.person_outline_rounded,
+                      size: 12, color: const Color(0xFF9CA3AF)),
+                  const SizedBox(width: 4),
+                  Text(
+                    [
+                      if (order.customerName != null) order.customerName!,
+                      if (order.customerPhone != null) order.customerPhone!,
+                    ].join(' · '),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF6B7280),
                     ),
                   ),
                 ],
@@ -1904,8 +2000,13 @@ class _OrderListTileState extends State<_OrderListTile> {
                       ],
                     ),
                     const SizedBox(height: 2),
+                    // Source + customer name + items summary
                     Text(
-                      itemsSummary,
+                      [
+                        order.typeLabel,
+                        if (order.customerName != null) order.customerName!,
+                        itemsSummary,
+                      ].join(' · '),
                       style: const TextStyle(
                         fontSize: 11,
                         color: Color(0xFF9CA3AF),

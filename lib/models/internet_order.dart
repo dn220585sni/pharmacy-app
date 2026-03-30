@@ -1,11 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Internet order model — for online orders (TabletkiUA, Glovo, etc.)
+// Internet order model — for online orders (TabletkiUA, ANCSite, apps, etc.)
 // ─────────────────────────────────────────────────────────────────────────────
+
+import 'package:flutter/foundation.dart';
 
 enum OrderStatus {
   newOrder,           // Нове
-  inProgress,         // В обробці
-  collected,          // Зібране
+  inProgress,         // В обробці (apteka make)
+  collected,          // Зібране (apteka pay)
   dispensed,          // Видане
   refused,            // Розформоване (disbanded — items returned to shelves)
   customerRefusal,    // Відмова клієнта
@@ -13,13 +15,21 @@ enum OrderStatus {
 }
 
 enum OrderType {
-  tabletkiUA,
-  glovo,
-  novaPoshta,
+  tabletkiUA,   // tabletkiua — Таблетки
+  ancSite,      // ANCSite — Сайт АНЦ
+  iosApp,       // iosApp — Додаток АНЦ
+  androidApp,   // androidApp — Додаток АНЦ
+  likTas,       // lik-tas — Страхові
+  otherShop,    // othershop — Інші
+  optimTabl,    // optimtabl — замовлення Таблетки (Оптима)
+  glovo,        // legacy — Glovo
+  novaPoshta,   // legacy — Нова Пошта
+  unknown,
 }
 
 class OrderItem {
-  final String sku;
+  final String sku;     // ids (s-код)
+  final String? ukod;
   final String name;
   final String? manufacturer;
   final double quantity;
@@ -31,6 +41,7 @@ class OrderItem {
 
   const OrderItem({
     required this.sku,
+    this.ukod,
     required this.name,
     this.manufacturer,
     required this.quantity,
@@ -40,6 +51,18 @@ class OrderItem {
     this.expiryDate,
     this.refusalReason,
   });
+
+  factory OrderItem.fromJson(Map<String, dynamic> json) {
+    final qty = double.tryParse(json['qty']?.toString() ?? '') ?? 0;
+    return OrderItem(
+      sku: json['ids']?.toString() ?? '',
+      ukod: json['ukod']?.toString(),
+      name: json['name']?.toString() ?? '',
+      quantity: qty,
+      price: double.tryParse(json['price']?.toString() ?? '') ?? 0,
+      total: double.tryParse(json['total']?.toString() ?? '') ?? 0,
+    );
+  }
 }
 
 class InternetOrder {
@@ -52,12 +75,12 @@ class InternetOrder {
   final OrderType type;
   final List<OrderItem> items;
   final String? customerPhone;
+  final String? customerName;
 
   /// Marked by external service — urgent orders (Glovo, locker deadline, etc.)
   final bool isUrgent;
 
   /// Whether this order can be placed into a locker (parameter from service).
-  /// Locker-eligible orders are automatically urgent.
   final bool isLockerEligible;
 
   /// Reason for pharmacy refusal (set when status == pharmacyRefusal).
@@ -73,10 +96,107 @@ class InternetOrder {
     required this.type,
     required this.items,
     this.customerPhone,
+    this.customerName,
     this.isUrgent = false,
     this.isLockerEligible = false,
     this.refusalReason,
   });
+
+  // ── JSON parsing from GetOrders API ──────────────────────────────────────
+
+  factory InternetOrder.fromJson(Map<String, dynamic> json) {
+    final items = (json['items'] as List<dynamic>?)
+            ?.map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [];
+
+    final status = _parseStatus(json['status']?.toString() ?? '');
+    final type = _parseType(json['orderType']?.toString() ?? '');
+    final isLocker = json['isLockerEligible']?.toString() == '1';
+
+    // Parse date "09.03.2026 20:25:06"
+    DateTime dateTime;
+    try {
+      final parts = (json['createdAt']?.toString() ?? '').split(' ');
+      final dateParts = parts[0].split('.');
+      final timePart = parts.length > 1 ? parts[1] : '00:00:00';
+      dateTime = DateTime.parse(
+        '${dateParts[2]}-${dateParts[1]}-${dateParts[0]}T$timePart',
+      );
+    } catch (_) {
+      dateTime = DateTime.now();
+    }
+
+    return InternetOrder(
+      id: json['orderId']?.toString() ?? '',
+      reserveNumber: json['orderNumber']?.toString() ?? '',
+      dateTime: dateTime,
+      total: double.tryParse(json['totalAmount']?.toString() ?? '') ?? 0,
+      status: status,
+      type: type,
+      items: items,
+      customerPhone: json['customerPhone']?.toString(),
+      customerName: _cleanName(json['customerName']?.toString()),
+      isUrgent: isLocker, // locker-eligible orders are automatically urgent
+      isLockerEligible: isLocker,
+    );
+  }
+
+  static OrderStatus _parseStatus(String raw) {
+    switch (raw.toLowerCase()) {
+      case 'new':
+        return OrderStatus.newOrder;
+      case 'apteka make':
+        return OrderStatus.inProgress;
+      case 'apteka pay':
+        return OrderStatus.collected;
+      case 'dispensed':
+      case 'done':
+        return OrderStatus.dispensed;
+      case 'refused':
+      case 'disbanded':
+        return OrderStatus.refused;
+      case 'customer_refusal':
+        return OrderStatus.customerRefusal;
+      case 'pharmacy_refusal':
+        return OrderStatus.pharmacyRefusal;
+      default:
+        debugPrint('Unknown order status: $raw');
+        return OrderStatus.newOrder;
+    }
+  }
+
+  static OrderType _parseType(String raw) {
+    switch (raw.toLowerCase()) {
+      case 'tabletkiua':
+        return OrderType.tabletkiUA;
+      case 'ancsite':
+        return OrderType.ancSite;
+      case 'iosapp':
+        return OrderType.iosApp;
+      case 'androidapp':
+        return OrderType.androidApp;
+      case 'lik-tas':
+        return OrderType.likTas;
+      case 'othershop':
+        return OrderType.otherShop;
+      case 'optimtabl':
+        return OrderType.optimTabl;
+      default:
+        debugPrint('Unknown order type: $raw');
+        return OrderType.unknown;
+    }
+  }
+
+  /// Clean customer name — remove "Default User" and trim.
+  static String? _cleanName(String? raw) {
+    if (raw == null) return null;
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty || trimmed == 'Default User') return null;
+    return trimmed;
+  }
+
+  // ── Labels ────────────────────────────────────────────────────────────────
 
   String get statusLabel {
     switch (status) {
@@ -100,11 +220,24 @@ class InternetOrder {
   String get typeLabel {
     switch (type) {
       case OrderType.tabletkiUA:
-        return 'TabletkiUA';
+        return 'Таблетки';
+      case OrderType.ancSite:
+        return 'Сайт АНЦ';
+      case OrderType.iosApp:
+      case OrderType.androidApp:
+        return 'Додаток АНЦ';
+      case OrderType.likTas:
+        return 'Страхові';
+      case OrderType.otherShop:
+        return 'Інші';
+      case OrderType.optimTabl:
+        return 'Таблетки (Оптима)';
       case OrderType.glovo:
         return 'Glovo';
       case OrderType.novaPoshta:
         return 'Нова Пошта';
+      case OrderType.unknown:
+        return 'Інше';
     }
   }
 
@@ -124,6 +257,7 @@ class InternetOrder {
       type: type,
       items: items,
       customerPhone: customerPhone,
+      customerName: customerName,
       isUrgent: isUrgent,
       isLockerEligible: isLockerEligible,
       refusalReason:

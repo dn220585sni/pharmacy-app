@@ -379,6 +379,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // Global key handler: redirect printable chars to search field
     HardwareKeyboard.instance.addHandler(_handleGlobalKey);
 
+    // Cleanup any previous session that wasn't properly closed
+    AuthService.cleanupPreviousSession();
+
     // Load pharmacists from server and auto-show picker
     _loadPharmacists(autoShow: true);
 
@@ -394,6 +397,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
     // Live: fetch from Priority Analogs API
     _priorityAnalogs = await PriorityAnalogService.fetchAnalogs();
+    if (_priorityAnalogs.isNotEmpty) {
+      // Log first 5 donors for testing
+      debugPrint('ЄДК sample donors:');
+      final seen = <int>{};
+      for (final a in _priorityAnalogs) {
+        if (seen.add(a.donorUkod) && seen.length <= 5) {
+          debugPrint('  donor=${a.donorUkod} "${a.donorName}" → '
+              'analog=${a.analogUkod} "${a.analogName}"');
+        }
+      }
+    }
     if (mounted) {
       setState(() {
         _edkOffers = buildEdkOffersFromApi(_priorityAnalogs, _searchResults);
@@ -405,6 +419,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void _rebuildEdkOffers() {
     if (ApiConfig.useMock || _priorityAnalogs.isEmpty) return;
     _edkOffers = buildEdkOffersFromApi(_priorityAnalogs, _searchResults);
+    if (_edkOffers.isNotEmpty) {
+      debugPrint('ЄДК: ${_edkOffers.length} offers rebuilt '
+          '(${_searchResults.where((d) => d.ukod != null).length} drugs with ukod)');
+    }
   }
 
   /// EDK key helper: mock uses Drug.id, live uses Drug.ukod.
@@ -412,15 +430,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   Future<void> _loadPharmacists({bool autoShow = false}) async {
     try {
+      debugPrint('Loading pharmacists...');
       final users = await AuthService.getUsers();
+      debugPrint('Loaded ${users.length} pharmacists');
       if (!mounted) return;
       users.sort((a, b) => a.user.toLowerCase().compareTo(b.user.toLowerCase()));
       setState(() => _pharmacists = users);
       if (autoShow && _currentPharmacist == null && users.isNotEmpty) {
         _showPharmacistPicker();
       }
-    } catch (_) {
-      // Silently ignore — pharmacist list stays empty
+    } catch (e) {
+      debugPrint('LoadPharmacists error: $e');
     }
   }
 
@@ -429,6 +449,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _loadPharmacists(autoShow: true);
       return;
     }
+    // If already logged in — show logout menu instead of picker
+    if (_currentPharmacist != null) {
+      _showPharmacistMenu();
+      return;
+    }
+    _openPharmacistPicker();
+  }
+
+  void _openPharmacistPicker() {
     showPharmacistPicker(context, _pharmacists).then((selected) {
       if (selected != null && mounted) {
         setState(() => _currentPharmacist = selected);
@@ -437,6 +466,97 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           SkarbService.login().then((r) {
             if (!r.success) debugPrint('Skarb login warning: ${r.error}');
           });
+        }
+      }
+    });
+  }
+
+  /// Show pharmacist menu with "Змінити" and "Завершити роботу" options.
+  void _showPharmacistMenu() {
+    showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        contentPadding: const EdgeInsets.fromLTRB(0, 20, 0, 8),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Pharmacist avatar + name
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F3FB),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Center(
+                child: Text(
+                  _currentPharmacist!.user.isNotEmpty
+                      ? _currentPharmacist!.user[0].toUpperCase()
+                      : '?',
+                  style: const TextStyle(
+                    color: Color(0xFF1E7DC8),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 20,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              _currentPharmacist!.user,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1C1C2E),
+              ),
+            ),
+            if (_currentPharmacist!.ipn.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                'ІПН: ${_currentPharmacist!.ipn}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF9CA3AF),
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            // Change pharmacist
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.swap_horiz_rounded,
+                  size: 20, color: Color(0xFF1E7DC8)),
+              title: const Text('Змінити фармацевта',
+                  style: TextStyle(fontSize: 13)),
+              onTap: () => Navigator.of(ctx).pop('change'),
+            ),
+            // Logout
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.logout_rounded,
+                  size: 20, color: Color(0xFFEF4444)),
+              title: const Text('Завершити роботу',
+                  style: TextStyle(fontSize: 13, color: Color(0xFFEF4444))),
+              onTap: () => Navigator.of(ctx).pop('logout'),
+            ),
+          ],
+        ),
+      ),
+    ).then((action) async {
+      if (action == null || !mounted) return;
+      if (action == 'logout') {
+        await AuthService.logout();
+        if (mounted) {
+          setState(() => _currentPharmacist = null);
+          _openPharmacistPicker();
+        }
+      } else if (action == 'change') {
+        await AuthService.logout();
+        if (mounted) {
+          setState(() => _currentPharmacist = null);
+          _openPharmacistPicker();
         }
       }
     });
@@ -929,6 +1049,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         final mockResults =
             _searchResults.where((d) => !d.id.startsWith('srv_')).toList();
         _searchResults = [...serverDrugs, ...mockResults];
+        _rebuildEdkOffers(); // оновити ЄДК з новими ukod
         // Always select first server drug when results arrive
         // (server drugs are more relevant than mocks).
         if (serverDrugs.isNotEmpty) {

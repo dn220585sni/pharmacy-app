@@ -35,6 +35,7 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
   PharmacistInfo? _selectedForPin;
   String? _pinError;
   bool _isLoggingIn = false;
+  bool _showForceLogout = false;
 
   @override
   void initState() {
@@ -102,7 +103,39 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
     } else {
       setState(() {
         _isLoggingIn = false;
-        _pinError = 'Помилка авторизації на сервері';
+        _showForceLogout = AuthService.isUserBusy;
+        _pinError = AuthService.isUserBusy
+            ? 'Сесія вже активна на іншому пристрої'
+            : 'Помилка авторизації на сервері';
+      });
+    }
+  }
+
+  /// Cleanup previous session and retry login.
+  Future<void> _cleanupAndRetry() async {
+    final p = _selectedForPin;
+    if (p == null) return;
+
+    setState(() {
+      _isLoggingIn = true;
+      _pinError = null;
+      _showForceLogout = false;
+    });
+
+    // Try to cleanup any persisted session from previous app run
+    await AuthService.cleanupPreviousSession();
+    if (!mounted) return;
+
+    // Retry login
+    final ok = await AuthService.login(p.user, p.password);
+    if (!mounted) return;
+
+    if (ok) {
+      Navigator.of(context).pop(p);
+    } else {
+      setState(() {
+        _isLoggingIn = false;
+        _pinError = AuthService.lastLoginError ?? 'Не вдалося увійти';
       });
     }
   }
@@ -414,6 +447,25 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
                       fontSize: 12,
                       color: Color(0xFFEF4444),
                       fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+                if (_showForceLogout) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: 200,
+                    height: 34,
+                    child: OutlinedButton.icon(
+                      onPressed: _isLoggingIn ? null : _cleanupAndRetry,
+                      icon: const Icon(Icons.logout_rounded, size: 15),
+                      label: const Text('Завершити сесію',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFD97706),
+                        side: const BorderSide(color: Color(0xFFFBBF24)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
                     ),
                   ),
                 ],

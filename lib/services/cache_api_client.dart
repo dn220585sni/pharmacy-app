@@ -116,8 +116,29 @@ class CacheApiClient {
         // Спочатку пробуємо UTF-8, якщо не виходить — windows-1251.
         final bodyString = _decodeBody(response);
 
+        // Fix Caché JSON: деякі процедури пропускають } між об'єктами
+        // в масивах. Наприклад: "ipn":""{"user" → "ipn":""},{"user"
+        var fixedBody = bodyString.replaceAll('"{"user"', '"},{"user"');
+
+        // Fix Caché JSON: відсутній ]} в кінці (масив + об'єкт не закриті)
+        final trimmed = fixedBody.trimRight();
+        if (trimmed.isNotEmpty && !trimmed.endsWith(']}') && !trimmed.endsWith('}}')) {
+          // Рахуємо скільки ] і } не вистачає
+          var openBrace = 0, openBracket = 0;
+          for (final ch in trimmed.codeUnits) {
+            if (ch == 123) openBrace++;      // {
+            if (ch == 125) openBrace--;      // }
+            if (ch == 91) openBracket++;     // [
+            if (ch == 93) openBracket--;     // ]
+          }
+          final suffix = StringBuffer();
+          for (var i = 0; i < openBracket; i++) suffix.write(']');
+          for (var i = 0; i < openBrace; i++) suffix.write('}');
+          if (suffix.isNotEmpty) fixedBody = '$trimmed$suffix';
+        }
+
         // Парсимо JSON.
-        final json = jsonDecode(bodyString) as Map<String, dynamic>;
+        final json = jsonDecode(fixedBody) as Map<String, dynamic>;
         return CacheResponse.fromJson(json);
       } on FormatException catch (e) {
         return CacheResponse.error('Помилка формату відповіді: $e');

@@ -161,6 +161,15 @@ class PriorityAnalogService {
       }
 
       final dataList = json['data'] as List<dynamic>? ?? [];
+
+      // Debug: log first raw entry to check ID1/ID2 format
+      if (dataList.isNotEmpty) {
+        final first = dataList.first as Map<String, dynamic>;
+        debugPrint('PriorityAnalog raw sample: ID1=${first['ID1']} (${first['ID1'].runtimeType}), '
+            'ID2=${first['ID2']} (${first['ID2'].runtimeType}), '
+            'NAME1=${first['GOOD_NAME1']}');
+      }
+
       final analogs = dataList
           .map((e) => PriorityAnalog.fromJson(e as Map<String, dynamic>))
           .where((a) => a.isActive)

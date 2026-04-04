@@ -9,6 +9,7 @@ import '../services/drug_service.dart';
 import '../services/farmasell_service.dart';
 import '../services/loyalty_service.dart';
 import '../services/product_browser_service.dart';
+import '../services/skarb_service.dart';
 import '../data/symptom_categories.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
@@ -271,7 +272,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   void _addPrescriptionToCart(
-      List<PrescriptionMatch> selectedMatches, Prescription rx) {
+      List<PrescriptionMatch> selectedMatches,
+      Prescription rx,
+      SkarbPrescriptionData? skarbData) {
     setState(() {
       for (final match in selectedMatches) {
         _cart.add(CartItem(
@@ -287,6 +290,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             concentration: rx.concentration,
             diseaseCategory: rx.diseaseCategory,
             medicalInstitution: rx.medicalInstitution,
+            skarbMedicationRequestId: skarbData?.medicationRequestId,
+            skarbMedicalProgramId: skarbData?.medicalProgramId,
+            skarbParticipantId: match.skarbParticipantId,
+            skarbMedicationId: match.skarbMedicationId,
           ),
         ));
       }
@@ -397,12 +404,27 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     showPharmacistPicker(context, _pharmacists).then((selected) {
       if (selected != null && mounted) {
         setState(() => _currentPharmacist = selected);
+        // Fire-and-forget Skarb login for e-prescription support
+        if (!ApiConfig.useMock && SkarbConfig.apiKey.isNotEmpty) {
+          SkarbService.login().then((r) {
+            if (!r.success) debugPrint('Skarb login warning: ${r.error}');
+          });
+        }
       }
     });
   }
 
+  /// LogoutRlz — закрити сесію при виході.
+  Future<void> _logoutPharmacist() async {
+    if (_currentPharmacist != null) {
+      await AuthService.logout();
+    }
+  }
+
   @override
   void dispose() {
+    // LogoutRlz — fire-and-forget при закритті додатка
+    _logoutPharmacist();
     _barcodeLookupTimer?.cancel();
     _nameSearchTimer?.cancel();
     _helpingHandTimer?.cancel();
@@ -2070,6 +2092,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                         .where((o) =>
                             o.isUrgent &&
                             o.status != OrderStatus.collected &&
+                            o.status != OrderStatus.paidOnline &&
                             o.status != OrderStatus.dispensed)
                         .length,
                     onExpensesTap: _toggleExpenses,

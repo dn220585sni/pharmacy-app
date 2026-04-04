@@ -5,13 +5,15 @@
 import 'package:flutter/foundation.dart';
 
 enum OrderStatus {
-  newOrder,           // Нове
-  inProgress,         // В обробці (apteka make)
-  collected,          // Зібране (apteka pay)
-  dispensed,          // Видане
-  refused,            // Розформоване (disbanded — items returned to shelves)
-  customerRefusal,    // Відмова клієнта
-  pharmacyRefusal,    // Відмова аптеки
+  newOrder,           // "" (пусто) — Нове, ще не оброблялося
+  inProgress,         // "apteka got" / "apteka read" — В обробці
+  collected,          // "apteka make" — Зібране в резерв
+  atWork,             // "apteka work" — В роботі (є питання по замовленню)
+  paidOnline,         // "apteka pay" — Оплачено онлайн (клієнт сплатив через еквайрінг)
+  dispensed,          // LEGACY — keep for local checkout flow
+  refused,            // LEGACY — keep for backward compat
+  customerRefusal,    // "client otkaz" — Відмова клієнта (або 2 доби без приходу)
+  pharmacyRefusal,    // "apteka otkaz" — Відмова аптеки
 }
 
 enum OrderType {
@@ -143,25 +145,45 @@ class InternetOrder {
   }
 
   static OrderStatus _parseStatus(String raw) {
-    switch (raw.toLowerCase()) {
-      case 'new':
+    switch (raw.toLowerCase().trim()) {
+      // ── New API contract ──
+      case '':
         return OrderStatus.newOrder;
-      case 'apteka make':
+      case 'apteka got':
+      case 'apteka read':
         return OrderStatus.inProgress;
-      case 'apteka pay':
+      case 'apteka make':
         return OrderStatus.collected;
+      case 'apteka work':
+        return OrderStatus.atWork;
+      case 'apteka pay':
+        return OrderStatus.paidOnline;
+      case 'apteka otkaz':
+        return OrderStatus.pharmacyRefusal;
+      case 'client otkaz':
+        return OrderStatus.customerRefusal;
+
+      // ── Legacy fallbacks (old API strings) ──
+      case 'new':
+        debugPrint('Legacy order status "new" → newOrder');
+        return OrderStatus.newOrder;
       case 'dispensed':
       case 'done':
+        debugPrint('Legacy order status "$raw" → dispensed');
         return OrderStatus.dispensed;
       case 'refused':
       case 'disbanded':
+        debugPrint('Legacy order status "$raw" → refused');
         return OrderStatus.refused;
       case 'customer_refusal':
+        debugPrint('Legacy order status "customer_refusal" → customerRefusal');
         return OrderStatus.customerRefusal;
       case 'pharmacy_refusal':
+        debugPrint('Legacy order status "pharmacy_refusal" → pharmacyRefusal');
         return OrderStatus.pharmacyRefusal;
+
       default:
-        debugPrint('Unknown order status: $raw');
+        debugPrint('Unknown order status: "$raw"');
         return OrderStatus.newOrder;
     }
   }
@@ -200,20 +222,15 @@ class InternetOrder {
 
   String get statusLabel {
     switch (status) {
-      case OrderStatus.newOrder:
-        return 'Нове';
-      case OrderStatus.inProgress:
-        return 'В обробці';
-      case OrderStatus.collected:
-        return 'Зібране';
-      case OrderStatus.dispensed:
-        return 'Видане';
-      case OrderStatus.refused:
-        return 'Розформоване';
-      case OrderStatus.customerRefusal:
-        return 'Відмова клієнта';
-      case OrderStatus.pharmacyRefusal:
-        return 'Відмова аптеки';
+      case OrderStatus.newOrder:        return 'Нове';
+      case OrderStatus.inProgress:      return 'В обробці';
+      case OrderStatus.collected:       return 'Зібране';
+      case OrderStatus.atWork:          return 'В роботі';
+      case OrderStatus.paidOnline:      return 'Оплачено онлайн';
+      case OrderStatus.dispensed:       return 'Видане';           // legacy
+      case OrderStatus.refused:         return 'Розформоване';     // legacy
+      case OrderStatus.customerRefusal: return 'Відмова клієнта';
+      case OrderStatus.pharmacyRefusal: return 'Відмова аптеки';
     }
   }
 

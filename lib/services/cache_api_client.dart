@@ -55,6 +55,9 @@ class CacheApiClient {
   /// і передаємо в кожному наступному запиті.
   String? _sessionCookie;
 
+  /// Rlz sessionId — передається в кожному запиті після LoginRlz.
+  String? sessionId;
+
   /// Кодек windows-1251 для декодування кирилиці.
   /// Caché може віддавати в цьому кодуванні (залежить від настройки).
   static const _win1251 = 'windows-1251';
@@ -73,9 +76,10 @@ class CacheApiClient {
     String serviceName, {
     Map<String, String>? params,
   }) async {
-    final queryParams = {
+    final queryParams = <String, String>{
       'ServiceName': serviceName,
       ...?params,
+      if (sessionId != null) 'sessionId': sessionId!,
     };
 
     final uri = Uri.parse(ApiConfig.baseUrl).replace(

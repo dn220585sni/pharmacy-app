@@ -376,6 +376,61 @@ final List<InternetOrder> mockOrders = [
     ],
   ),
 
+  // ── "В роботі" (atWork) order ──────────────────────────────────────────────
+  InternetOrder(
+    id: 'ord-work-01',
+    reserveNumber: '164480012',
+    dateTime: DateTime(2026, 3, 5, 10, 15),
+    total: 345.80,
+    status: OrderStatus.atWork,
+    type: OrderType.tabletkiUA,
+    items: [
+      const OrderItem(
+        sku: '26104387',
+        name: 'МАГНЕЛЬ КАПС. №60',
+        manufacturer: 'Sanofi',
+        quantity: 1,
+        price: 216.27,
+        total: 216.27,
+        expiryDate: '20.11.2027',
+      ),
+      const OrderItem(
+        sku: '24590118',
+        name: 'ШПРИЦ 2МЛ ТРЕХК.',
+        manufacturer: 'BD',
+        quantity: 1,
+        price: 129.53,
+        total: 129.53,
+        expiryDate: '01.01.2030',
+      ),
+    ],
+    customerPhone: '+380671112233',
+    customerName: 'Петренко Олена',
+  ),
+
+  // ── "Оплачено онлайн" (paidOnline) order ─────────────────────────────────
+  InternetOrder(
+    id: 'ord-paid-01',
+    reserveNumber: '164481500',
+    dateTime: DateTime(2026, 3, 5, 11, 20),
+    total: 482.76,
+    status: OrderStatus.paidOnline,
+    type: OrderType.ancSite,
+    items: [
+      const OrderItem(
+        sku: '27234561',
+        name: 'ПАНТИРОКС КАПС 40мг №28',
+        manufacturer: 'Nobel',
+        quantity: 1,
+        price: 482.76,
+        total: 482.76,
+        expiryDate: '08.06.2027',
+      ),
+    ],
+    customerPhone: '+380509998877',
+    customerName: 'Шевченко Ігор',
+  ),
+
   // ── Refused (disbanded) orders ─────────────────────────────────────────────
   InternetOrder(
     id: 'ord-ref-01',

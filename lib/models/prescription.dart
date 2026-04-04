@@ -42,11 +42,15 @@ class PrescriptionMatch {
   final Drug drug;
   final int maxQuantity;
   final double reimbursementPrice;
-  final double copayment; // drug.price - reimbursementPrice
+  double copayment; // drug.price - reimbursementPrice (може оновитись від API)
   final int pharmacistBonus;
   final bool isInRegistry;
   bool isSelected;
   int selectedQuantity;
+
+  // ── Skarb IDs (null для паперових / mock рецептів) ────────────────────
+  final String? skarbParticipantId;
+  final String? skarbMedicationId;
 
   PrescriptionMatch({
     required this.prescriptionItem,
@@ -58,11 +62,16 @@ class PrescriptionMatch {
     this.isInRegistry = true,
     this.isSelected = false,
     this.selectedQuantity = 1,
+    this.skarbParticipantId,
+    this.skarbMedicationId,
   });
 
   double get totalCopayment => copayment * selectedQuantity;
   double get totalReimbursement => reimbursementPrice * selectedQuantity;
   double get totalPrice => drug.price * selectedQuantity;
+
+  /// Чи є Skarb дані для цього матча.
+  bool get hasSkarb => skarbParticipantId != null;
 }
 
 // ── Full prescription record ─────────────────────────────────────────────────
@@ -127,6 +136,12 @@ class PrescriptionCartData {
   final String? diseaseCategory; // категорія захворювання
   final String? medicalInstitution; // медичний заклад
 
+  // ── Skarb Cloud IDs (null для паперових / mock рецептів) ────────────────
+  final String? skarbMedicationRequestId;
+  final String? skarbMedicalProgramId;
+  final String? skarbParticipantId;
+  final String? skarbMedicationId;
+
   const PrescriptionCartData({
     required this.prescriptionNumber,
     required this.reimbursementPrice,
@@ -138,8 +153,15 @@ class PrescriptionCartData {
     this.concentration,
     this.diseaseCategory,
     this.medicalInstitution,
+    this.skarbMedicationRequestId,
+    this.skarbMedicalProgramId,
+    this.skarbParticipantId,
+    this.skarbMedicationId,
   });
 
   /// Paper 1303 prescriptions don't need a redemption code.
   bool get needsRedemptionCode => prescriptionType != PrescriptionType.paper1303;
+
+  /// Чи підключено через Skarb Cloud (е-рецепт з API).
+  bool get isSkarb => skarbMedicationRequestId != null;
 }

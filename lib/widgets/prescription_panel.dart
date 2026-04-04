@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import '../models/prescription.dart';
 import '../models/drug.dart';
 import '../data/mock_prescriptions.dart';
+import '../services/api_config.dart';
+import '../services/skarb_service.dart';
 import 'prescription_refusal_dialog.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -14,7 +16,7 @@ class PrescriptionPanel extends StatefulWidget {
   final VoidCallback onClose;
   final List<Drug> drugCatalog;
   final void Function(List<PrescriptionMatch> selectedMatches,
-      Prescription prescription) onAddToCart;
+      Prescription prescription, SkarbPrescriptionData? skarbData) onAddToCart;
 
   const PrescriptionPanel({
     super.key,
@@ -38,6 +40,10 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
   Prescription? _prescription;
   List<PrescriptionMatch> _matches = [];
   bool _prescriptionWasLoaded = false;
+  bool _isLoading = false;
+
+  /// Raw Skarb data for passing to checkout (null = mock/paper).
+  SkarbPrescriptionData? _skarbData;
 
   // ── Paper prescription editable fields ──────────────────────────────────
   final _paperMedicationCtr = TextEditingController();
@@ -230,6 +236,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
       }
       setState(() {
         _prescriptionWasLoaded = true;
+        _skarbData = null;
         _prescription = Prescription(
           number: number,
           type: _selectedType,
@@ -248,7 +255,16 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
       return;
     }
 
-    // Electronic: lookup from mock data
+    // Electronic: use Skarb API when available, otherwise mock
+    if (!ApiConfig.useMock && SkarbConfig.apiKey.isNotEmpty) {
+      _lookupFromSkarb(number);
+    } else {
+      _lookupFromMock(number);
+    }
+  }
+
+  /// Lookup prescription from mock data.
+  void _lookupFromMock(String number) {
     final rx = mockPrescriptions[number];
     if (rx == null) {
       setState(() => _errorMessage = 'Рецепт не знайдено');
@@ -258,10 +274,83 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
     final matches = findPrescriptionMatches(rx, widget.drugCatalog);
     setState(() {
       _prescriptionWasLoaded = true;
+      _skarbData = null;
       _prescription = rx;
       _matches = matches;
       _errorMessage = null;
     });
+  }
+
+  /// Lookup prescription from Skarb Cloud API.
+  Future<void> _lookupFromSkarb(String number) async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final result = await SkarbService.getPrescriptionData(number);
+
+    if (!mounted) return;
+
+    if (!result.success) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = result.error;
+      });
+      return;
+    }
+
+    final skarbData = result.data!;
+
+    // Map Skarb response → Prescription model
+    final items = skarbData.participants.map((p) => PrescriptionItem(
+      helsiName: p.medicationName,
+      helsiQuantity: p.packageQty,
+      inn: null, // INN not directly in participant; match by name
+      reimbursementPrice: p.reimbursementAmount,
+    )).toList();
+
+    final rx = Prescription(
+      number: skarbData.requestNumber.isNotEmpty ? skarbData.requestNumber : number,
+      type: _selectedType,
+      status: _parseSkarbStatus(skarbData.status),
+      issueDate: skarbData.dispenseValidFrom ?? DateTime.now(),
+      medication: skarbData.medicationName,
+      quantity: skarbData.medicationRemainingQty ?? skarbData.medicationQty,
+      patientName: skarbData.patientName,
+      patientAge: skarbData.patientAge,
+      clinicName: skarbData.clinicName,
+      doctorName: skarbData.doctorName,
+      programName: skarbData.medicalProgramName,
+      uuid: skarbData.medicationRequestId,
+      items: items,
+    );
+
+    final matches = findPrescriptionMatches(
+      rx,
+      widget.drugCatalog,
+      skarbParticipants: skarbData.participants,
+    );
+
+    setState(() {
+      _isLoading = false;
+      _prescriptionWasLoaded = true;
+      _skarbData = skarbData;
+      _prescription = rx;
+      _matches = matches;
+      _errorMessage = null;
+    });
+  }
+
+  static PrescriptionStatus _parseSkarbStatus(String raw) {
+    switch (raw.toUpperCase()) {
+      case 'ACTIVE': return PrescriptionStatus.active;
+      case 'PARTIALLY_USED': return PrescriptionStatus.partiallyUsed;
+      case 'USED': return PrescriptionStatus.used;
+      case 'EXPIRED': return PrescriptionStatus.expired;
+      case 'REJECTED': return PrescriptionStatus.rejected;
+      default: return PrescriptionStatus.active;
+    }
   }
 
   @override
@@ -694,10 +783,21 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
             child: SizedBox(
               height: 38,
               child: ElevatedButton.icon(
-                onPressed: _isInputValid ? _lookupPrescription : null,
-                icon: const Icon(Icons.search, size: 16),
-                label: const Text('Розпочати роботу',
-                    style: TextStyle(
+                onPressed: _isInputValid && !_isLoading
+                    ? _lookupPrescription
+                    : null,
+                icon: _isLoading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.search, size: 16),
+                label: Text(_isLoading ? 'Завантаження...' : 'Розпочати роботу',
+                    style: const TextStyle(
                         fontSize: 12.5, fontWeight: FontWeight.w500)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _isInputValid
@@ -1643,7 +1743,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
                                     ? null : _paperMedInstitutionCtr.text.trim(),
                               )
                             : _prescription!;
-                        widget.onAddToCart(_selected, rx);
+                        widget.onAddToCart(_selected, rx, _skarbData);
                       }
                     : null,
                 icon: const Icon(Icons.add_shopping_cart, size: 16),

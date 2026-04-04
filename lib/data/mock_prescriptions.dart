@@ -1,5 +1,6 @@
 import '../models/drug.dart';
 import '../models/prescription.dart';
+import '../services/skarb_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock e-prescriptions for development & demo.
@@ -176,10 +177,14 @@ final Map<String, Prescription> mockPrescriptions = {
 };
 
 /// Find local inventory drugs matching a prescription's items by INN.
+///
+/// [skarbParticipants] — якщо рецепт зі Skarb API, передати список учасників
+/// для прокидання participantId/medicationId в PrescriptionMatch.
 List<PrescriptionMatch> findPrescriptionMatches(
   Prescription rx,
-  List<Drug> drugs,
-) {
+  List<Drug> drugs, {
+  List<SkarbParticipant>? skarbParticipants,
+}) {
   final matches = <PrescriptionMatch>[];
   for (final item in rx.items) {
     if (item.inn == null) continue;
@@ -196,6 +201,16 @@ List<PrescriptionMatch> findPrescriptionMatches(
       final copayB = b.price - item.reimbursementPrice;
       return copayA.compareTo(copayB);
     });
+
+    // Find matching Skarb participant by medication name (if available)
+    SkarbParticipant? skarbMatch;
+    if (skarbParticipants != null) {
+      final itemNameLower = item.helsiName.toLowerCase();
+      skarbMatch = skarbParticipants.where((p) =>
+          p.medicationName.toLowerCase().contains(itemNameLower) ||
+          itemNameLower.contains(p.medicationName.toLowerCase())).firstOrNull;
+    }
+
     for (var i = 0; i < candidates.length; i++) {
       final drug = candidates[i];
       final copay = (drug.price - item.reimbursementPrice)
@@ -209,6 +224,8 @@ List<PrescriptionMatch> findPrescriptionMatches(
         pharmacistBonus: drug.pharmacistBonus ?? 0,
         isSelected: i == 0, // auto-select best option
         selectedQuantity: drug.stock.clamp(0, item.helsiQuantity),
+        skarbParticipantId: skarbMatch?.participantId,
+        skarbMedicationId: skarbMatch?.medicationId,
       ));
     }
   }

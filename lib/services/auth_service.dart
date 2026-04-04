@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'api_config.dart';
 import 'cache_api_client.dart';
 
@@ -16,45 +18,68 @@ class PharmacistInfo {
 
 /// Сервіс авторизації фармацевта.
 ///
-/// Caché сервіси: Login, Logout, GetUsers
+/// Caché сервіси: GetUsersRlz, LoginRlz, LogoutRlz
 class AuthService {
   static final _api = CacheApiClient();
 
-  /// Авторизація фармацевта.
+  /// Активна сесія фармацевта.
+  static String? _sessionId;
+  static String? get sessionId => _sessionId;
+
+  /// Авторизація фармацевта — створює сесію.
   ///
-  /// Caché: `GET ?ServiceName=Login&user={user}&pswd={pswd}`
+  /// Caché: `GET ?ServiceName=LoginRlz&user={user}&pswd={pswd}`
+  /// Response: `{"Status":"OK","Result":"Встановлена сесія","sessionId":"..."}`
   static Future<bool> login(String user, String password) async {
     if (ApiConfig.useMock) return _mockLogin(user, password);
 
-    final response = await _api.call('Login', params: {
+    final response = await _api.call('LoginRlz', params: {
       'user': user,
       'pswd': password,
     });
 
-    return response.isOk;
+    if (response.isOk) {
+      final id = response.data['sessionId']?.toString();
+      if (id != null && id.isNotEmpty) {
+        _sessionId = id;
+        _api.sessionId = id;
+        debugPrint('LoginRlz OK: sessionId=$id');
+        return true;
+      }
+    }
+    debugPrint('LoginRlz failed: ${response.result}');
+    return false;
   }
 
-  /// Вихід.
+  /// Закриття сесії фармацевта.
   ///
-  /// Caché: `GET ?ServiceName=Logout&user={user}`
-  static Future<bool> logout(String user) async {
-    if (ApiConfig.useMock) return true;
+  /// Caché: `GET ?ServiceName=LogoutRlz&sessionId={sessionId}`
+  static Future<bool> logout() async {
+    if (ApiConfig.useMock || _sessionId == null) {
+      _sessionId = null;
+      return true;
+    }
 
-    final response = await _api.call('Logout', params: {
-      'user': user,
+    final id = _sessionId!;
+    _sessionId = null;
+    _api.sessionId = null;
+
+    final response = await _api.call('LogoutRlz', params: {
+      'sessionId': id,
     });
 
+    debugPrint('LogoutRlz: ${response.result}');
     return response.isOk;
   }
 
-  /// Отримати список фармацевтів.
+  /// Отримати список фармацевтів з паролями та ІПН.
   ///
-  /// Caché: `GET ?ServiceName=GetUsers`
+  /// Caché: `GET ?ServiceName=GetUsersRlz`
   /// Повертає масив {user, pswd, ipn}
   static Future<List<PharmacistInfo>> getUsers() async {
     if (ApiConfig.useMock) return _mockGetUsers();
 
-    final response = await _api.call('GetUsers');
+    final response = await _api.call('GetUsersRlz');
 
     if (!response.isOk) return [];
 
@@ -77,14 +102,19 @@ class AuthService {
 
   static Future<bool> _mockLogin(String user, String password) async {
     await Future.delayed(const Duration(milliseconds: 300));
-    return user.isNotEmpty && password.isNotEmpty;
+    if (user.isNotEmpty && password.isNotEmpty) {
+      _sessionId = 'mock_session_${DateTime.now().millisecondsSinceEpoch}';
+      _api.sessionId = _sessionId;
+      return true;
+    }
+    return false;
   }
 
   static Future<List<PharmacistInfo>> _mockGetUsers() async {
     await Future.delayed(const Duration(milliseconds: 200));
     return [
-      PharmacistInfo(user: 'Микола', password: '', ipn: '1234567890'),
-      PharmacistInfo(user: 'Олена', password: '', ipn: '0987654321'),
+      PharmacistInfo(user: 'Микола', password: '1234', ipn: '1234567890'),
+      PharmacistInfo(user: 'Олена', password: '5678', ipn: '0987654321'),
     ];
   }
 }

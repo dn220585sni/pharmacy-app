@@ -71,7 +71,7 @@ class OrdersPanelState extends State<OrdersPanel>
   bool _showDisbandedOrders = false;
 
   /// Active filter chip labels (multi-select, OR logic).
-  Set<String> _activeFilters = {'Нові', 'В обробці', 'Зібрані'};
+  Set<String> _activeFilters = {'Нові', 'В обробці', 'Зібрані', 'В роботі', 'Оплачено онлайн'};
 
   /// All available filter labels.
   static const List<String> _filterLabels = [
@@ -79,9 +79,9 @@ class OrdersPanelState extends State<OrdersPanel>
     'Нові',
     'В обробці',
     'Зібрані',
+    'В роботі',
+    'Оплачено онлайн',
     'Термінові',
-    'Відпущені',
-    'Розформовані',
     'Відмова клієнта',
     'Відмова аптеки',
   ];
@@ -245,14 +245,14 @@ class OrdersPanelState extends State<OrdersPanel>
           if (o.status == OrderStatus.newOrder) return true;
         case 'В обробці':
           if (o.status == OrderStatus.inProgress) return true;
-        case 'Термінові':
-          if (o.isUrgent) return true;
         case 'Зібрані':
           if (o.status == OrderStatus.collected) return true;
-        case 'Відпущені':
-          if (o.status == OrderStatus.dispensed) return true;
-        case 'Розформовані':
-          if (o.status == OrderStatus.refused) return true;
+        case 'В роботі':
+          if (o.status == OrderStatus.atWork) return true;
+        case 'Оплачено онлайн':
+          if (o.status == OrderStatus.paidOnline) return true;
+        case 'Термінові':
+          if (o.isUrgent) return true;
         case 'Відмова клієнта':
           if (o.status == OrderStatus.customerRefusal) return true;
         case 'Відмова аптеки':
@@ -266,8 +266,8 @@ class OrdersPanelState extends State<OrdersPanel>
   List<InternetOrder> _sorted(List<InternetOrder> orders) {
     final list = orders.where(_matchesFilters).toList();
     list.sort((a, b) {
-      final aUrgent = a.isUrgent && a.status != OrderStatus.collected && a.status != OrderStatus.dispensed;
-      final bUrgent = b.isUrgent && b.status != OrderStatus.collected && b.status != OrderStatus.dispensed;
+      final aUrgent = a.isUrgent && a.status != OrderStatus.collected && a.status != OrderStatus.paidOnline && a.status != OrderStatus.dispensed;
+      final bUrgent = b.isUrgent && b.status != OrderStatus.collected && b.status != OrderStatus.paidOnline && b.status != OrderStatus.dispensed;
       if (aUrgent && !bUrgent) return -1;
       if (!aUrgent && bUrgent) return 1;
       return 0; // preserve original order within groups
@@ -336,6 +336,7 @@ class OrdersPanelState extends State<OrdersPanel>
     if (order.type == OrderType.glovo) return;
     if (order.type == OrderType.novaPoshta) return;
     if (order.status == OrderStatus.dispensed) return;
+    if (order.status == OrderStatus.paidOnline) return;
     for (final item in order.items) {
       if (tryActivateEdk(item.sku, _orderEdkOffers)) return;
     }
@@ -395,9 +396,12 @@ class OrdersPanelState extends State<OrdersPanel>
   void _enterOrderCheckout() {
     final order = _selectedOrder;
     if (order == null) return;
-    // Collected orders skip scan check (already collected).
+    // Collected/paidOnline orders skip scan check (already collected).
     // Non-collected orders require all items to be scanned first.
-    if (order.status != OrderStatus.collected && !_allScanned) return;
+    // TODO: paidOnline — skip register payment step (separate task)
+    if (order.status != OrderStatus.collected &&
+        order.status != OrderStatus.paidOnline &&
+        !_allScanned) return;
     setState(() => _orderCheckoutMode = true);
   }
 
@@ -954,7 +958,8 @@ class OrdersPanelState extends State<OrdersPanel>
 
   Widget _buildDetailScreen(InternetOrder order) {
     final showEdk = activeEdkOffer != null &&
-        order.status != OrderStatus.dispensed;
+        order.status != OrderStatus.dispensed &&
+        order.status != OrderStatus.paidOnline;
 
     return Column(
       key: ValueKey('order_detail_${order.id}'),
@@ -971,6 +976,7 @@ class OrdersPanelState extends State<OrdersPanel>
                   item: item,
                   isScanned: _scannedSkus.contains(item.sku),
                   canScan: order.status != OrderStatus.collected &&
+                      order.status != OrderStatus.paidOnline &&
                       order.status != OrderStatus.dispensed,
                   onScan: () => _scanItem(item),
                 ),
@@ -1490,6 +1496,7 @@ class OrdersPanelState extends State<OrdersPanel>
           ],
           // Scan hint for not-yet-collected orders
           if (order.status != OrderStatus.collected &&
+              order.status != OrderStatus.paidOnline &&
               !_allScanned) ...[
             const SizedBox(height: 10),
             Container(
@@ -1527,7 +1534,9 @@ class OrdersPanelState extends State<OrdersPanel>
           // Action buttons — depend on order status
           if (order.status == OrderStatus.pharmacyRefusal)
             _buildRefusedActions(order)
-          else if (order.status == OrderStatus.collected)
+          else if (order.status == OrderStatus.collected ||
+                   order.status == OrderStatus.paidOnline)
+            // TODO: paidOnline — separate action set (skip payment step)
             _buildCollectedActions()
           else
             _buildNotCollectedActions(),
@@ -1951,6 +1960,7 @@ class _OrderListTileState extends State<_OrderListTile> {
                         ),
                         if (order.isUrgent &&
                             order.status != OrderStatus.collected &&
+                            order.status != OrderStatus.paidOnline &&
                             order.status != OrderStatus.dispensed) ...[
                           // Reason badge: Лікомат or Glovo
                           if (order.isLockerEligible) ...[
@@ -2124,9 +2134,10 @@ class _StatusDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Urgent + not yet collected/dispensed → red filled dot
+    // Urgent + not yet collected/paid/dispensed → red filled dot
     final isActiveUrgent = isUrgent &&
         status != OrderStatus.collected &&
+        status != OrderStatus.paidOnline &&
         status != OrderStatus.dispensed;
 
     final color = isActiveUrgent
@@ -2135,14 +2146,17 @@ class _StatusDot extends StatelessWidget {
             OrderStatus.newOrder => const Color(0xFF3B82F6),     // blue
             OrderStatus.inProgress => const Color(0xFFF59E0B),   // amber
             OrderStatus.collected => const Color(0xFF22C55E),    // green
-            OrderStatus.dispensed => const Color(0xFF6B7280),    // gray
-            OrderStatus.refused => const Color(0xFFEF4444),      // red
+            OrderStatus.atWork => const Color(0xFF8B5CF6),       // purple
+            OrderStatus.paidOnline => const Color(0xFF06B6D4),   // cyan
+            OrderStatus.dispensed => const Color(0xFF6B7280),    // gray (legacy)
+            OrderStatus.refused => const Color(0xFFEF4444),      // red (legacy)
             OrderStatus.customerRefusal => const Color(0xFFEF4444),
             OrderStatus.pharmacyRefusal => const Color(0xFFD97706),
           };
 
     final isFilled = isActiveUrgent ||
         status == OrderStatus.collected ||
+        status == OrderStatus.paidOnline ||
         status == OrderStatus.dispensed;
 
     return Container(
@@ -2178,6 +2192,14 @@ class _OrderStatusBadge extends StatelessWidget {
           const Color(0xFF22C55E),
           const Color(0xFFF0FDF4)
         ),
+      OrderStatus.atWork => (
+          const Color(0xFF8B5CF6),
+          const Color(0xFFF5F3FF)
+        ),
+      OrderStatus.paidOnline => (
+          const Color(0xFF06B6D4),
+          const Color(0xFFECFEFF)
+        ),
       OrderStatus.dispensed => (
           const Color(0xFF6B7280),
           const Color(0xFFF9FAFB)
@@ -2200,6 +2222,8 @@ class _OrderStatusBadge extends StatelessWidget {
       OrderStatus.newOrder => 'Нове',
       OrderStatus.inProgress => 'В обробці',
       OrderStatus.collected => 'Зібране',
+      OrderStatus.atWork => 'В роботі',
+      OrderStatus.paidOnline => 'Оплачено онлайн',
       OrderStatus.dispensed => 'Видане',
       OrderStatus.refused => 'Розформоване',
       OrderStatus.customerRefusal => 'Відмова клієнта',

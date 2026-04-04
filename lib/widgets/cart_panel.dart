@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../mixins/checkout_mixin.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
@@ -6,6 +7,8 @@ import '../models/customer_loyalty.dart';
 import '../models/drug.dart';
 import '../models/payment_method.dart';
 import '../models/prescription.dart';
+import '../services/api_config.dart';
+import '../services/skarb_service.dart';
 import 'cart_item_widget.dart';
 import 'cart_offer_card.dart';
 import 'checkout/bonus_discount_block.dart';
@@ -973,9 +976,12 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
               'Соц.проект', _selectedSocialProject ?? rxData.programName),
           const SizedBox(height: 8),
 
-          // ── Код погашення ──────────────────────────────────────────────
-          const Text('Код погашення рецепту',
-              style: TextStyle(
+          // ── Код погашення / PIN-код ───────────────────────────────────
+          Text(
+              rxData.isSkarb
+                  ? 'PIN-код пацієнта (4 цифри)'
+                  : 'Код погашення рецепту',
+              style: const TextStyle(
                   fontSize: 10.5,
                   color: Color(0xFF6B7280),
                   fontWeight: FontWeight.w500)),
@@ -989,6 +995,8 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                     controller: _redemptionCodeController,
                     focusNode: _redemptionCodeFocus,
                     enabled: !_isRedemptionVerified,
+                    maxLength: rxData.isSkarb ? 4 : null,
+                    keyboardType: rxData.isSkarb ? TextInputType.number : null,
                     style: const TextStyle(
                         fontSize: 13,
                         fontFamily: 'monospace',
@@ -996,7 +1004,8 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                         letterSpacing: 0.8),
                     onSubmitted: (_) => _verifyRedemptionCode(),
                     decoration: InputDecoration(
-                      hintText: 'Введіть код',
+                      counterText: '', // hide maxLength counter
+                      hintText: rxData.isSkarb ? '0000' : 'Введіть код',
                       hintStyle: TextStyle(
                           fontSize: 12, color: Colors.grey.shade400),
                       filled: true,
@@ -1108,15 +1117,122 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     final code = _redemptionCodeController.text.trim();
     if (code.isEmpty) return;
 
-    setState(() => _isVerifyingRedemption = true);
-    // Simulate API call
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (!mounted) return;
-    setState(() {
-      _isVerifyingRedemption = false;
-      _isRedemptionVerified = true;
-    });
+    final rxData = _prescriptionData;
+    final isSkarb = rxData?.isSkarb ?? false;
 
+    // Skarb: PIN must be 4 digits
+    if (isSkarb && (code.length != 4 || int.tryParse(code) == null)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PIN-код має бути 4 цифри')),
+      );
+      return;
+    }
+
+    setState(() => _isVerifyingRedemption = true);
+
+    if (isSkarb && !ApiConfig.useMock) {
+      await _processSkarbDispense(code, rxData!);
+    } else {
+      // Mock: simulate API call
+      await Future.delayed(const Duration(milliseconds: 800));
+      if (!mounted) return;
+      setState(() {
+        _isVerifyingRedemption = false;
+        _isRedemptionVerified = true;
+      });
+      _onRedemptionSuccess();
+    }
+  }
+
+  /// Погашення рецепта через Skarb Cloud API.
+  Future<void> _processSkarbDispense(
+      String pinCode, PrescriptionCartData rxData) async {
+    // Collect Skarb IDs from prescription cart items
+    final rxItems = widget.cart.where((i) => i.isPrescription).toList();
+    final medicationIds = <String>[];
+    final participantIds = <String>[];
+    final prices = <double>[];
+    final quantities = <int>[];
+
+    for (final item in rxItems) {
+      final pd = item.prescriptionData!;
+      if (pd.skarbMedicationId != null) {
+        medicationIds.add(pd.skarbMedicationId!);
+      }
+      if (pd.skarbParticipantId != null) {
+        participantIds.add(pd.skarbParticipantId!);
+      }
+      prices.add(item.drug.price);
+      quantities.add(item.quantity);
+    }
+
+    final paymentAmount = _isFullyReimbursed ? 0.0 : finalTotal;
+
+    final result = await SkarbService.processDispenseViaSmartSign(
+      code: pinCode,
+      medicalProgramId: rxData.skarbMedicalProgramId ?? '',
+      medicationRequestId: rxData.skarbMedicationRequestId ?? '',
+      medicationIds: medicationIds,
+      participantIds: participantIds,
+      prices: prices,
+      quantities: quantities,
+      paymentAmount: paymentAmount,
+      paymentId: DateTime.now().millisecondsSinceEpoch.toString(),
+    );
+
+    if (!mounted) return;
+
+    if (result.success) {
+      setState(() {
+        _isVerifyingRedemption = false;
+        _isRedemptionVerified = true;
+      });
+      _onRedemptionSuccess();
+    } else {
+      // SmartSign failed — try fallback with init-dispense-form
+      final fallback = await SkarbService.initDispenseForm(
+        code: pinCode,
+        medicalProgramId: rxData.skarbMedicalProgramId ?? '',
+        medicationRequestId: rxData.skarbMedicationRequestId ?? '',
+        medicationIds: medicationIds,
+        participantIds: participantIds,
+        prices: prices,
+        quantities: quantities,
+        paymentAmount: paymentAmount,
+        paymentId: DateTime.now().millisecondsSinceEpoch.toString(),
+      );
+
+      if (!mounted) return;
+
+      if (fallback.success && fallback.data!.url.isNotEmpty) {
+        setState(() => _isVerifyingRedemption = false);
+        // Open manual signing URL
+        final url = Uri.tryParse(fallback.data!.url);
+        if (url != null) {
+          launchUrl(url, mode: LaunchMode.externalApplication);
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Відкрито сторінку підпису. '
+                  'Після підпису натисніть "Погасити" знову.'),
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+      } else {
+        setState(() => _isVerifyingRedemption = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(result.error ?? 'Помилка погашення')),
+          );
+        }
+      }
+    }
+  }
+
+  /// Спільна логіка після успішного погашення.
+  void _onRedemptionSuccess() {
     // For fully reimbursed: trigger onPay callback now (no prior payment)
     if (_isFullyReimbursed && !showPaymentSuccess) {
       widget.onPay(paidByPoints: 0);

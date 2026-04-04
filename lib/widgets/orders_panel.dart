@@ -10,6 +10,7 @@ import '../data/mock_orders.dart';
 import '../data/edk_offers.dart';
 import '../data/mock_drugs.dart';
 import '../services/api_config.dart';
+import '../services/priority_analog_service.dart';
 import '../services/order_service.dart';
 import 'checkout/bonus_discount_block.dart';
 import 'checkout/cash_change_section.dart';
@@ -105,9 +106,22 @@ class OrdersPanelState extends State<OrdersPanel>
 
   // ── ЄДК (pharmaceutical substitution for order items) ─────────────────────
 
-  /// EDK offers: order item SKU → replacement drug.
-  late final Map<String, EdkOffer> _orderEdkOffers =
-      buildOrderEdkOffers(mockDrugs);
+  /// EDK offers. Mock: keyed by OrderItem.sku, live: keyed by OrderItem.ukod.
+  Map<String, EdkOffer> _orderEdkOffers = {};
+
+  /// Initialize EDK offers for orders.
+  Future<void> _initOrderEdkOffers() async {
+    if (ApiConfig.useMock) {
+      _orderEdkOffers = buildMockOrderEdkOffers(mockDrugs);
+      return;
+    }
+    final analogs = await PriorityAnalogService.fetchAnalogs();
+    if (mounted) {
+      setState(() {
+        _orderEdkOffers = buildEdkOffersFromApi(analogs, mockDrugs);
+      });
+    }
+  }
 
   // ── Checkout state ─────────────────────────────────────────────────────────
   bool _orderCheckoutMode = false;
@@ -157,6 +171,7 @@ class OrdersPanelState extends State<OrdersPanel>
     _filteredOrders = [];
     _searchController.addListener(_filterOrders);
     _loadOrders();
+    _initOrderEdkOffers();
   }
 
   /// Load orders from GetOrders API (or mock fallback).
@@ -338,7 +353,8 @@ class OrdersPanelState extends State<OrdersPanel>
     if (order.status == OrderStatus.dispensed) return;
     if (order.status == OrderStatus.paidOnline) return;
     for (final item in order.items) {
-      if (tryActivateEdk(item.sku, _orderEdkOffers)) return;
+      final edkKey = ApiConfig.useMock ? item.sku : (item.ukod ?? '');
+      if (tryActivateEdk(edkKey, _orderEdkOffers)) return;
     }
   }
 
@@ -359,7 +375,8 @@ class OrdersPanelState extends State<OrdersPanel>
     setState(() => _scannedSkus.add(item.sku));
     // Trigger EDK if this item has an offer and wasn't already scanned
     if (_edkAllowed && !wasScanned) {
-      tryActivateEdk(item.sku, _orderEdkOffers);
+      final edkKey = ApiConfig.useMock ? item.sku : (item.ukod ?? '');
+      tryActivateEdk(edkKey, _orderEdkOffers);
     }
   }
 

@@ -1,9 +1,87 @@
 import '../models/drug.dart';
 import '../models/edk_offer.dart';
+import '../services/priority_analog_service.dart';
 
-/// Build retail EDK offers map (donor drug id → replacement offer).
-/// Used by PosScreen for in-stock and out-of-stock substitutions.
-Map<String, EdkOffer> buildRetailEdkOffers(List<Drug> drugs) {
+// ═══════════════════════════════════════════════════════════════════════════════
+// API-based EDK offers builder (live mode)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Build EDK offers from Priority Analogs API data.
+///
+/// Keyed by **donor ukod** (string). For each donor, finds the first analog
+/// (by RATING) that exists in [drugs] catalog with stock > 0.
+Map<String, EdkOffer> buildEdkOffersFromApi(
+  List<PriorityAnalog> analogs,
+  List<Drug> drugs,
+) {
+  // Build ukod → Drug lookup (only drugs with ukod and stock)
+  final drugByUkod = <String, Drug>{};
+  for (final d in drugs) {
+    if (d.ukod != null && d.ukod!.isNotEmpty) {
+      // Keep the one with most stock if duplicates
+      final existing = drugByUkod[d.ukod!];
+      if (existing == null || d.stock > existing.stock) {
+        drugByUkod[d.ukod!] = d;
+      }
+    }
+  }
+
+  // Group analogs by donor ukod, sorted by rating
+  final grouped = <String, List<PriorityAnalog>>{};
+  for (final a in analogs) {
+    final key = a.donorUkod.toString();
+    (grouped[key] ??= []).add(a);
+  }
+  for (final list in grouped.values) {
+    list.sort((a, b) => a.rating.compareTo(b.rating));
+  }
+
+  // Build offers: first in-stock analog per donor
+  final offers = <String, EdkOffer>{};
+  for (final entry in grouped.entries) {
+    final donorKey = entry.key;
+    for (final analog in entry.value) {
+      final analogKey = analog.analogUkod.toString();
+      final replacementDrug = drugByUkod[analogKey];
+      if (replacementDrug != null && replacementDrug.stock > 0) {
+        // Build promo label from bonuses
+        String? promo;
+        if (analog.bonus > 0 && analog.dodBonus > 0) {
+          promo = 'Бонус +${analog.bonus + analog.dodBonus}';
+        } else if (analog.bonus > 0) {
+          promo = 'Бонус +${analog.bonus}';
+        } else if (analog.dodBonus > 0) {
+          promo = 'Дод. бонус +${analog.dodBonus}';
+        }
+
+        offers[donorKey] = EdkOffer(
+          drug: replacementDrug,
+          donorDrugId: donorKey,
+          description: '${analog.analogName} — '
+              'рекомендована заміна від ${analog.analogManufact.replaceAll('*', '').trim()}.',
+          script: 'Рекомендую розглянути ${analog.analogName.trim()} — '
+              'якісний аналог з перевіреною ефективністю.',
+          promoLabel: promo,
+          bonus: analog.bonus,
+          dodBonus: analog.dodBonus,
+          linkType: analog.linkType,
+          rating: analog.rating,
+        );
+        break; // перший з наявністю — достатньо
+      }
+    }
+  }
+
+  return offers;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Mock EDK offers (development mode)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Build MOCK retail EDK offers map (donor Drug.id → replacement offer).
+/// Used by PosScreen in mock mode.
+Map<String, EdkOffer> buildMockRetailEdkOffers(List<Drug> drugs) {
   Drug byId(String id) => drugs.firstWhere((d) => d.id == id);
   return {
     // ── In-stock EDK offers ────────────────────────────────────────────────
@@ -79,9 +157,9 @@ Map<String, EdkOffer> buildRetailEdkOffers(List<Drug> drugs) {
   };
 }
 
-/// Build order EDK offers map (order item SKU → replacement offer).
-/// Used by OrdersPanel for internet-order substitutions.
-Map<String, EdkOffer> buildOrderEdkOffers(List<Drug> drugs) {
+/// Build MOCK order EDK offers map (order item SKU → replacement offer).
+/// Used by OrdersPanel in mock mode.
+Map<String, EdkOffer> buildMockOrderEdkOffers(List<Drug> drugs) {
   Drug byId(String id) => drugs.firstWhere((d) => d.id == id);
   return {
     // МЕЛОКСИКАМ-ТЕВА (ord-07) → Нурофен Експрес

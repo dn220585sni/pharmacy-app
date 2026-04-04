@@ -8,6 +8,7 @@ import '../services/auth_service.dart';
 import '../services/drug_service.dart';
 import '../services/farmasell_service.dart';
 import '../services/loyalty_service.dart';
+import '../services/priority_analog_service.dart';
 import '../services/product_browser_service.dart';
 import '../services/skarb_service.dart';
 import '../data/symptom_categories.dart';
@@ -380,7 +381,34 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
     // Load pharmacists from server and auto-show picker
     _loadPharmacists(autoShow: true);
+
+    // Load EDK offers
+    _initEdkOffers();
   }
+
+  /// Initialize EDK offers: mock or API.
+  Future<void> _initEdkOffers() async {
+    if (ApiConfig.useMock) {
+      _edkOffers = buildMockRetailEdkOffers(mockDrugs);
+      return;
+    }
+    // Live: fetch from Priority Analogs API
+    _priorityAnalogs = await PriorityAnalogService.fetchAnalogs();
+    if (mounted) {
+      setState(() {
+        _edkOffers = buildEdkOffersFromApi(_priorityAnalogs, _searchResults);
+      });
+    }
+  }
+
+  /// Rebuild EDK offers when drug catalog changes (live mode only).
+  void _rebuildEdkOffers() {
+    if (ApiConfig.useMock || _priorityAnalogs.isEmpty) return;
+    _edkOffers = buildEdkOffersFromApi(_priorityAnalogs, _searchResults);
+  }
+
+  /// EDK key helper: mock uses Drug.id, live uses Drug.ukod.
+  String _edkKey(Drug d) => ApiConfig.useMock ? d.id : (d.ukod ?? '');
 
   Future<void> _loadPharmacists({bool autoShow = false}) async {
     try {
@@ -1299,13 +1327,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   // ── ЄДК logic ────────────────────────────────────────────────────────────
 
-  /// EDK offers: donor drug id → replacement offer.
-  late final Map<String, EdkOffer> _edkOffers =
-      buildRetailEdkOffers(mockDrugs);
+  /// EDK offers map. Mock: keyed by Drug.id, live: keyed by Drug.ukod.
+  Map<String, EdkOffer> _edkOffers = {};
+
+  /// Raw priority analogs from API (for rebuilding offers when catalog changes).
+  List<PriorityAnalog> _priorityAnalogs = [];
 
   /// Check and show EDK offer after adding a donor drug to cart.
   void _tryShowEdk(Drug donorDrug) {
-    tryActivateEdk(donorDrug.id, _edkOffers);
+    tryActivateEdk(_edkKey(donorDrug), _edkOffers);
   }
 
   /// Accept EDK: add 1 package of replacement, remove donor from cart.
@@ -1317,7 +1347,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       dismissedEdkIds.add(donorId);
       activeEdkOffer = null;
       // Remove the donor — replacement substitutes it.
-      _cart.removeWhere((i) => i.drug.id == donorId);
+      _cart.removeWhere((i) =>
+          ApiConfig.useMock ? i.drug.id == donorId : i.drug.ukod == donorId);
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
         if (_cart[idx].quantity < replacement.stock) _cart[idx].quantity++;
@@ -1339,7 +1370,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     setState(() {
       dismissedEdkIds.add(donorId);
       activeEdkOffer = null;
-      _cart.removeWhere((i) => i.drug.id == donorId);
+      _cart.removeWhere((i) =>
+          ApiConfig.useMock ? i.drug.id == donorId : i.drug.ukod == donorId);
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
         final current = _cart[idx].fractionalQty ?? 0;
@@ -1362,7 +1394,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Add EDK replacement for an out-of-stock drug (whole package).
   void _addOosEdkPackage(Drug oosDrug) {
-    final offer = _edkOffers[oosDrug.id];
+    final offer = _edkOffers[_edkKey(oosDrug)];
     if (offer == null) return;
     final replacement = offer.drug;
     setState(() {
@@ -1380,7 +1412,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Add EDK replacement for an out-of-stock drug (1 blister).
   void _addOosEdkBlister(Drug oosDrug) {
-    final offer = _edkOffers[oosDrug.id];
+    final offer = _edkOffers[_edkKey(oosDrug)];
     if (offer == null) return;
     final replacement = offer.drug;
     if (!replacement.canSplitByBlister) return;
@@ -2178,11 +2210,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                   ? OutOfStockPanel(
                       key: _outOfStockPanelKey,
                       drug: _selectedDrug!,
-                      edkOffer: _edkOffers[_selectedDrug!.id],
+                      edkOffer: _edkOffers[_edkKey(_selectedDrug!)],
                       onAddPackage: () =>
                           _addOosEdkPackage(_selectedDrug!),
                       onAddBlister:
-                          (_edkOffers[_selectedDrug!.id]
+                          (_edkOffers[_edkKey(_selectedDrug!)]
                                       ?.drug
                                       .canSplitByBlister ??
                                   false)

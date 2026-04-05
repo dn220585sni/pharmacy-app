@@ -31,10 +31,10 @@ class PriorityAnalogConfig {
 
 /// Одна зв'язка донор → аналог з API.
 class PriorityAnalog {
-  final int donorUkod;          // ID1 — u-код товару-донора
+  final String donorUkod;       // ID1 — u-код товару-донора (e.g. "25860*1*1455*10**500*10*16044")
   final String donorName;       // GOOD_NAME1
   final String donorManufact;   // MANUFACT1
-  final int analogUkod;         // ID2 — u-код аналога
+  final String analogUkod;      // ID2 — u-код аналога
   final String analogName;      // GOOD_NAME2
   final String analogManufact;  // MANUFACT2
   final DateTime dtBeg;         // початок дії зв'язки
@@ -77,10 +77,10 @@ class PriorityAnalog {
 
   factory PriorityAnalog.fromJson(Map<String, dynamic> json) {
     return PriorityAnalog(
-      donorUkod: _toInt(json['ID1']),
+      donorUkod: json['ID1']?.toString() ?? '',
       donorName: json['GOOD_NAME1']?.toString() ?? '',
       donorManufact: json['MANUFACT1']?.toString() ?? '',
-      analogUkod: _toInt(json['ID2']),
+      analogUkod: json['ID2']?.toString() ?? '',
       analogName: json['GOOD_NAME2']?.toString() ?? '',
       analogManufact: json['MANUFACT2']?.toString() ?? '',
       dtBeg: _parseDate(json['DT_BEG']) ?? DateTime.now(),

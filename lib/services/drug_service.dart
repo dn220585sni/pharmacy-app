@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../data/mock_drugs.dart';
 import '../models/drug.dart';
 import 'api_config.dart';
@@ -510,10 +511,14 @@ class DrugService {
         'ids': ids,
       });
 
-      if (!response.isOk) return null;
+      if (!response.isOk) {
+        debugPrint('GetSKUdetail FAIL ids=$ids: result="${response.result}" data=${response.data}');
+        return null;
+      }
 
       return SKUDetailResult.fromJson(response.data);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('GetSKUdetail ERROR ids=$ids: $e');
       return null;
     }
   }

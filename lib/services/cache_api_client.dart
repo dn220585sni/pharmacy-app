@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'api_config.dart';
 
@@ -21,7 +22,9 @@ class CacheResponse {
   factory CacheResponse.fromJson(Map<String, dynamic> json) {
     return CacheResponse(
       isOk: json['Status'] == 'OK',
-      result: json['Result']?.toString() ?? '',
+      result: json['Result']?.toString() ??
+          json['TextError']?.toString() ??
+          '',
       data: json,
     );
   }
@@ -82,9 +85,14 @@ class CacheApiClient {
       if (sessionId != null) 'sessionId': sessionId!,
     };
 
-    final uri = Uri.parse(ApiConfig.baseUrl).replace(
-      queryParameters: queryParams,
-    );
+    // Build query string manually — Caché CSP doesn't handle
+    // percent-encoded * and , in u-codes (e.g. "479*1*47*10**0,2*3*").
+    // Uri.replace(queryParameters:) encodes them as %2A/%2C which breaks lookups.
+    final queryString = queryParams.entries
+        .map((e) => '${e.key}=${e.value}')
+        .join('&');
+    final uri = Uri.parse('${ApiConfig.baseUrl}?$queryString');
+    final _logRaw = false; // set true to debug raw API responses
 
     for (var attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
@@ -116,9 +124,17 @@ class CacheApiClient {
         // Спочатку пробуємо UTF-8, якщо не виходить — windows-1251.
         final bodyString = _decodeBody(response);
 
+        if (_logRaw) {
+          debugPrint('CacheAPI RAW (${bodyString.length} chars): ${bodyString.substring(0, bodyString.length > 300 ? 300 : bodyString.length)}');
+        }
+
         // Fix Caché JSON: деякі процедури пропускають } між об'єктами
         // в масивах. Наприклад: "ipn":""{"user" → "ipn":""},{"user"
         var fixedBody = bodyString.replaceAll('"{"user"', '"},{"user"');
+
+        // Fix Caché JSON: GetOrders — відсутня кома між об'єктами замовлень
+        // "}{"orderId" → "},{"orderId"
+        fixedBody = fixedBody.replaceAll('}{"orderId"', '},{"orderId"');
 
         // Fix Caché JSON: відсутній ]} в кінці (масив + об'єкт не закриті)
         final trimmed = fixedBody.trimRight();

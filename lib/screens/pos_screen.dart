@@ -104,6 +104,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// Whether the internet orders panel is shown in the right column.
   bool _ordersOpen = false;
 
+  /// Layout mode for orders panel (left / right / fullscreen).
+  OrdersPanelLayout _ordersPanelLayout = OrdersPanelLayout.right;
+
   /// Whether the cash expenses panel is shown in the right column.
   bool _expensesOpen = false;
 
@@ -400,7 +403,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (_priorityAnalogs.isNotEmpty) {
       // Log first 5 donors for testing
       debugPrint('ЄДК sample donors:');
-      final seen = <int>{};
+      final seen = <String>{};
       for (final a in _priorityAnalogs) {
         if (seen.add(a.donorUkod) && seen.length <= 5) {
           debugPrint('  donor=${a.donorUkod} "${a.donorName}" → '
@@ -1151,12 +1154,21 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (_skuDetailFetched.contains(drug.id)) return;
     _skuDetailFetched.add(drug.id);
 
-    // Use ukod (u-code) for GetSKUdetail; fall back to s-code from id
-    final ids = drug.ukod ?? drug.id.replaceFirst('srv_', '');
-    if (ids.isEmpty) return;
+    // GetSKUdetail works with u-codes (e.g. "5511*3*14").
+    // Use ukod; fall back to s-code from drug.id for legacy items.
+    final ids = drug.ukod ?? drug.id.replaceFirst('srv_u_', '').replaceFirst('srv_', '');
+    if (ids.isEmpty) {
+      debugPrint('SKUDetail: skip — ids is empty for ${drug.name} (id=${drug.id}, ukod=${drug.ukod})');
+      return;
+    }
+    debugPrint('SKUDetail: fetching ids="$ids" for ${drug.name} (id=${drug.id})');
 
     DrugService.fetchSKUDetail(ids).then((detail) {
-      if (!mounted || detail == null) return;
+      if (!mounted) return;
+      if (detail == null) {
+        debugPrint('SKUDetail: returned null for ids="$ids"');
+        return;
+      }
 
       setState(() {
         // Use CURRENT version of drug (may have been enriched by ProductBrowser)
@@ -1207,14 +1219,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       });
 
       // If INN was just populated, try fetching external analogues
+      debugPrint('SKUDetail: inn=${detail.inn}, analogueGroup=${detail.analogueGroup} for ${drug.name}');
       if (detail.inn != null && detail.inn!.isNotEmpty) {
         final updated = _selectedDrug;
         if (updated != null && updated.id == drug.id) {
           _fetchExternalAnalogues(updated);
+        } else {
+          debugPrint('Analogues: skip after SKUDetail — drug changed (selected=${_selectedDrug?.id}, detail=${drug.id})');
         }
       }
-    }).catchError((_) {
-      // Silently ignore — SKU detail is optional enhancement
+    }).catchError((e) {
+      debugPrint('SKUDetail: error for ids="$ids" — $e');
     });
   }
 
@@ -1222,21 +1237,31 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// Fire-and-forget async: updates _externalAnalogues on success.
   void _fetchExternalAnalogues(Drug drug) {
     // Only fetch if drug has INN and we haven't loaded for this drug yet
-    if (drug.inn == null || drug.inn!.isEmpty) return;
-    if (_externalAnaloguesForDrugId == drug.id) return;
+    if (drug.inn == null || drug.inn!.isEmpty) {
+      debugPrint('Analogues: skip — INN is empty for ${drug.name}');
+      return;
+    }
+    if (_externalAnaloguesForDrugId == drug.id) {
+      debugPrint('Analogues: skip — already fetched for ${drug.id}');
+      return;
+    }
 
     _externalAnaloguesForDrugId = drug.id;
     setState(() => _externalAnalogues = []);
+    debugPrint('Analogues: searching by INN="${drug.inn}" for ${drug.name}');
 
     // Search by INN to find analogues from the entire market
     ProductBrowserService.searchProducts(drug.inn!, limit: 15).then((results) {
       if (!mounted) return;
       if (_selectedDrug?.id != drug.id) return; // user changed selection
 
+      debugPrint('Analogues: found ${results.length} results for INN="${drug.inn}"');
       setState(() {
         _externalAnalogues = results;
       });
-    }).catchError((_) {});
+    }).catchError((e) {
+      debugPrint('Analogues: error — $e');
+    });
   }
 
   // ── Manual barcode input (F4) ───────────────────────────────────────────
@@ -2020,16 +2045,33 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   void _selectAnalogue(Drug drug) {
-    _searchController.text = '';
-    _filterDrugs();
-    setState(() {
-      _selectedDrug = drug;
-      _focusQtyOnSelect = true;
-      _cartOpen = false;
-      activeEdkOffer = null;
-    });
-    final idx = _searchResults.indexWhere((d) => d.id == drug.id);
-    if (idx >= 0) _scrollToIndex(idx);
+    // Reset analogue tracking so new drug's analogues will be fetched
+    _externalAnaloguesForDrugId = null;
+
+    // If this drug is already in search results — just select it
+    final existingIdx = _searchResults.indexWhere((d) => d.id == drug.id);
+    if (existingIdx >= 0) {
+      setState(() {
+        _selectedDrug = _searchResults[existingIdx];
+        _focusQtyOnSelect = true;
+        _cartOpen = false;
+        activeEdkOffer = null;
+      });
+      _scrollToIndex(existingIdx);
+      _fetchProductBrowserInfo(_searchResults[existingIdx]);
+      _fetchExternalAnalogues(_searchResults[existingIdx]);
+      _fetchSKUDetail(_searchResults[existingIdx]);
+      return;
+    }
+
+    // External analogue (from anc.ua) — search by name to find in our catalog
+    final searchName = drug.name
+        .replaceAll(RegExp(r'[№#].*'), '') // strip trailing "№30" etc.
+        .trim();
+    if (searchName.length >= 2) {
+      _searchController.text = searchName;
+      // _filterDrugs is triggered by listener; server search follows
+    }
   }
 
   // ─── Storage location editing ────────────────────────────────────────────────
@@ -2137,77 +2179,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                                 child: Row(
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
-                                  children: [
-                                    Expanded(
-                                      flex: 6,
-                                      child: _buildTableCard(),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      flex: 3,
-                                      child: _cartOpen
-                                          ? CartPanel(
-                                              key: _cartPanelKey,
-                                              cart: List.unmodifiable(_cart),
-                                              offers: _isCustomerAuthorized ? _recommendedOffers : const [],
-                                              onClear: _clearCart,
-                                              onIncrease: _increaseQty,
-                                              onDecrease: _decreaseQty,
-                                              onRemove: _removeFromCart,
-                                              onPay: _processPayment,
-                                              onClose: _toggleCart,
-                                              onAddOffer: _addOfferToCart,
-                                              onAddOfferBlister: _addOfferBlisterToCart,
-                                              loyalty: _customerLoyalty,
-                                              onFocusPhone: _focusPhoneField,
-                                            )
-                                          : _ordersOpen
-                                              ? OrdersPanel(
-                                                  key: _ordersPanelKey,
-                                                  onClose: _toggleOrders,
-                                                  loyalty: _customerLoyalty,
-                                                  onAddEdkPackage: (drug) =>
-                                                      _setQuantity(drug, 1),
-                                                  onAddEdkBlister: (drug) =>
-                                                      _setFractionalQuantity(
-                                                          drug, 1),
-                                                  onOrderPaid: _onOrderPaid,
-                                                  onFocusPhone: _focusPhoneField,
-                                                )
-                                              : _expensesOpen
-                                                  ? ExpensesPanel(
-                                                      key: _expensesPanelKey,
-                                                      onClose: _toggleExpenses,
-                                                    )
-                                                  : _prescriptionOpen
-                                                      ? PrescriptionPanel(
-                                                          key: _prescriptionPanelKey,
-                                                          onClose: _togglePrescription,
-                                                          drugCatalog: mockDrugs,
-                                                          onAddToCart: _addPrescriptionToCart,
-                                                        )
-                                                      : _socialProjectsOpen
-                                                          ? SocialProjectsPanel(
-                                                              key: _socialProjectsPanelKey,
-                                                              onClose: _toggleSocialProjects,
-                                                              selectedProject: _selectedSocialProject,
-                                                              onProjectSelected: (p) =>
-                                                                  setState(() => _selectedSocialProject = p),
-                                                            )
-                                                          : _messagesOpen
-                                                              ? MessagesPanel(
-                                                                  key: _messagesPanelKey,
-                                                                  onClose: _toggleMessages,
-                                                                )
-                                                              : _robotOpen
-                                                                  ? RobotPanel(
-                                                                      key: _robotPanelKey,
-                                                                      onClose: _toggleRobot,
-                                                                      cart: _cart,
-                                                                    )
-                                                                  : _buildRightPanel(),
-                                    ),
-                                  ],
+                                  children: _buildMainContentChildren(),
                                 ),
                               ),
                             ],
@@ -2275,6 +2247,85 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   // ── Search bar (open strip, no card) ───────────────────────────────────────
 
   /// Right panel: switches between EdkPanel and DrugDetailPanel with animation.
+  /// Build the detail panel (cart, orders, expenses, etc.)
+  Widget _buildDetailPanel() {
+    if (_cartOpen) {
+      return CartPanel(
+        key: _cartPanelKey,
+        cart: List.unmodifiable(_cart),
+        offers: _isCustomerAuthorized ? _recommendedOffers : const [],
+        onClear: _clearCart,
+        onIncrease: _increaseQty,
+        onDecrease: _decreaseQty,
+        onRemove: _removeFromCart,
+        onPay: _processPayment,
+        onClose: _toggleCart,
+        onAddOffer: _addOfferToCart,
+        onAddOfferBlister: _addOfferBlisterToCart,
+        loyalty: _customerLoyalty,
+        onFocusPhone: _focusPhoneField,
+      );
+    }
+    if (_ordersOpen) {
+      return OrdersPanel(
+        key: _ordersPanelKey,
+        onClose: _toggleOrders,
+        loyalty: _customerLoyalty,
+        onAddEdkPackage: (drug) => _setQuantity(drug, 1),
+        onAddEdkBlister: (drug) => _setFractionalQuantity(drug, 1),
+        onOrderPaid: _onOrderPaid,
+        onFocusPhone: _focusPhoneField,
+        layout: _ordersPanelLayout,
+        onLayoutChanged: (layout) =>
+            setState(() => _ordersPanelLayout = layout),
+      );
+    }
+    if (_expensesOpen) {
+      return ExpensesPanel(key: _expensesPanelKey, onClose: _toggleExpenses);
+    }
+    if (_prescriptionOpen) {
+      return PrescriptionPanel(
+        key: _prescriptionPanelKey,
+        onClose: _togglePrescription,
+        drugCatalog: mockDrugs,
+        onAddToCart: _addPrescriptionToCart,
+      );
+    }
+    if (_socialProjectsOpen) {
+      return SocialProjectsPanel(
+        key: _socialProjectsPanelKey,
+        onClose: _toggleSocialProjects,
+        selectedProject: _selectedSocialProject,
+        onProjectSelected: (p) => setState(() => _selectedSocialProject = p),
+      );
+    }
+    if (_messagesOpen) {
+      return MessagesPanel(key: _messagesPanelKey, onClose: _toggleMessages);
+    }
+    if (_robotOpen) {
+      return RobotPanel(key: _robotPanelKey, onClose: _toggleRobot, cart: _cart);
+    }
+    return _buildRightPanel();
+  }
+
+  /// Build main content children list — supports orders panel layout modes.
+  List<Widget> _buildMainContentChildren() {
+    final isOrdersFullscreen =
+        _ordersOpen && _ordersPanelLayout == OrdersPanelLayout.fullscreen;
+
+    if (isOrdersFullscreen) {
+      // Fullscreen: orders panel takes all space, table hidden
+      return [Expanded(child: _buildDetailPanel())];
+    }
+
+    // Default: table on the left, detail panel on the right
+    return [
+      Expanded(flex: 6, child: _buildTableCard()),
+      const SizedBox(width: 10),
+      Expanded(flex: 3, child: _buildDetailPanel()),
+    ];
+  }
+
   Widget _buildRightPanel() {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),

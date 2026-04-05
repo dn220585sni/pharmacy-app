@@ -29,7 +29,7 @@ Map<String, EdkOffer> buildEdkOffersFromApi(
   // Group analogs by donor ukod, sorted by rating
   final grouped = <String, List<PriorityAnalog>>{};
   for (final a in analogs) {
-    final key = a.donorUkod.toString();
+    final key = a.donorUkod;
     (grouped[key] ??= []).add(a);
   }
   for (final list in grouped.values) {
@@ -41,7 +41,7 @@ Map<String, EdkOffer> buildEdkOffersFromApi(
   for (final entry in grouped.entries) {
     final donorKey = entry.key;
     for (final analog in entry.value) {
-      final analogKey = analog.analogUkod.toString();
+      final analogKey = analog.analogUkod;
       final replacementDrug = drugByUkod[analogKey];
       if (replacementDrug != null && replacementDrug.stock > 0) {
         // Build promo label from bonuses

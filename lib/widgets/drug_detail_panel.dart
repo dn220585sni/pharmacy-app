@@ -520,6 +520,16 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
                 _ExternalAnalogueRow(
                   product: e.value,
                   isEven: e.key.isEven,
+                  onTap: () => widget.onSelectAnalogue(Drug(
+                    id: 'anc_${e.value.id}',
+                    name: e.value.name,
+                    manufacturer: e.value.producer ?? '',
+                    category: '',
+                    price: e.value.price,
+                    stock: 0,
+                    unit: 'шт',
+                    imageUrl: e.value.picture,
+                  )),
                 )).toList(),
           ),
         ),
@@ -1324,15 +1334,21 @@ class _UsagePropCell extends StatelessWidget {
 class _ExternalAnalogueRow extends StatelessWidget {
   final ProductSearchResult product;
   final bool isEven;
+  final VoidCallback? onTap;
 
   const _ExternalAnalogueRow({
     required this.product,
     required this.isEven,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return GestureDetector(
+      onTap: onTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
       color: isEven ? const Color(0xFFFAFBFC) : const Color(0xFFF5F6F8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
       child: Row(
@@ -1400,6 +1416,8 @@ class _ExternalAnalogueRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+      ),
       ),
     );
   }

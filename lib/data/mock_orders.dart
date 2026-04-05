@@ -14,7 +14,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 12,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '26993528',
         name: 'ПЕЧАЄВСЬКІ ТАБ ВІД ІЗЖОГИ №',
         manufacturer: 'Технолог',
@@ -24,7 +24,7 @@ final List<InternetOrder> mockOrders = [
         total: 34.95,
         expiryDate: '01.09.2028',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '',
         name: 'Знижка на чек',
         quantity: 1,
@@ -42,7 +42,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 15,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '27001845',
         name: 'НУТРОФ ФОРТЕ КА',
         manufacturer: 'Théa Pharma',
@@ -61,7 +61,7 @@ final List<InternetOrder> mockOrders = [
     status: OrderStatus.newOrder,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '25487201',
         name: 'ЦИПРОФЛОКСАЦИН',
         manufacturer: 'Дарниця',
@@ -70,7 +70,7 @@ final List<InternetOrder> mockOrders = [
         total: 110.71,
         expiryDate: '12.03.2027',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '25487202',
         name: 'ЦИПРОФЛОКСАЦИН',
         manufacturer: 'Дарниця',
@@ -90,7 +90,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 11,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '26104387',
         name: 'МАГНЕЛЬ КАПС. №',
         manufacturer: 'Sanofi',
@@ -111,7 +111,7 @@ final List<InternetOrder> mockOrders = [
     isLockerEligible: true,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '27843001',
         name: 'АРТІХОЛ ТАБЛ.0.',
         manufacturer: 'Мікрохім',
@@ -120,7 +120,7 @@ final List<InternetOrder> mockOrders = [
         total: 155.23,
         expiryDate: '30.04.2027',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '27843002',
         name: 'АРТІХОЛ ТАБЛ.0.',
         manufacturer: 'Мікрохім',
@@ -140,7 +140,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 32,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '25891340',
         name: 'ГЕРБІОН ПЛЮЩ СИ',
         manufacturer: 'KRKA',
@@ -160,7 +160,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 31,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '24590118',
         name: 'ШПРИЦ 2МЛ ТРЕХК.',
         manufacturer: 'BD',
@@ -169,7 +169,7 @@ final List<InternetOrder> mockOrders = [
         total: 45.00,
         expiryDate: '01.01.2030',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '26771903',
         name: 'МЕЛОКСИКАМ-ТЕВА',
         manufacturer: 'Тева',
@@ -190,7 +190,7 @@ final List<InternetOrder> mockOrders = [
     isLockerEligible: true,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '27654901',
         name: 'НОКСПЕРЙ НАЗАЛ.',
         manufacturer: 'Noxinn',
@@ -210,7 +210,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 17,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '25112478',
         name: 'САНІВІТАН КАПС.',
         manufacturer: 'Київський',
@@ -219,7 +219,7 @@ final List<InternetOrder> mockOrders = [
         total: 189.50,
         expiryDate: '20.09.2027',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '25112479',
         name: 'САНІВІТАН КАПС.',
         manufacturer: 'Київський',
@@ -228,7 +228,7 @@ final List<InternetOrder> mockOrders = [
         total: 189.50,
         expiryDate: '20.09.2027',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '26890213',
         name: 'СІОФОР ХР ТАБЛ',
         manufacturer: 'Berlin-Chemie',
@@ -248,7 +248,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 39,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '27001122',
         name: 'ЕРОТОН ТАБЛ. 50',
         manufacturer: 'Фармак',
@@ -267,7 +267,7 @@ final List<InternetOrder> mockOrders = [
     status: OrderStatus.newOrder,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '26345670',
         name: 'ДОППЕЛЬГЕРЦ АКТ',
         manufacturer: 'Queisser',
@@ -287,7 +287,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 51,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '25998710',
         name: 'БІШОФІТ КРИСТАЛ',
         manufacturer: 'Полтавафарм',
@@ -307,7 +307,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 36,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '27456012',
         name: 'ТЕАЛОЗ ДУО Р-Р',
         manufacturer: 'Théa Pharma',
@@ -316,7 +316,7 @@ final List<InternetOrder> mockOrders = [
         total: 541.94,
         expiryDate: '19.04.2027',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '27456013',
         name: 'ТЕАЛОЗ ДУО Р-Р',
         manufacturer: 'Théa Pharma',
@@ -336,7 +336,7 @@ final List<InternetOrder> mockOrders = [
     isUrgent: true,
     type: OrderType.glovo,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '24109082',
         name: 'ПАКЕТ МАЙКА 30К',
         manufacturer: '',
@@ -344,7 +344,7 @@ final List<InternetOrder> mockOrders = [
         price: 12.50,
         total: 12.50,
       ),
-      const OrderItem(
+      OrderItem(
         sku: '26883210',
         name: 'ЕНТЕРОСГЕЛЬ ПАС',
         manufacturer: 'Креома',
@@ -364,7 +364,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 42,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '27234561',
         name: 'ПАНТИРОКС КАПС',
         manufacturer: 'Nobel',
@@ -385,7 +385,7 @@ final List<InternetOrder> mockOrders = [
     status: OrderStatus.atWork,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '26104387',
         name: 'МАГНЕЛЬ КАПС. №60',
         manufacturer: 'Sanofi',
@@ -394,7 +394,7 @@ final List<InternetOrder> mockOrders = [
         total: 216.27,
         expiryDate: '20.11.2027',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '24590118',
         name: 'ШПРИЦ 2МЛ ТРЕХК.',
         manufacturer: 'BD',
@@ -417,7 +417,7 @@ final List<InternetOrder> mockOrders = [
     status: OrderStatus.paidOnline,
     type: OrderType.ancSite,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '27234561',
         name: 'ПАНТИРОКС КАПС 40мг №28',
         manufacturer: 'Nobel',
@@ -441,7 +441,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 12,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '26993528',
         name: 'ПЕЧАЄВСЬКІ ТАБ ВІД ІЗЖОГИ №20',
         manufacturer: 'Технолог',
@@ -451,7 +451,7 @@ final List<InternetOrder> mockOrders = [
         expiryDate: '01.09.2028',
         refusalReason: 'Клієнт передумав',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '26771903',
         name: 'МЕЛОКСИКАМ-ТЕВА 15мг №20',
         manufacturer: 'Тева',
@@ -472,7 +472,7 @@ final List<InternetOrder> mockOrders = [
     status: OrderStatus.refused,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '25112478',
         name: 'САНІВІТАН КАПС. №30',
         manufacturer: 'Київський',
@@ -482,7 +482,7 @@ final List<InternetOrder> mockOrders = [
         expiryDate: '20.09.2027',
         refusalReason: 'Не підійшла ціна',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '26890213',
         name: 'СІОФОР ХР ТАБЛ 500мг №60',
         manufacturer: 'Berlin-Chemie',
@@ -504,7 +504,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 31,
     type: OrderType.glovo,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '27234561',
         name: 'ПАНТИРОКС КАПС 40мг №28',
         manufacturer: 'Nobel',
@@ -525,7 +525,7 @@ final List<InternetOrder> mockOrders = [
     lockerCell: 42,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '27001845',
         name: 'НУТРОФ ФОРТЕ КАПС №30',
         manufacturer: 'Théa Pharma',
@@ -535,7 +535,7 @@ final List<InternetOrder> mockOrders = [
         expiryDate: '15.06.2027',
         refusalReason: 'Знайшли дешевше',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '26104387',
         name: 'МАГНЕЛЬ КАПС. №60',
         manufacturer: 'Sanofi',
@@ -558,7 +558,7 @@ final List<InternetOrder> mockOrders = [
     status: OrderStatus.customerRefusal,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '27843001',
         name: 'АРТІХОЛ ТАБЛ.0.',
         manufacturer: 'Мікрохім',
@@ -568,7 +568,7 @@ final List<InternetOrder> mockOrders = [
         expiryDate: '30.04.2027',
         refusalReason: 'Клієнт знайшов дешевше',
       ),
-      const OrderItem(
+      OrderItem(
         sku: '27843002',
         name: 'АРТІХОЛ ТАБЛ.0.',
         manufacturer: 'Мікрохім',
@@ -589,7 +589,7 @@ final List<InternetOrder> mockOrders = [
     status: OrderStatus.customerRefusal,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '25891340',
         name: 'ГЕРБІОН ПЛЮЩ СИ',
         manufacturer: 'KRKA',
@@ -612,7 +612,7 @@ final List<InternetOrder> mockOrders = [
     status: OrderStatus.pharmacyRefusal,
     type: OrderType.tabletkiUA,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '27654901',
         name: 'НОКСПЕРЙ НАЗАЛ.',
         manufacturer: 'Noxinn',
@@ -632,7 +632,7 @@ final List<InternetOrder> mockOrders = [
     status: OrderStatus.pharmacyRefusal,
     type: OrderType.glovo,
     items: [
-      const OrderItem(
+      OrderItem(
         sku: '24590118',
         name: 'ШПРИЦ 2МЛ ТРЕХК.',
         manufacturer: 'BD',

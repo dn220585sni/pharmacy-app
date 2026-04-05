@@ -12,6 +12,7 @@ import '../data/mock_drugs.dart';
 import '../services/api_config.dart';
 import '../services/priority_analog_service.dart';
 import '../services/order_service.dart';
+import '../services/drug_service.dart';
 import 'checkout/bonus_discount_block.dart';
 import 'checkout/cash_change_section.dart';
 import 'checkout/payment_method_toggle.dart';
@@ -24,6 +25,9 @@ import 'likomat_dialog.dart';
 // OrdersPanel — Internet orders panel shown in the right detail column.
 // Three-screen flow: Order List → Order Details → Checkout.
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Layout mode for the orders panel within the POS screen.
+enum OrdersPanelLayout { right, fullscreen }
 
 class OrdersPanel extends StatefulWidget {
   final VoidCallback onClose;
@@ -38,6 +42,12 @@ class OrdersPanel extends StatefulWidget {
   /// Called to focus the phone input when loyalty is needed.
   final VoidCallback? onFocusPhone;
 
+  /// Current layout mode of the orders panel.
+  final OrdersPanelLayout layout;
+
+  /// Called when the user changes the layout mode.
+  final void Function(OrdersPanelLayout layout)? onLayoutChanged;
+
   const OrdersPanel({
     super.key,
     required this.onClose,
@@ -46,6 +56,8 @@ class OrdersPanel extends StatefulWidget {
     this.onAddEdkBlister,
     this.onOrderPaid,
     this.onFocusPhone,
+    this.layout = OrdersPanelLayout.right,
+    this.onLayoutChanged,
   });
 
   @override
@@ -83,6 +95,7 @@ class OrdersPanelState extends State<OrdersPanel>
     'В роботі',
     'Оплачено онлайн',
     'Термінові',
+    'Завислі',
     'Відмова клієнта',
     'Відмова аптеки',
   ];
@@ -268,6 +281,8 @@ class OrdersPanelState extends State<OrdersPanel>
           if (o.status == OrderStatus.paidOnline) return true;
         case 'Термінові':
           if (o.isUrgent) return true;
+        case 'Завислі':
+          if (o.isStale) return true;
         case 'Відмова клієнта':
           if (o.status == OrderStatus.customerRefusal) return true;
         case 'Відмова аптеки':
@@ -343,6 +358,62 @@ class OrdersPanelState extends State<OrdersPanel>
     });
     // Show EDK immediately when opening an eligible order
     _triggerEdkForOrder(order);
+    // Enrich order items with drug details (image, storage, series, expiry)
+    _enrichOrderItems(order);
+  }
+
+  /// Enrich order items with data from GetSKUdetail and GetSKUprice APIs.
+  Future<void> _enrichOrderItems(InternetOrder order) async {
+    if (ApiConfig.useMock) {
+      // In mock mode, populate with sample data
+      setState(() {
+        for (final item in order.items) {
+          if (!item.isEnriched) {
+            item.enrichedStorageLocation = 'Ст.А-${item.sku.hashCode.abs() % 20 + 1}';
+            item.enrichedSeries = 'SN${item.sku.substring(0, 4)}';
+            item.enrichedExpiryDate = '12.2027';
+            item.isEnriched = true;
+          }
+        }
+      });
+      return;
+    }
+
+    for (final item in order.items) {
+      if (item.isEnriched) continue;
+      try {
+        // Fetch detail (image, series, expiry) and price (storage locations) in parallel
+        final results = await Future.wait([
+          DrugService.fetchSKUDetail(item.sku),
+          DrugService.getStockAndPrices(item.sku),
+        ]);
+        final detail = results[0] as SKUDetailResult?;
+        final priceResult = results[1] as DrugPriceResult;
+
+        if (!mounted) return;
+
+        setState(() {
+          if (detail != null) {
+            item.enrichedImageUrl = detail.imageUrl;
+            item.enrichedSeries = detail.series;
+            item.enrichedExpiryDate = detail.expiryDate;
+          }
+          // Build storage location string from GetSKUprice
+          final parts = <String>[];
+          if (priceResult.stelazh?.isNotEmpty == true) parts.add('Ст.${priceResult.stelazh}');
+          if (priceResult.vitrina?.isNotEmpty == true) parts.add('Вт.${priceResult.vitrina}');
+          if (priceResult.polka?.isNotEmpty == true) parts.add('П.${priceResult.polka}');
+          if (priceResult.robot?.isNotEmpty == true) parts.add('Робот ${priceResult.robot}');
+          if (parts.isNotEmpty) {
+            item.enrichedStorageLocation = parts.join(' / ');
+          }
+          item.isEnriched = true;
+        });
+      } catch (e) {
+        debugPrint('Enrichment failed for SKU ${item.sku}: $e');
+        item.isEnriched = true; // Don't retry
+      }
+    }
   }
 
   /// Find the first EDK offer for an order's items and activate it.
@@ -418,7 +489,9 @@ class OrdersPanelState extends State<OrdersPanel>
     // TODO: paidOnline — skip register payment step (separate task)
     if (order.status != OrderStatus.collected &&
         order.status != OrderStatus.paidOnline &&
-        !_allScanned) return;
+        !_allScanned) {
+      return;
+    }
     setState(() => _orderCheckoutMode = true);
   }
 
@@ -768,6 +841,22 @@ class OrdersPanelState extends State<OrdersPanel>
               child: CircularProgressIndicator(strokeWidth: 1.5),
             ),
           const SizedBox(width: 4),
+          // Fullscreen toggle — next to close button
+          if (widget.onLayoutChanged != null)
+            HoverIconButton(
+              icon: widget.layout == OrdersPanelLayout.fullscreen
+                  ? Icons.fullscreen_exit_rounded
+                  : Icons.fullscreen_rounded,
+              tooltip: widget.layout == OrdersPanelLayout.fullscreen
+                  ? 'Звичайний розмір'
+                  : 'На весь екран',
+              onTap: () => widget.onLayoutChanged!(
+                widget.layout == OrdersPanelLayout.fullscreen
+                    ? OrdersPanelLayout.right
+                    : OrdersPanelLayout.fullscreen,
+              ),
+            ),
+          const SizedBox(width: 2),
           // Close button
           HoverIconButton(
             icon: Icons.close_rounded,
@@ -2082,6 +2171,37 @@ class _OrderListTileState extends State<_OrderListTile> {
                             ),
                           ),
                         ],
+                        // ── Stale order badge (3+ days) ──
+                        if (order.isStale) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEF2F2),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                  color: const Color(0xFFFECACA)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.warning_amber_rounded,
+                                    size: 10, color: Color(0xFFDC2626)),
+                                const SizedBox(width: 2),
+                                Text(
+                                  order.staleLabel,
+                                  style: const TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFFDC2626),
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 2),
@@ -2306,18 +2426,18 @@ class _OrderItemRow extends StatelessWidget {
             ? item.quantity.toInt().toString()
             : item.quantity.toString());
 
-    // Scanned items get a blue-tinted card
+    // INVERTED: unscanned = blue (attention needed), scanned = green (done)
     final Color bgColor;
     final Color borderColor;
     if (isDiscount) {
       bgColor = const Color(0xFFFFFBEB);
       borderColor = const Color(0xFFFDE68A);
     } else if (isScanned) {
-      bgColor = const Color(0xFFEFF6FF);
-      borderColor = const Color(0xFFBFDBFE);
+      bgColor = const Color(0xFFF0FDF4);   // green — done
+      borderColor = const Color(0xFFBBF7D0);
     } else {
-      bgColor = const Color(0xFFF9FAFB);
-      borderColor = const Color(0xFFE5E7EB);
+      bgColor = const Color(0xFFEFF6FF);   // blue — needs scanning
+      borderColor = const Color(0xFFBFDBFE);
     }
 
     return Container(
@@ -2330,7 +2450,7 @@ class _OrderItemRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Icon: blue checkbox when scanned, default otherwise
+          // Icon: green checkbox when scanned, blue medication when not
           Container(
             width: 34,
             height: 34,
@@ -2338,8 +2458,8 @@ class _OrderItemRow extends StatelessWidget {
               color: isDiscount
                   ? const Color(0xFFFEF3C7)
                   : isScanned
-                      ? const Color(0xFFDBEAFE)
-                      : const Color(0xFFE8F3FB),
+                      ? const Color(0xFFDCFCE7)   // green bg
+                      : const Color(0xFFDBEAFE),   // blue bg
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
@@ -2350,12 +2470,14 @@ class _OrderItemRow extends StatelessWidget {
                       : Icons.medication_rounded,
               color: isDiscount
                   ? const Color(0xFFB45309)
-                  : const Color(0xFF1E7DC8),
+                  : isScanned
+                      ? const Color(0xFF16A34A) // green icon
+                      : const Color(0xFF1E7DC8),
               size: 17,
             ),
           ),
           const SizedBox(width: 10),
-          // Name and price × qty
+          // Name, enriched info, and price × qty
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2366,7 +2488,7 @@ class _OrderItemRow extends StatelessWidget {
                     color: isDiscount
                         ? const Color(0xFFB45309)
                         : isScanned
-                            ? const Color(0xFF1E7DC8)
+                            ? const Color(0xFF15803D)
                             : const Color(0xFF1C1C2E),
                     fontSize: 12.5,
                     fontWeight: FontWeight.w500,
@@ -2374,12 +2496,51 @@ class _OrderItemRow extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
+                // ── Storage location ──
+                if (item.enrichedStorageLocation != null) ...[
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      const Icon(Icons.location_on_outlined,
+                          size: 11, color: Color(0xFF6B7280)),
+                      const SizedBox(width: 3),
+                      Expanded(
+                        child: Text(
+                          item.enrichedStorageLocation!,
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            color: Color(0xFF6B7280),
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                // ── Series & expiry ──
+                if (item.enrichedSeries != null || item.enrichedExpiryDate != null) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    [
+                      if (item.enrichedSeries != null) 'Серія: ${item.enrichedSeries}',
+                      if (item.enrichedExpiryDate != null) 'до ${item.enrichedExpiryDate}',
+                    ].join(' \u2022 '),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF9CA3AF),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
                 const SizedBox(height: 2),
                 Text(
                   '${item.price.toStringAsFixed(2).replaceAll('.', ',')} ₴ × $qtyStr',
                   style: TextStyle(
                     color: isScanned
-                        ? const Color(0xFF93C5FD)
+                        ? const Color(0xFF86EFAC)
                         : const Color(0xFF9CA3AF),
                     fontSize: 11,
                   ),
@@ -2387,7 +2548,38 @@ class _OrderItemRow extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 4),
+          // ── Image preview button ──
+          if (item.isEnriched)
+            GestureDetector(
+              onTap: () => _showImageDialog(context),
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: item.enrichedImageUrl != null
+                        ? const Color(0xFFEFF6FF)
+                        : const Color(0xFFF3F4F6),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: item.enrichedImageUrl != null
+                          ? const Color(0xFFBFDBFE)
+                          : const Color(0xFFE5E7EB),
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.image_outlined,
+                    size: 14,
+                    color: item.enrichedImageUrl != null
+                        ? const Color(0xFF1E7DC8)
+                        : const Color(0xFFD1D5DB),
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(width: 4),
           // Total price — tappable to simulate scan
           GestureDetector(
             onTap: (canScan && !isScanned && !isDiscount) ? onScan : null,
@@ -2416,7 +2608,7 @@ class _OrderItemRow extends StatelessWidget {
                     color: isDiscount
                         ? const Color(0xFFB45309)
                         : isScanned
-                            ? const Color(0xFF1E7DC8)
+                            ? const Color(0xFF15803D)
                             : const Color(0xFF1C1C2E),
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -2429,5 +2621,111 @@ class _OrderItemRow extends StatelessWidget {
       ),
     );
   }
+
+  void _showImageDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 400, maxHeight: 450),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      item.name,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: item.enrichedImageUrl != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.network(
+                          item.enrichedImageUrl!,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, e, st) => _noImagePlaceholder(),
+                        ),
+                      )
+                    : _noImagePlaceholder(),
+              ),
+              if (item.enrichedSeries != null || item.enrichedExpiryDate != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  [
+                    if (item.enrichedSeries != null) 'Серія: ${item.enrichedSeries}',
+                    if (item.enrichedExpiryDate != null) 'Термін: ${item.enrichedExpiryDate}',
+                  ].join(' \u2022 '),
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+                ),
+              ],
+              if (item.enrichedStorageLocation != null) ...[
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.location_on_outlined,
+                        size: 13, color: Color(0xFF6B7280)),
+                    const SizedBox(width: 4),
+                    Text(
+                      item.enrichedStorageLocation!,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF6B7280),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _noImagePlaceholder() {
+    return Container(
+      height: 200,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.image_not_supported_outlined,
+                size: 48, color: Color(0xFFD1D5DB)),
+            SizedBox(height: 8),
+            Text(
+              'Зображення недоступне',
+              style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
+
 

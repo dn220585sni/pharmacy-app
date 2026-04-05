@@ -41,7 +41,14 @@ class OrderItem {
   final String? expiryDate;
   final String? refusalReason;
 
-  const OrderItem({
+  // ── Enriched fields (populated from GetSKUdetail / GetSKUprice) ──────────
+  String? enrichedImageUrl;
+  String? enrichedSeries;
+  String? enrichedExpiryDate;
+  String? enrichedStorageLocation; // e.g. "Ст.А-12 / Вт.3"
+  bool isEnriched = false;
+
+  OrderItem({
     required this.sku,
     this.ukod,
     required this.name,
@@ -256,6 +263,22 @@ class InternetOrder {
       case OrderType.unknown:
         return 'Інше';
     }
+  }
+
+  /// Whether this order is "stale" — older than 3 days and not in a final status.
+  bool get isStale {
+    final age = DateTime.now().difference(dateTime).inDays;
+    if (age < 3) return false;
+    return status != OrderStatus.dispensed &&
+        status != OrderStatus.refused &&
+        status != OrderStatus.customerRefusal &&
+        status != OrderStatus.pharmacyRefusal;
+  }
+
+  /// Human-readable age label for stale orders.
+  String get staleLabel {
+    final days = DateTime.now().difference(dateTime).inDays;
+    return '$days дн.';
   }
 
   InternetOrder copyWith({

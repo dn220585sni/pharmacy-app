@@ -21,9 +21,9 @@ class SkarbConfig {
   /// API-Key (отримати від Skarb Cloud).
   static const apiKey = ''; // TODO: отримати API-Key
 
-  /// Credentials для авторизації фармацевта.
-  static const email = ''; // TODO: email фармацевта
-  static const password = ''; // TODO: password
+  /// Credentials для авторизації фармацевта (тестове середовище).
+  static const email = 'smartsign+2@openpharma.global';
+  static const password = '123';
 
   /// Таймаут запитів.
   static const timeout = Duration(seconds: 15);

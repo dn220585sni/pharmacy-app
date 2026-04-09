@@ -10,6 +10,7 @@ import '../data/mock_orders.dart';
 import '../data/edk_offers.dart';
 import '../data/mock_drugs.dart';
 import '../services/api_config.dart';
+import '../services/cache_api_client.dart';
 import '../services/priority_analog_service.dart';
 import '../services/order_service.dart';
 import '../services/drug_service.dart';
@@ -84,7 +85,7 @@ class OrdersPanelState extends State<OrdersPanel>
   bool _showDisbandedOrders = false;
 
   /// Active filter chip labels (multi-select, OR logic).
-  Set<String> _activeFilters = {'Нові', 'В обробці', 'Зібрані', 'В роботі', 'Оплачено онлайн'};
+  Set<String> _activeFilters = {'Нові', 'В обробці', 'Зібрані', 'В роботі', 'Відпущено'};
 
   /// All available filter labels.
   static const List<String> _filterLabels = [
@@ -93,7 +94,7 @@ class OrdersPanelState extends State<OrdersPanel>
     'В обробці',
     'Зібрані',
     'В роботі',
-    'Оплачено онлайн',
+    'Відпущено',
     'Термінові',
     'Завислі',
     'Відмова клієнта',
@@ -105,6 +106,10 @@ class OrdersPanelState extends State<OrdersPanel>
 
   /// Whether orders are loading from API.
   bool _isLoading = false;
+
+  /// Extended order data from GetOrderData API.
+  OrderData? _orderData;
+  bool _orderDataLoading = false;
 
   /// Selected date for orders (defaults to today).
   DateTime _ordersDate = DateTime.now();
@@ -150,6 +155,8 @@ class OrdersPanelState extends State<OrdersPanel>
     setState(() {
       _selectedOrder = null;
       _scannedSkus.clear();
+      _orderData = null;
+      _orderDataLoading = false;
     });
   }
 
@@ -277,7 +284,7 @@ class OrdersPanelState extends State<OrdersPanel>
           if (o.status == OrderStatus.collected) return true;
         case 'В роботі':
           if (o.status == OrderStatus.atWork) return true;
-        case 'Оплачено онлайн':
+        case 'Відпущено':
           if (o.status == OrderStatus.paidOnline) return true;
         case 'Термінові':
           if (o.isUrgent) return true;
@@ -355,11 +362,15 @@ class OrdersPanelState extends State<OrdersPanel>
       _selectedOrder = order;
       _scannedSkus.clear();
       activeEdkOffer = null;
+      _orderData = null;
+      _orderDataLoading = false;
     });
     // Show EDK immediately when opening an eligible order
     _triggerEdkForOrder(order);
     // Enrich order items with drug details (image, storage, series, expiry)
     _enrichOrderItems(order);
+    // Fetch extended order data (source, phone, delivery, payment, etc.)
+    _fetchOrderData(order.id);
   }
 
   /// Enrich order items with data from GetSKUdetail and GetSKUprice APIs.
@@ -413,6 +424,29 @@ class OrdersPanelState extends State<OrdersPanel>
         debugPrint('Enrichment failed for SKU ${item.sku}: $e');
         item.isEnriched = true; // Don't retry
       }
+    }
+  }
+
+  /// Fetch extended order data from GetOrderData API.
+  Future<void> _fetchOrderData(String orderId) async {
+    setState(() => _orderDataLoading = true);
+    try {
+      final resp = await CacheApiClient().call(
+        'GetOrderData',
+        params: {'orderId': orderId},
+      );
+      if (!mounted || _selectedOrder?.id != orderId) return;
+      if (resp.isOk) {
+        setState(() {
+          _orderData = OrderData.fromJson(resp.data);
+          _orderDataLoading = false;
+        });
+      } else {
+        setState(() => _orderDataLoading = false);
+      }
+    } catch (e) {
+      debugPrint('GetOrderData failed for $orderId: $e');
+      if (mounted) setState(() => _orderDataLoading = false);
     }
   }
 
@@ -1072,11 +1106,15 @@ class OrdersPanelState extends State<OrdersPanel>
       children: [
         _buildDetailHeader(order),
         const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
-        // Items + EDK card scroll together
+        // Items + order data + EDK card scroll together
         Expanded(
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 6),
             children: [
+              // ── Extended order data (GetOrderData) ───────────────
+              // Only shown when there are extra fields not in the header
+              // (payment, delivery, insurance, medical programs, etc.)
+              _buildOrderDataSection(),
               for (final item in order.items)
                 _OrderItemRow(
                   item: item,
@@ -1102,6 +1140,91 @@ class OrdersPanelState extends State<OrdersPanel>
     );
   }
 
+  // ── Extended order data section (GetOrderData) ───────────────────────────
+
+  Widget _buildOrderDataSection() {
+    if (_orderDataLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 12, height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.5),
+            ),
+            SizedBox(width: 8),
+            Text(
+              'Завантаження даних замовлення...',
+              style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_orderData == null || _orderData!.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final fields = _orderData!.fields;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(10, 2, 10, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.info_outline_rounded, size: 13, color: Color(0xFF64748B)),
+              SizedBox(width: 6),
+              Text(
+                'Дані замовлення',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF475569),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          for (final entry in fields.entries)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 130,
+                    child: Text(
+                      entry.key,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF94A3B8),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      entry.value,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF1E293B),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   // ── Detail header (mirrors CartPanel header) ──────────────────────────────
 
   Widget _buildDetailHeader(InternetOrder order) {
@@ -1119,7 +1242,11 @@ class OrdersPanelState extends State<OrdersPanel>
               HoverIconButton(
                 icon: Icons.arrow_back_rounded,
                 tooltip: 'До списку',
-                onTap: () => setState(() => _selectedOrder = null),
+                onTap: () => setState(() {
+                  _selectedOrder = null;
+                  _orderData = null;
+                  _orderDataLoading = false;
+                }),
               ),
               const SizedBox(width: 4),
               const Icon(Icons.receipt_long_rounded,
@@ -1194,6 +1321,35 @@ class OrdersPanelState extends State<OrdersPanel>
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
                             color: Color(0xFF1E7DC8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                // Online payment badge (from GetOrderData LiqPay fields)
+                if (_orderData?.isPaidOnline == true) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: const Color(0xFF6EE7B7)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.payment_rounded,
+                            size: 11, color: Color(0xFF059669)),
+                        SizedBox(width: 4),
+                        Text(
+                          'Оплачено онлайн',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF059669),
                           ),
                         ),
                       ],
@@ -2360,7 +2516,7 @@ class _OrderStatusBadge extends StatelessWidget {
       OrderStatus.inProgress => 'В обробці',
       OrderStatus.collected => 'Зібране',
       OrderStatus.atWork => 'В роботі',
-      OrderStatus.paidOnline => 'Оплачено онлайн',
+      OrderStatus.paidOnline => 'Відпущено',
       OrderStatus.dispensed => 'Видане',
       OrderStatus.refused => 'Розформоване',
       OrderStatus.customerRefusal => 'Відмова клієнта',

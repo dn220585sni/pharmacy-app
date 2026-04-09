@@ -408,7 +408,7 @@ final List<InternetOrder> mockOrders = [
     customerName: 'Петренко Олена',
   ),
 
-  // ── "Оплачено онлайн" (paidOnline) order ─────────────────────────────────
+  // ── "Відпущено" (paidOnline / apteka pay) order ──────────────────────────
   InternetOrder(
     id: 'ord-paid-01',
     reserveNumber: '164481500',

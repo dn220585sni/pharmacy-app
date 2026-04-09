@@ -1,6 +1,10 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+
+// Web localStorage access via conditional import
+import 'session_storage_stub.dart'
+    if (dart.library.html) 'session_storage_web.dart' as session_storage;
 
 import 'api_config.dart';
 import 'cache_api_client.dart';
@@ -39,45 +43,66 @@ class AuthService {
 
   static const _sessionFileName = '.pharmacy_session';
 
-  /// Шлях до файлу сесії.
-  static Future<File> get _sessionFile async {
+  /// Шлях до файлу сесії (non-web only).
+  static Future<File?> get _sessionFile async {
+    if (kIsWeb) return null;
     final dir = await getApplicationSupportDirectory();
     return File('${dir.path}/$_sessionFileName');
   }
 
-  /// Зберегти sessionId + user у файл.
+  /// Зберегти sessionId + user.
   static Future<void> _persistSession(String sessionId, String user) async {
     try {
+      if (kIsWeb) {
+        session_storage.saveSession(sessionId, user);
+        return;
+      }
       final file = await _sessionFile;
-      await file.writeAsString('$sessionId\n$user');
+      await file!.writeAsString('$sessionId\n$user');
     } catch (e) {
       debugPrint('Failed to persist session: $e');
     }
   }
 
-  /// Видалити файл сесії.
+  /// Видалити збережену сесію.
   static Future<void> _clearPersistedSession() async {
     try {
+      if (kIsWeb) {
+        session_storage.clearSession();
+        return;
+      }
       final file = await _sessionFile;
-      if (await file.exists()) await file.delete();
+      if (file != null && await file.exists()) await file.delete();
     } catch (e) {
       debugPrint('Failed to clear session file: $e');
     }
   }
 
-  /// Відновити sessionId з файлу і викликати LogoutRlz (при старті додатка).
+  /// Відновити sessionId і викликати LogoutRlz (при старті додатка).
   static Future<void> cleanupPreviousSession() async {
     if (ApiConfig.useMock) return;
     try {
-      final file = await _sessionFile;
-      if (!await file.exists()) return;
-      final content = await file.readAsString();
+      String? content;
+      if (kIsWeb) {
+        content = session_storage.getSession();
+      } else {
+        final file = await _sessionFile;
+        if (file != null && await file.exists()) {
+          content = await file.readAsString();
+        }
+      }
+      if (content == null || content.isEmpty) return;
       final lines = content.split('\n');
       if (lines.isEmpty || lines[0].trim().isEmpty) return;
       final oldSessionId = lines[0].trim();
       debugPrint('Found previous session: $oldSessionId → LogoutRlz');
       await _api.call('LogoutRlz', params: {'sessionId': oldSessionId});
-      await file.delete();
+      if (kIsWeb) {
+        session_storage.clearSession();
+      } else {
+        final file = await _sessionFile;
+        await file!.delete();
+      }
     } catch (e) {
       debugPrint('Session cleanup error: $e');
     }

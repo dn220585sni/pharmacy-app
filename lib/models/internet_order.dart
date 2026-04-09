@@ -9,7 +9,7 @@ enum OrderStatus {
   inProgress,         // "apteka got" / "apteka read" — В обробці
   collected,          // "apteka make" — Зібране в резерв
   atWork,             // "apteka work" — В роботі (є питання по замовленню)
-  paidOnline,         // "apteka pay" — Оплачено онлайн (клієнт сплатив через еквайрінг)
+  paidOnline,         // "apteka pay" — Відпущено (оплачено в аптеці)
   dispensed,          // LEGACY — keep for local checkout flow
   refused,            // LEGACY — keep for backward compat
   customerRefusal,    // "client otkaz" — Відмова клієнта (або 2 доби без приходу)
@@ -233,7 +233,7 @@ class InternetOrder {
       case OrderStatus.inProgress:      return 'В обробці';
       case OrderStatus.collected:       return 'Зібране';
       case OrderStatus.atWork:          return 'В роботі';
-      case OrderStatus.paidOnline:      return 'Оплачено онлайн';
+      case OrderStatus.paidOnline:      return 'Відпущено';
       case OrderStatus.dispensed:       return 'Видане';           // legacy
       case OrderStatus.refused:         return 'Розформоване';     // legacy
       case OrderStatus.customerRefusal: return 'Відмова клієнта';
@@ -303,5 +303,79 @@ class InternetOrder {
       refusalReason:
           clearRefusalReason ? null : (refusalReason ?? this.refusalReason),
     );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Order data model — extended order info from GetOrderData API
+// ─────────────────────────────────────────────────────────────────────────────
+
+class OrderData {
+  /// Non-empty fields: Ukrainian label → value
+  final Map<String, String> fields;
+
+  /// True when order was paid online via LiqPay (internet acquiring).
+  final bool isPaidOnline;
+
+  const OrderData(this.fields, {this.isPaidOnline = false});
+
+  bool get isEmpty => fields.isEmpty;
+
+  /// Human-readable labels for extra fields that ADD value for the pharmacist.
+  /// Basic header fields (source, sum, phone, name, date, time, address)
+  /// are intentionally excluded — they are already shown in the order header.
+  /// Only these are displayed — everything already in the header is skipped.
+  static const _labels = <String, String>{
+    // Payment
+    'payment_method': 'Спосіб оплати',
+    'is_paid': 'Оплачено',
+    'paidByPoints': 'Оплата балами',
+    'coupon': 'Купон',
+    // LiqPay
+    'liqpay_status': 'LiqPay статус',
+    'liqpay_amount': 'LiqPay сума',
+    // Binance
+    'binance_amount': 'Binance сума',
+    // Delivery
+    'delivery_uk': 'Доставка',
+    // Delivery — Nova Poshta
+    'newpost_RecipientName': 'НП отримувач',
+    'newpost_RecipientsPhone': 'НП телефон',
+    'newpost_recipientAddressName': 'НП адреса',
+    'newpost_ServiceType': 'НП тип послуги',
+    // Delivery — other
+    'wD_service': 'Служба доставки',
+    'wD_meest_name': 'Meest отримувач',
+    'wD_meest_phone': 'Meest телефон',
+    // Insurance
+    'insur_org_name': 'Страхова компанія',
+    'insur_user_name': 'Застрахована особа',
+    // Medical / social
+    'medical_program': 'Медична програма',
+    'trusted_person': 'Довірена особа',
+    'police_number': 'Номер поліса',
+    'socialProgramCard': 'Соціальна картка',
+    // Reimbursement
+    'reimbursement_request_number': 'Номер реімбурсації',
+  };
+
+  factory OrderData.fromJson(Map<String, dynamic> json) {
+    final data = json['Data'];
+    if (data == null || data is! List || data.isEmpty) {
+      return const OrderData({});
+    }
+    final raw = data[0] as Map<String, dynamic>;
+    final fields = <String, String>{};
+    for (final entry in _labels.entries) {
+      final value = raw[entry.key]?.toString().trim() ?? '';
+      if (value.isNotEmpty) {
+        fields[entry.value] = value;
+      }
+    }
+    // Determine online payment: any of is_paid, liqpay_status, payment_method non-empty
+    final isPaid = (raw['is_paid']?.toString().trim() ?? '').isNotEmpty ||
+        (raw['liqpay_status']?.toString().trim() ?? '').isNotEmpty ||
+        (raw['payment_method']?.toString().trim() ?? '').isNotEmpty;
+    return OrderData(fields, isPaidOnline: isPaid);
   }
 }

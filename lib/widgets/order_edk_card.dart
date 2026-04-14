@@ -22,7 +22,7 @@ class OrderEdkCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final drug = offer.drug;
-    final bonus = drug.pharmacistBonus;
+    final bonus = offer.bonus ?? drug.pharmacistBonus;
     final hasBlister = drug.canSplitByBlister;
 
     return Container(
@@ -162,32 +162,37 @@ class OrderEdkCard extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                      style: const TextStyle(
-                        color: Color(0xFF1C1C2E),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
+                    if (drug.price > 0)
+                      Text(
+                        '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                        style: const TextStyle(
+                          color: Color(0xFF1C1C2E),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                    ),
-                    if (bonus != null) ...[
+                    if (bonus != null && bonus > 0) ...[
                       const SizedBox(height: 2),
                       Container(
-                        width: 22,
-                        height: 22,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFFEF3C7),
-                          shape: BoxShape.circle,
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF3C7),
+                          borderRadius: BorderRadius.circular(6),
                         ),
-                        child: Center(
-                          child: Text(
-                            '$bonus',
-                            style: const TextStyle(
-                              color: Color(0xFFB45309),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.star_rounded, size: 11, color: Color(0xFFB45309)),
+                            const SizedBox(width: 2),
+                            Text(
+                              '+$bonus',
+                              style: const TextStyle(
+                                color: Color(0xFFB45309),
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
-                          ),
+                          ],
                         ),
                       ),
                     ],

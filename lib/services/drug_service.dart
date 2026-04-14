@@ -136,6 +136,33 @@ class DrugPriceResult {
   bool get isAvailable => totalStock > 0;
 }
 
+/// ЄДК-пропозиція заміни від Caché (з GetEdkOffers).
+class EdkApiOffer {
+  final String replacementId;   // с-код заміни
+  final String replacementName; // назва заміни
+  final int replacementBonus;   // бонус
+  final String script;          // мовний модуль
+  final String reason;          // причина ("Аналог", "Дефектура" тощо)
+
+  const EdkApiOffer({
+    required this.replacementId,
+    required this.replacementName,
+    required this.replacementBonus,
+    required this.script,
+    required this.reason,
+  });
+
+  factory EdkApiOffer.fromJson(Map<String, dynamic> json) {
+    return EdkApiOffer(
+      replacementId: json['replacementId']?.toString() ?? '',
+      replacementName: json['replacementName']?.toString() ?? '',
+      replacementBonus: int.tryParse(json['replacementBonus']?.toString() ?? '') ?? 0,
+      script: json['script']?.toString() ?? '',
+      reason: json['reason']?.toString() ?? '',
+    );
+  }
+}
+
 /// Детальна інформація по товару (з GetSKUdetail).
 class SKUDetailResult {
   final String? name;
@@ -520,6 +547,42 @@ class DrugService {
     } catch (e) {
       debugPrint('GetSKUdetail ERROR ids=$ids: $e');
       return null;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // ЄДК (GetEdkOffers) — пропозиції заміни від Caché
+  // ---------------------------------------------------------------------------
+
+  /// Отримати ЄДК-пропозиції для товару.
+  ///
+  /// [ids] — внутрішній ID товару (короткий числовий код з GetSKUdetail.ids,
+  /// НЕ s-код з SearchByNameSKU).
+  ///
+  /// Caché: `GET ?ServiceName=GetEdkOffers&ids={ids}`
+  /// Response: `{"Status":"OK","offers":[{"replacementId":"...","replacementName":"...","replacementBonus":"...","script":"...","reason":"..."}]}`
+  static Future<List<EdkApiOffer>> fetchEdkOffers(String ids) async {
+    if (ApiConfig.useMock || ids.isEmpty) return [];
+
+    try {
+      final response = await _api.call('GetEdkOffers', params: {
+        'ids': ids,
+      });
+
+      if (!response.isOk) {
+        debugPrint('GetEdkOffers FAIL ids=$ids: ${response.result}');
+        return [];
+      }
+
+      final offersJson = response.data['offers'] as List<dynamic>?;
+      if (offersJson == null || offersJson.isEmpty) return [];
+
+      return offersJson
+          .map((e) => EdkApiOffer.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('GetEdkOffers ERROR ids=$ids: $e');
+      return [];
     }
   }
 

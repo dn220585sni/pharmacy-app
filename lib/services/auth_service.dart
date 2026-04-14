@@ -33,8 +33,9 @@ class AuthService {
   static String? _sessionId;
   static String? get sessionId => _sessionId;
 
-  /// Ім'я поточного залогіненого фармацевта (для force logout).
+  /// Ім'я поточного залогіненого фармацевта.
   static String? _currentUser;
+  static String? get currentUser => _currentUser;
 
   /// Останній результат помилки login (для UI).
   static String? lastLoginError;
@@ -178,7 +179,9 @@ class AuthService {
   static Future<List<PharmacistInfo>> getUsers() async {
     if (ApiConfig.useMock) return _mockGetUsers();
 
-    final response = await _api.call('GetUsersRlz');
+    final response = await _api.call('GetUsersRlz', params: {
+      'rezhim': 'all',
+    });
 
     debugPrint('GetUsersRlz isOk=${response.isOk}, result=${response.result}');
     if (!response.isOk) return [];

@@ -4,6 +4,7 @@ import '../models/prescription.dart';
 import '../models/drug.dart';
 import '../data/mock_prescriptions.dart';
 import '../services/api_config.dart';
+import '../services/ciet_service.dart';
 import '../services/skarb_service.dart';
 import 'prescription_refusal_dialog.dart';
 
@@ -255,7 +256,17 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
       return;
     }
 
-    // Electronic: use Skarb API when available, otherwise mock
+    // 1303 program: use CIET API
+    if (_selectedType == PrescriptionType.program1303) {
+      if (!ApiConfig.useMock) {
+        _lookupFrom1303(number);
+      } else {
+        _lookupFromMock(number);
+      }
+      return;
+    }
+
+    // Electronic (Skarb): use Skarb API when available, otherwise mock
     if (!ApiConfig.useMock && SkarbConfig.apiKey.isNotEmpty) {
       _lookupFromSkarb(number);
     } else {
@@ -273,6 +284,66 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
 
     final matches = findPrescriptionMatches(rx, widget.drugCatalog);
     setState(() {
+      _prescriptionWasLoaded = true;
+      _skarbData = null;
+      _prescription = rx;
+      _matches = matches;
+      _errorMessage = null;
+    });
+  }
+
+  /// Lookup prescription from CIET 1303 API.
+  Future<void> _lookupFrom1303(String number) async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final result = await CietService.getRecipes(recipeNumber: number);
+
+    if (!mounted) return;
+
+    if (!result.success || result.data == null || result.data!.isEmpty) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = result.error ?? 'Рецепт не знайдено';
+      });
+      return;
+    }
+
+    final recipes = result.data!;
+    // Group by recipe_number — all positions belong to the same prescription
+    final first = recipes.first;
+
+    final items = recipes.map((r) => PrescriptionItem(
+      helsiName: r.position,
+      helsiQuantity: r.drugsNeedBought ?? 0,
+      inn: r.nameInnUa,
+      reimbursementPrice: r.hasReimbursement
+          ? (r.reimbursement.first.retailPrice ?? 0)
+          : 0,
+    )).toList();
+
+    final rx = Prescription(
+      number: first.recipeNumber,
+      type: _selectedType,
+      status: first.isValid ? PrescriptionStatus.active : PrescriptionStatus.expired,
+      issueDate: first.recipeCreated ?? DateTime.now(),
+      medication: first.position,
+      quantity: first.drugsNeedBought ?? 0,
+      patientName: first.patientName,
+      patientAge: int.tryParse(first.patientAge ?? ''),
+      clinicName: first.institutionName,
+      doctorName: first.doctorName,
+      programName: first.category1303Name ?? 'Програма 1303',
+      uuid: first.recipeId.toString(),
+      items: items,
+    );
+
+    final matches = findPrescriptionMatches(rx, widget.drugCatalog);
+
+    setState(() {
+      _isLoading = false;
       _prescriptionWasLoaded = true;
       _skarbData = null;
       _prescription = rx;

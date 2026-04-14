@@ -11,9 +11,10 @@ import '../data/edk_offers.dart';
 import '../data/mock_drugs.dart';
 import '../services/api_config.dart';
 import '../services/cache_api_client.dart';
-import '../services/priority_analog_service.dart';
+import '../services/auth_service.dart';
 import '../services/order_service.dart';
 import '../services/drug_service.dart';
+import '../services/product_browser_service.dart';
 import 'checkout/bonus_discount_block.dart';
 import 'checkout/cash_change_section.dart';
 import 'checkout/payment_method_toggle.dart';
@@ -85,7 +86,7 @@ class OrdersPanelState extends State<OrdersPanel>
   bool _showDisbandedOrders = false;
 
   /// Active filter chip labels (multi-select, OR logic).
-  Set<String> _activeFilters = {'Нові', 'В обробці', 'Зібрані', 'В роботі', 'Відпущено'};
+  Set<String> _activeFilters = {'Нові', 'В обробці', 'Зібрані', 'В роботі'};
 
   /// All available filter labels.
   static const List<String> _filterLabels = [
@@ -95,7 +96,6 @@ class OrdersPanelState extends State<OrdersPanel>
     'Зібрані',
     'В роботі',
     'Відпущено',
-    'Термінові',
     'Завислі',
     'Відмова клієнта',
     'Відмова аптеки',
@@ -127,17 +127,10 @@ class OrdersPanelState extends State<OrdersPanel>
   /// EDK offers. Mock: keyed by OrderItem.sku, live: keyed by OrderItem.ukod.
   Map<String, EdkOffer> _orderEdkOffers = {};
 
-  /// Initialize EDK offers for orders.
+  /// Initialize EDK offers for orders (mock only; live uses per-item GetEdkOffers).
   Future<void> _initOrderEdkOffers() async {
     if (ApiConfig.useMock) {
       _orderEdkOffers = buildMockOrderEdkOffers(mockDrugs);
-      return;
-    }
-    final analogs = await PriorityAnalogService.fetchAnalogs();
-    if (mounted) {
-      setState(() {
-        _orderEdkOffers = buildEdkOffersFromApi(analogs, mockDrugs);
-      });
     }
   }
 
@@ -286,8 +279,6 @@ class OrdersPanelState extends State<OrdersPanel>
           if (o.status == OrderStatus.atWork) return true;
         case 'Відпущено':
           if (o.status == OrderStatus.paidOnline) return true;
-        case 'Термінові':
-          if (o.isUrgent) return true;
         case 'Завислі':
           if (o.isStale) return true;
         case 'Відмова клієнта':
@@ -390,6 +381,9 @@ class OrdersPanelState extends State<OrdersPanel>
       return;
     }
 
+    // Кеш зображень по ukod — всі с-коди одного товару отримають одне зображення
+    final imageCache = <String, String?>{};
+
     for (final item in order.items) {
       if (item.isEnriched) continue;
       try {
@@ -403,12 +397,103 @@ class OrdersPanelState extends State<OrdersPanel>
 
         if (!mounted) return;
 
+        // Перевіряємо кеш по ukod
+        final cacheKey = item.ukod ?? item.name;
+        String? imageUrl;
+
+        if (imageCache.containsKey(cacheKey)) {
+          imageUrl = imageCache[cacheKey];
+        } else {
+          imageUrl = detail?.imageUrl;
+
+          // Fallback: якщо Caché не повернув зображення — шукаємо через anc.ua
+          if (imageUrl == null || imageUrl.isEmpty) {
+            try {
+              List<ProductSearchResult> searchResults = [];
+
+              // Шукаємо по торговій назві (без форми випуску — ламає пошук anc.ua)
+              {
+                final words = item.name.split(RegExp(r'\s+'));
+                final stopPatterns = ['ГРАН', 'ТАБЛ', 'КАПС', 'СУСП', 'СИРОП',
+                  'КРЕМ', 'МАЗЬ', 'РОЗЧ', 'ГЕЛЬ', 'СПРЕЙ', 'КРАП', 'ПОР',
+                  'АМП', 'СУПОЗ', 'ФЛАК', 'ШИП', 'Д/', 'Р-Н', 'Р/Н', 'N'];
+                final brandWords = <String>[];
+                for (final w in words) {
+                  final upper = w.toUpperCase();
+                  if (stopPatterns.any((p) => upper.startsWith(p))) break;
+                  brandWords.add(w);
+                }
+                final searchName = (brandWords.isNotEmpty ? brandWords : [words.first])
+                    .map((w) => w.isNotEmpty
+                        ? '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}'
+                        : w)
+                    .join(' ')
+                    .replaceAll(RegExp(r'(?<=\s|^)H(?=\s|$)'), 'Н')
+                    .replaceAll(RegExp(r'(?<=\s|^)C(?=\s|$)'), 'С')
+                    .replaceAll(RegExp(r'(?<=\s|^)B(?=\s|$)'), 'В')
+                    .replaceAll(RegExp(r'(?<=\s|^)A(?=\s|$)'), 'А');
+                searchResults = await ProductBrowserService.searchProducts(
+                  searchName,
+                  limit: 5,
+                );
+              }
+
+              if (searchResults.isNotEmpty) {
+                // Матчимо по назві + формі випуску
+                String norm(String s) => s.toLowerCase().replaceAll('и', 'і').replaceAll('ы', 'і');
+                final itemFirst = norm(item.name.split(RegExp(r'\s+')).first);
+
+                // Визначаємо форму випуску з назви замовлення
+                const formMap = {
+                  'ТАБЛ': 'таблетк', 'КАПС': 'капсул', 'СУСП': 'суспенз',
+                  'СИРОП': 'сироп', 'ГРАН': 'гранул', 'КРЕМ': 'крем',
+                  'МАЗЬ': 'мазь', 'ГЕЛЬ': 'гель', 'СПРЕЙ': 'спрей',
+                  'КРАП': 'крапл', 'Р-Н': 'розчин', 'Р/Н': 'розчин',
+                  'РОЗЧ': 'розчин', 'ПОР': 'порош', 'АМП': 'ампул',
+                  'СУПОЗ': 'супозитор', 'ШИП': 'шипуч', 'АЕРОЗОЛЬ': 'аерозол',
+                };
+                final itemUpper = item.name.toUpperCase();
+                String? itemForm;
+                for (final e in formMap.entries) {
+                  if (itemUpper.contains(e.key)) {
+                    itemForm = e.value;
+                    break;
+                  }
+                }
+
+                // Спочатку шукаємо збіг по назві + формі
+                ProductSearchResult? match;
+                if (itemForm != null) {
+                  match = searchResults.cast<ProductSearchResult?>().firstWhere(
+                    (r) => norm(r!.name.split(RegExp(r'\s+')).first) == itemFirst
+                        && r.name.toLowerCase().contains(itemForm!),
+                    orElse: () => null,
+                  );
+                }
+                // Fallback: тільки по назві
+                match ??= searchResults.cast<ProductSearchResult?>().firstWhere(
+                  (r) => norm(r!.name.split(RegExp(r'\s+')).first) == itemFirst,
+                  orElse: () => null,
+                );
+                imageUrl = match?.imageUrl;
+              }
+            } catch (e) {
+              debugPrint('Image search failed for "${item.name}": $e');
+            }
+          }
+
+          // Зберігаємо в кеш
+          imageCache[cacheKey] = imageUrl;
+        }
+
+        if (!mounted) return;
+
         setState(() {
           if (detail != null) {
-            item.enrichedImageUrl = detail.imageUrl;
             item.enrichedSeries = detail.series;
             item.enrichedExpiryDate = detail.expiryDate;
           }
+          item.enrichedImageUrl = imageUrl;
           // Build storage location string from GetSKUprice
           final parts = <String>[];
           if (priceResult.stelazh?.isNotEmpty == true) parts.add('Ст.${priceResult.stelazh}');
@@ -420,11 +505,75 @@ class OrdersPanelState extends State<OrdersPanel>
           }
           item.isEnriched = true;
         });
+
+        // Fetch EDK offers using short ids from GetSKUdetail
+        if (detail?.skuCode != null && detail!.skuCode!.isNotEmpty) {
+          _fetchOrderEdkOffers(item, detail.skuCode!);
+        }
       } catch (e) {
         debugPrint('Enrichment failed for SKU ${item.sku}: $e');
         item.isEnriched = true; // Don't retry
       }
     }
+  }
+
+  /// Fetch EDK offers for an order item from Caché GetEdkOffers.
+  void _fetchOrderEdkOffers(OrderItem item, String detailIds) {
+    if (ApiConfig.useMock) return;
+    final edkKey = item.ukod ?? item.sku;
+
+    DrugService.fetchEdkOffers(detailIds).then((apiOffers) async {
+      if (!mounted || apiOffers.isEmpty) return;
+      final offer = apiOffers.first;
+
+      // Fetch image from anc.ua
+      String? imageUrl;
+      try {
+        final searchName = offer.replacementName
+            .split(' ')
+            .map((w) => w.isNotEmpty
+                ? '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}'
+                : w)
+            .join(' ');
+        final results = await ProductBrowserService.searchProducts(searchName, limit: 3);
+        if (results.isNotEmpty) {
+          imageUrl = results.first.imageUrl;
+        }
+      } catch (_) {}
+
+      if (!mounted) return;
+
+      final replacementDrug = Drug(
+        id: 'edk_${offer.replacementId}',
+        name: offer.replacementName,
+        manufacturer: '',
+        category: '',
+        price: 0,
+        stock: 1,
+        unit: 'шт',
+        skuCode: offer.replacementId,
+        imageUrl: imageUrl,
+      );
+
+      String? promo;
+      if (offer.replacementBonus > 0) {
+        promo = 'Бонус +${offer.replacementBonus}';
+      }
+
+      setState(() {
+        _orderEdkOffers[edkKey] = EdkOffer(
+          drug: replacementDrug,
+          donorDrugId: edkKey,
+          description: '${offer.replacementName} — ${offer.reason.toLowerCase()}.',
+          script: offer.script,
+          promoLabel: promo,
+          bonus: offer.replacementBonus,
+        );
+      });
+      debugPrint('ЄДК order: ids=$detailIds → ${offer.replacementName}');
+    }).catchError((e) {
+      debugPrint('ЄДК order: error for ids=$detailIds: $e');
+    });
   }
 
   /// Fetch extended order data from GetOrderData API.
@@ -534,10 +683,21 @@ class OrdersPanelState extends State<OrdersPanel>
     final order = _selectedOrder;
     if (order == null || !_allScanned) return;
 
-    showLikomatDialog(context).then((selectedCell) {
+    showLikomatDialog(context).then((selectedCell) async {
       if (selectedCell == null) return; // user cancelled
       final idx = _orders.indexWhere((o) => o.id == order.id);
       if (idx < 0) return;
+
+      // Оновлюємо статус на сервері
+      final response = await OrderService.updateOrderStatus(
+        orderId: order.id,
+        newStatus: 'apteka make',
+        user: AuthService.currentUser ?? '',
+      );
+      if (!response.isOk) {
+        debugPrint('UpdateOrderStatus failed: ${response.result}');
+      }
+
       final updated = order.copyWith(
         status: OrderStatus.collected,
         lockerCell: selectedCell,
@@ -621,11 +781,22 @@ class OrdersPanelState extends State<OrdersPanel>
   }
 
   /// Apply refusal with the selected reason.
-  void _refuseOrder(String reason) {
+  void _refuseOrder(String reason) async {
     final order = _selectedOrder;
     if (order == null) return;
     final idx = _orders.indexWhere((o) => o.id == order.id);
     if (idx < 0) return;
+
+    // Оновлюємо статус на сервері
+    final response = await OrderService.updateOrderStatus(
+      orderId: order.id,
+      newStatus: 'apteka otkaz',
+      user: AuthService.currentUser ?? '',
+    );
+    if (!response.isOk) {
+      debugPrint('UpdateOrderStatus (refuse) failed: ${response.result}');
+    }
+
     final updated = order.copyWith(
       status: OrderStatus.pharmacyRefusal,
       refusalReason: reason,
@@ -663,6 +834,18 @@ class OrdersPanelState extends State<OrdersPanel>
   void _processOrderPayment() {
     final order = _selectedOrder;
     if (order == null) return;
+
+    // Оновлюємо статус на сервері
+    OrderService.updateOrderStatus(
+      orderId: order.id,
+      newStatus: 'apteka pay',
+      user: AuthService.currentUser ?? '',
+    ).then((response) {
+      if (!response.isOk) {
+        debugPrint('UpdateOrderStatus (pay) failed: ${response.result}');
+      }
+    });
+
     setState(() => showPaymentSuccess = true);
     Future.delayed(const Duration(seconds: 2), () {
       if (!mounted) return;
@@ -1759,6 +1942,7 @@ class OrdersPanelState extends State<OrdersPanel>
           // Scan hint for not-yet-collected orders
           if (order.status != OrderStatus.collected &&
               order.status != OrderStatus.paidOnline &&
+              order.status != OrderStatus.dispensed &&
               !_allScanned) ...[
             const SizedBox(height: 10),
             Container(
@@ -1794,11 +1978,12 @@ class OrdersPanelState extends State<OrdersPanel>
           ],
           const SizedBox(height: 12),
           // Action buttons — depend on order status
-          if (order.status == OrderStatus.pharmacyRefusal)
+          if (order.status == OrderStatus.paidOnline ||
+              order.status == OrderStatus.dispensed)
+            const SizedBox.shrink()
+          else if (order.status == OrderStatus.pharmacyRefusal)
             _buildRefusedActions(order)
-          else if (order.status == OrderStatus.collected ||
-                   order.status == OrderStatus.paidOnline)
-            // TODO: paidOnline — separate action set (skip payment step)
+          else if (order.status == OrderStatus.collected)
             _buildCollectedActions()
           else
             _buildNotCollectedActions(),
@@ -2606,135 +2791,201 @@ class _OrderItemRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Icon: green checkbox when scanned, blue medication when not
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: isDiscount
-                  ? const Color(0xFFFEF3C7)
-                  : isScanned
-                      ? const Color(0xFFDCFCE7)   // green bg
-                      : const Color(0xFFDBEAFE),   // blue bg
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              isDiscount
-                  ? Icons.discount_outlined
-                  : isScanned
-                      ? Icons.check_box_rounded
-                      : Icons.medication_rounded,
-              color: isDiscount
-                  ? const Color(0xFFB45309)
-                  : isScanned
-                      ? const Color(0xFF16A34A) // green icon
-                      : const Color(0xFF1E7DC8),
-              size: 17,
+          // Drug image thumbnail (or fallback icon) — tap opens popover
+          Builder(
+            builder: (thumbCtx) => GestureDetector(
+              onTap: item.isEnriched
+                  ? () => _showImagePopover(thumbCtx)
+                  : null,
+              child: MouseRegion(
+                cursor: item.isEnriched
+                    ? SystemMouseCursors.click
+                    : SystemMouseCursors.basic,
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: isDiscount
+                        ? const Color(0xFFFEF3C7)
+                        : isScanned
+                            ? const Color(0xFFDCFCE7)
+                            : const Color(0xFFDBEAFE),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isDiscount
+                          ? const Color(0xFFFDE68A)
+                          : isScanned
+                              ? const Color(0xFFBBF7D0)
+                              : const Color(0xFFBFDBFE),
+                    ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: item.enrichedImageUrl != null
+                      ? Image.network(
+                          item.enrichedImageUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _fallbackIcon(isDiscount, isScanned),
+                        )
+                      : _fallbackIcon(isDiscount, isScanned),
+                ),
+              ),
             ),
           ),
           const SizedBox(width: 10),
           // Name, enriched info, and price × qty
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.name,
-                  style: TextStyle(
-                    color: isDiscount
-                        ? const Color(0xFFB45309)
-                        : isScanned
-                            ? const Color(0xFF15803D)
-                            : const Color(0xFF1C1C2E),
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                // ── Storage location ──
-                if (item.enrichedStorageLocation != null) ...[
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on_outlined,
-                          size: 11, color: Color(0xFF6B7280)),
-                      const SizedBox(width: 3),
-                      Expanded(
-                        child: Text(
-                          item.enrichedStorageLocation!,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth > 420;
+                final hasEnriched = item.enrichedStorageLocation != null ||
+                    item.enrichedSeries != null ||
+                    item.enrichedExpiryDate != null;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Wide mode: name + enriched info side by side
+                    if (isWide && hasEnriched)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: Text(
+                              item.name,
+                              style: TextStyle(
+                                color: isDiscount
+                                    ? const Color(0xFFB45309)
+                                    : isScanned
+                                        ? const Color(0xFF15803D)
+                                        : const Color(0xFF1C1C2E),
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 2,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                if (item.enrichedStorageLocation != null)
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.location_on_outlined,
+                                          size: 13, color: Color(0xFF1E7DC8)),
+                                      const SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text(
+                                          item.enrichedStorageLocation!,
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            color: Color(0xFF1C1C2E),
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                if (item.enrichedSeries != null ||
+                                    item.enrichedExpiryDate != null) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    [
+                                      if (item.enrichedSeries != null) 'Серія: ${item.enrichedSeries}',
+                                      if (item.enrichedExpiryDate != null) 'до ${item.enrichedExpiryDate}',
+                                    ].join(' \u2022 '),
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF6B7280),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      )
+                    else ...[
+                      // Narrow mode: original stacked layout
+                      Text(
+                        item.name,
+                        style: TextStyle(
+                          color: isDiscount
+                              ? const Color(0xFFB45309)
+                              : isScanned
+                                  ? const Color(0xFF15803D)
+                                  : const Color(0xFF1C1C2E),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      // ── Storage location ──
+                      if (item.enrichedStorageLocation != null) ...[
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            const Icon(Icons.location_on_outlined,
+                                size: 11, color: Color(0xFF6B7280)),
+                            const SizedBox(width: 3),
+                            Expanded(
+                              child: Text(
+                                item.enrichedStorageLocation!,
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  color: Color(0xFF6B7280),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      // ── Series & expiry ──
+                      if (item.enrichedSeries != null || item.enrichedExpiryDate != null) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          [
+                            if (item.enrichedSeries != null) 'Серія: ${item.enrichedSeries}',
+                            if (item.enrichedExpiryDate != null) 'до ${item.enrichedExpiryDate}',
+                          ].join(' \u2022 '),
                           style: const TextStyle(
-                            fontSize: 10.5,
-                            color: Color(0xFF6B7280),
-                            fontWeight: FontWeight.w600,
+                            fontSize: 10,
+                            color: Color(0xFF9CA3AF),
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      ),
+                      ],
                     ],
-                  ),
-                ],
-                // ── Series & expiry ──
-                if (item.enrichedSeries != null || item.enrichedExpiryDate != null) ...[
-                  const SizedBox(height: 1),
-                  Text(
-                    [
-                      if (item.enrichedSeries != null) 'Серія: ${item.enrichedSeries}',
-                      if (item.enrichedExpiryDate != null) 'до ${item.enrichedExpiryDate}',
-                    ].join(' \u2022 '),
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: Color(0xFF9CA3AF),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${item.price.toStringAsFixed(2).replaceAll('.', ',')} ₴ × $qtyStr',
+                      style: TextStyle(
+                        color: isScanned
+                            ? const Color(0xFF86EFAC)
+                            : const Color(0xFF9CA3AF),
+                        fontSize: 11,
+                      ),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-                const SizedBox(height: 2),
-                Text(
-                  '${item.price.toStringAsFixed(2).replaceAll('.', ',')} ₴ × $qtyStr',
-                  style: TextStyle(
-                    color: isScanned
-                        ? const Color(0xFF86EFAC)
-                        : const Color(0xFF9CA3AF),
-                    fontSize: 11,
-                  ),
-                ),
-              ],
+                  ],
+                );
+              },
             ),
           ),
-          const SizedBox(width: 4),
-          // ── Image preview button ──
-          if (item.isEnriched)
-            GestureDetector(
-              onTap: () => _showImageDialog(context),
-              child: MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: item.enrichedImageUrl != null
-                        ? const Color(0xFFEFF6FF)
-                        : const Color(0xFFF3F4F6),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: item.enrichedImageUrl != null
-                          ? const Color(0xFFBFDBFE)
-                          : const Color(0xFFE5E7EB),
-                    ),
-                  ),
-                  child: Icon(
-                    Icons.image_outlined,
-                    size: 14,
-                    color: item.enrichedImageUrl != null
-                        ? const Color(0xFF1E7DC8)
-                        : const Color(0xFFD1D5DB),
-                  ),
-                ),
-              ),
-            ),
           const SizedBox(width: 4),
           // Total price — tappable to simulate scan
           GestureDetector(
@@ -2778,84 +3029,133 @@ class _OrderItemRow extends StatelessWidget {
     );
   }
 
-  void _showImageDialog(BuildContext context) {
+  Widget _fallbackIcon(bool isDiscount, bool isScanned) {
+    return Icon(
+      isDiscount
+          ? Icons.discount_outlined
+          : isScanned
+              ? Icons.check_box_rounded
+              : Icons.medication_rounded,
+      color: isDiscount
+          ? const Color(0xFFB45309)
+          : isScanned
+              ? const Color(0xFF16A34A)
+              : const Color(0xFF1E7DC8),
+      size: 17,
+    );
+  }
+
+  void _showImagePopover(BuildContext context) {
+    final RenderBox box = context.findRenderObject() as RenderBox;
+    final Offset position = box.localToGlobal(Offset.zero);
+    final screenSize = MediaQuery.of(context).size;
+
+    // Position popover to the right of the thumbnail; if it overflows, place to the left
+    final popoverWidth = 320.0;
+    final double left;
+    if (position.dx + box.size.width + 8 + popoverWidth < screenSize.width) {
+      left = position.dx + box.size.width + 8;
+    } else {
+      left = position.dx - popoverWidth - 8;
+    }
+    final top = (position.dy - 40).clamp(8.0, screenSize.height - 400);
+
     showDialog(
       context: context,
-      builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 400, maxHeight: 450),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      item.name,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+      barrierColor: Colors.black26,
+      builder: (ctx) {
+        return Stack(
+          children: [
+            Positioned(
+              left: left,
+              top: top,
+              child: Material(
+                elevation: 12,
+                borderRadius: BorderRadius.circular(12),
+                clipBehavior: Clip.antiAlias,
+                child: GestureDetector(
+                  onTap: () => Navigator.of(ctx).pop(),
+                  child: Container(
+                    width: popoverWidth,
+                    constraints: const BoxConstraints(maxHeight: 380),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 18),
-                    onPressed: () => Navigator.of(ctx).pop(),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Flexible(
-                child: item.enrichedImageUrl != null
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          item.enrichedImageUrl!,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, e, st) => _noImagePlaceholder(),
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          item.name,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF1C1C2E),
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
                         ),
-                      )
-                    : _noImagePlaceholder(),
-              ),
-              if (item.enrichedSeries != null || item.enrichedExpiryDate != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  [
-                    if (item.enrichedSeries != null) 'Серія: ${item.enrichedSeries}',
-                    if (item.enrichedExpiryDate != null) 'Термін: ${item.enrichedExpiryDate}',
-                  ].join(' \u2022 '),
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
-                ),
-              ],
-              if (item.enrichedStorageLocation != null) ...[
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.location_on_outlined,
-                        size: 13, color: Color(0xFF6B7280)),
-                    const SizedBox(width: 4),
-                    Text(
-                      item.enrichedStorageLocation!,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF6B7280),
-                        fontWeight: FontWeight.w600,
-                      ),
+                        const SizedBox(height: 10),
+                        Flexible(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: item.enrichedImageUrl != null
+                                ? Image.network(
+                                    item.enrichedImageUrl!,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, __, ___) =>
+                                        _noImagePlaceholder(),
+                                  )
+                                : _noImagePlaceholder(),
+                          ),
+                        ),
+                        if (item.enrichedSeries != null ||
+                            item.enrichedExpiryDate != null ||
+                            item.enrichedStorageLocation != null) ...[
+                          const SizedBox(height: 10),
+                          if (item.enrichedStorageLocation != null)
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.location_on_outlined,
+                                    size: 14, color: Color(0xFF1E7DC8)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  item.enrichedStorageLocation!,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Color(0xFF1C1C2E),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          if (item.enrichedSeries != null ||
+                              item.enrichedExpiryDate != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              [
+                                if (item.enrichedSeries != null) 'Серія: ${item.enrichedSeries}',
+                                if (item.enrichedExpiryDate != null) 'до ${item.enrichedExpiryDate}',
+                              ].join(' \u2022 '),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF6B7280),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ],
-            ],
-          ),
-        ),
-      ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 

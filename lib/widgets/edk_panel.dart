@@ -19,7 +19,6 @@ class EdkPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final drug = offer.drug;
-    final bonus = drug.pharmacistBonus;
 
     return Container(
       decoration: BoxDecoration(
@@ -161,41 +160,42 @@ class EdkPanel extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
 
-                  // Price row + bonus
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                        style: const TextStyle(
-                          color: Color(0xFF1C1C2E),
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                        ),
+                  // Price + bonus row
+                  if (drug.price > 0)
+                    Text(
+                      '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                      style: const TextStyle(
+                        color: Color(0xFF1C1C2E),
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
                       ),
-                      if (bonus != null) ...[
-                        const SizedBox(width: 10),
-                        Container(
-                          width: 32,
-                          height: 32,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFFEF3C7),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
-                            child: Text(
-                              '$bonus',
-                              style: const TextStyle(
-                                color: Color(0xFFB45309),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                              ),
+                    ),
+                  if (offer.bonus != null && offer.bonus! > 0) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF3C7),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFDE68A)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.star_rounded, size: 16, color: Color(0xFFB45309)),
+                          const SizedBox(width: 5),
+                          Text(
+                            'Бонус фармацевту: +${offer.bonus}',
+                            style: const TextStyle(
+                              color: Color(0xFFB45309),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                        ),
-                      ],
-                    ],
-                  ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 14),
 
                   // Script block (speech module)

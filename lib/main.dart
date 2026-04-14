@@ -1,16 +1,30 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'screens/pos_screen.dart';
+import 'services/auth_service.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
+  final binding = WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
     ),
   );
+
+  // Logout active session when the app window is closed
+  binding.addObserver(_AppCloseObserver());
+
   runApp(const PharmacyApp());
+}
+
+class _AppCloseObserver extends WidgetsBindingObserver {
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    await AuthService.logout();
+    return AppExitResponse.exit;
+  }
 }
 
 class PharmacyApp extends StatelessWidget {

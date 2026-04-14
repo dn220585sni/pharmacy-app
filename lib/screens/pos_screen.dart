@@ -8,7 +8,6 @@ import '../services/auth_service.dart';
 import '../services/drug_service.dart';
 import '../services/farmasell_service.dart';
 import '../services/loyalty_service.dart';
-import '../services/priority_analog_service.dart';
 import '../services/product_browser_service.dart';
 import '../services/skarb_service.dart';
 import '../data/symptom_categories.dart';
@@ -392,40 +391,79 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _initEdkOffers();
   }
 
-  /// Initialize EDK offers: mock or API.
+  /// Initialize EDK offers: mock only (live uses per-drug GetEdkOffers).
   Future<void> _initEdkOffers() async {
     if (ApiConfig.useMock) {
       _edkOffers = buildMockRetailEdkOffers(mockDrugs);
-      return;
-    }
-    // Live: fetch from Priority Analogs API
-    _priorityAnalogs = await PriorityAnalogService.fetchAnalogs();
-    if (_priorityAnalogs.isNotEmpty) {
-      // Log first 5 donors for testing
-      debugPrint('ЄДК sample donors:');
-      final seen = <String>{};
-      for (final a in _priorityAnalogs) {
-        if (seen.add(a.donorUkod) && seen.length <= 5) {
-          debugPrint('  donor=${a.donorUkod} "${a.donorName}" → '
-              'analog=${a.analogUkod} "${a.analogName}"');
-        }
-      }
-    }
-    if (mounted) {
-      setState(() {
-        _edkOffers = buildEdkOffersFromApi(_priorityAnalogs, _searchResults);
-      });
     }
   }
 
-  /// Rebuild EDK offers when drug catalog changes (live mode only).
+  /// Fetch EDK offers for a specific drug from Caché GetEdkOffers.
+  ///
+  /// [drug] — товар-донор
+  /// [detailIds] — короткий ids з GetSKUdetail (напр. "3257")
+  void _fetchEdkOffers(Drug drug, String detailIds) {
+    if (ApiConfig.useMock) return;
+
+    DrugService.fetchEdkOffers(detailIds).then((apiOffers) async {
+      if (!mounted || apiOffers.isEmpty) return;
+      final offer = apiOffers.first;
+      final edkKey = drug.ukod ?? drug.id;
+
+      // Fetch image from anc.ua for replacement drug
+      String? imageUrl;
+      try {
+        final searchName = offer.replacementName
+            .split(' ')
+            .map((w) => w.isNotEmpty
+                ? '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}'
+                : w)
+            .join(' ');
+        final results = await ProductBrowserService.searchProducts(searchName, limit: 3);
+        if (results.isNotEmpty) {
+          imageUrl = results.first.imageUrl;
+        }
+      } catch (_) {}
+
+      if (!mounted) return;
+
+      final replacementDrug = Drug(
+        id: 'edk_${offer.replacementId}',
+        name: offer.replacementName,
+        manufacturer: '',
+        category: '',
+        price: 0,
+        stock: 1,
+        unit: 'шт',
+        skuCode: offer.replacementId,
+        imageUrl: imageUrl,
+      );
+
+      String? promo;
+      if (offer.replacementBonus > 0) {
+        promo = 'Бонус +${offer.replacementBonus}';
+      }
+
+      setState(() {
+        _edkOffers[edkKey] = EdkOffer(
+          drug: replacementDrug,
+          donorDrugId: edkKey,
+          description: '${offer.replacementName} — ${offer.reason.toLowerCase()}.',
+          script: offer.script,
+          promoLabel: promo,
+          bonus: offer.replacementBonus,
+        );
+      });
+      debugPrint('ЄДК: GetEdkOffers ids=$detailIds → ${offer.replacementName} (${offer.reason})');
+    }).catchError((e) {
+      debugPrint('ЄДК: GetEdkOffers error for ids=$detailIds: $e');
+    });
+  }
+
+  /// Rebuild EDK offers — no-op in live mode (offers are per-drug now).
   void _rebuildEdkOffers() {
-    if (ApiConfig.useMock || _priorityAnalogs.isEmpty) return;
-    _edkOffers = buildEdkOffersFromApi(_priorityAnalogs, _searchResults);
-    if (_edkOffers.isNotEmpty) {
-      debugPrint('ЄДК: ${_edkOffers.length} offers rebuilt '
-          '(${_searchResults.where((d) => d.ukod != null).length} drugs with ukod)');
-    }
+    // In live mode, EDK offers are fetched per-drug via GetEdkOffers.
+    // Nothing to rebuild.
   }
 
   /// EDK key helper: mock uses Drug.id, live uses Drug.ukod.
@@ -1228,6 +1266,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           debugPrint('Analogues: skip after SKUDetail — drug changed (selected=${_selectedDrug?.id}, detail=${drug.id})');
         }
       }
+
+      // Fetch EDK offers from Caché using the short ids from GetSKUdetail
+      if (detail.skuCode != null && detail.skuCode!.isNotEmpty) {
+        _fetchEdkOffers(drug, detail.skuCode!);
+      }
     }).catchError((e) {
       debugPrint('SKUDetail: error for ids="$ids" — $e');
     });
@@ -1475,9 +1518,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// EDK offers map. Mock: keyed by Drug.id, live: keyed by Drug.ukod.
   Map<String, EdkOffer> _edkOffers = {};
-
-  /// Raw priority analogs from API (for rebuilding offers when catalog changes).
-  List<PriorityAnalog> _priorityAnalogs = [];
 
   /// Check and show EDK offer after adding a donor drug to cart.
   void _tryShowEdk(Drug donorDrug) {

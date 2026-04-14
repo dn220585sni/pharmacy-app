@@ -19,7 +19,7 @@ class SkarbConfig {
   static const testBaseUrl = 'https://test-skarb.phrm.pro/api/v2';
 
   /// API-Key (отримати від Skarb Cloud).
-  static const apiKey = ''; // TODO: отримати API-Key
+  static const apiKey = '2a_c43eiilL2-ZHJceqJbCbLKcBEukh3';
 
   /// Credentials для авторизації фармацевта (тестове середовище).
   static const email = 'smartsign+2@openpharma.global';

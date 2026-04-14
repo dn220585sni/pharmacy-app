@@ -149,9 +149,23 @@ class ProductBrowserService {
   /// Search endpoint → return slug of first matching product.
   static Future<String?> _searchSlug(String query) async {
     try {
+      // Шукаємо тільки по торговій назві (без форми випуску)
+      final words = query.split(RegExp(r'\s+'));
+      final stopPatterns = ['ГРАН', 'ТАБЛ', 'КАПС', 'СУСП', 'СИРОП',
+        'КРЕМ', 'МАЗЬ', 'РОЗЧ', 'ГЕЛЬ', 'СПРЕЙ', 'КРАП', 'ПОР',
+        'АМП', 'СУПОЗ', 'ФЛАК', 'ШИП', 'Д/', 'Р-Н', 'Р/Н'];
+      final brandWords = <String>[];
+      for (final w in words) {
+        if (stopPatterns.any((p) => w.toUpperCase().startsWith(p))) break;
+        brandWords.add(w);
+      }
+      final searchQuery = brandWords.isNotEmpty
+          ? brandWords.join(' ')
+          : query;
+
       final url = Uri.parse(
         'https://anc.ua/productbrowser/v2/ua/search/products'
-        '?q=${Uri.encodeComponent(query)}&city=$_defaultCity',
+        '?q=${Uri.encodeComponent(searchQuery)}&city=$_defaultCity',
       );
       final response = await _client.get(url, headers: {
         'Accept': 'application/json',
@@ -164,8 +178,46 @@ class ProductBrowserService {
       final products = json['products'] as List?;
       if (products == null || products.isEmpty) return null;
 
-      final first = products.first as Map<String, dynamic>;
-      return first['link']?.toString();
+      // Матчимо по назві + формі випуску (и↔і для рос./укр.)
+      String norm(String s) => s.toLowerCase().replaceAll('и', 'і').replaceAll('ы', 'і');
+      final queryFirst = norm(words.first);
+
+      // Визначаємо форму випуску з запиту
+      const formMap = {
+        'ТАБЛ': 'таблетк', 'КАПС': 'капсул', 'СУСП': 'суспенз',
+        'СИРОП': 'сироп', 'ГРАН': 'гранул', 'КРЕМ': 'крем',
+        'МАЗЬ': 'мазь', 'ГЕЛЬ': 'гель', 'СПРЕЙ': 'спрей',
+        'КРАП': 'крапл', 'Р-Н': 'розчин', 'Р/Н': 'розчин',
+        'РОЗЧ': 'розчин', 'ПОР': 'порош', 'АМП': 'ампул',
+        'СУПОЗ': 'супозитор', 'ШИП': 'шипуч', 'АЕРОЗОЛЬ': 'аерозол',
+      };
+      final queryUpper = query.toUpperCase();
+      String? queryForm;
+      for (final e in formMap.entries) {
+        if (queryUpper.contains(e.key)) {
+          queryForm = e.value;
+          break;
+        }
+      }
+
+      // Спочатку шукаємо збіг по назві + формі
+      if (queryForm != null) {
+        for (final p in products) {
+          final pName = (p as Map<String, dynamic>)['name']?.toString() ?? '';
+          if (norm(pName.split(RegExp(r'\s+')).first) == queryFirst &&
+              pName.toLowerCase().contains(queryForm)) {
+            return p['link']?.toString();
+          }
+        }
+      }
+      // Fallback: тільки по назві
+      for (final p in products) {
+        final pName = (p as Map<String, dynamic>)['name']?.toString() ?? '';
+        if (norm(pName.split(RegExp(r'\s+')).first) == queryFirst) {
+          return p['link']?.toString();
+        }
+      }
+      return null;
     } catch (_) {
       return null;
     }

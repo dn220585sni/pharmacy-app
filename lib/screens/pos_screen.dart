@@ -43,7 +43,6 @@ import '../data/mock_nearby_pharmacies.dart';
 import '../models/nearby_pharmacy.dart';
 import '../widgets/top_bar.dart';
 import '../widgets/drug_list_item.dart';
-import '../utils/fuzzy_search.dart';
 
 // Approximate item row height for scroll-to-selection
 const double _kItemHeight = 49.0;
@@ -61,7 +60,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   final ScrollController _listScrollController = ScrollController();
   final _searchBarKey = GlobalKey();
 
-  List<Drug> _searchResults = mockDrugs;
+  List<Drug> _searchResults = [];
   final List<CartItem> _cart = [];
   Drug? _selectedDrug;
   double _totalEarned = 0.0;
@@ -79,6 +78,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   // ── Server lookup (barcode + name search) ────────────────────────────────
   Timer? _barcodeLookupTimer;
   Timer? _nameSearchTimer;
+  Timer? _localFilterTimer;
   bool _isServerLookup = false;
 
   // ── Product Browser (drug safety tags + external analogues) ─────────────
@@ -616,6 +616,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _logoutPharmacist();
     _barcodeLookupTimer?.cancel();
     _nameSearchTimer?.cancel();
+    _localFilterTimer?.cancel();
     _helpingHandTimer?.cancel();
     HardwareKeyboard.instance.removeHandler(_handleGlobalKey);
     _searchController.dispose();
@@ -912,49 +913,20 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   void _filterDrugs() {
     final query = _searchController.text.trim();
-    final targetCats = symptomCategories[_selectedSymptom] ?? [];
-    setState(() {
-      // Preserve existing server results (srv_ prefix) while re-filtering mocks.
-      final existingServerDrugs =
-          _searchResults.where((d) => d.id.startsWith('srv_')).toList();
 
-      if (query.isEmpty) {
-        // No query — show all mocks (filtered by symptom only), no server drugs.
-        _searchResults = mockDrugs.where((drug) {
-          return _selectedSymptom == 'Всі' ||
-              targetCats.contains(drug.category);
-        }).toList();
-      } else {
-        // Score every mock drug with fuzzy matching, filter & sort.
-        final scored = <MapEntry<Drug, double>>[];
-        for (final drug in mockDrugs) {
-          final matchesSymptom = _selectedSymptom == 'Всі' ||
-              targetCats.contains(drug.category);
-          if (!matchesSymptom) continue;
-          final score = drugMatchScore(query, drug);
-          if (score > 0) scored.add(MapEntry(drug, score));
-        }
-        scored.sort((a, b) => b.value.compareTo(a.value));
-        final mockResults = scored.map((e) => e.key).toList();
-        // Keep server drugs at top, mocks below
-        _searchResults = [...existingServerDrugs, ...mockResults];
-      }
+    // Empty query: apply immediately (no debounce needed)
+    if (query.isEmpty) {
+      _localFilterTimer?.cancel();
+      _applyLocalFilter(query);
+    } else {
+      // Debounce local fuzzy filter: 50ms to batch rapid keystrokes
+      _localFilterTimer?.cancel();
+      _localFilterTimer = Timer(const Duration(milliseconds: 50), () {
+        _applyLocalFilter(query);
+      });
+    }
 
-      // Keep current selection if it's still in results;
-      // otherwise fall back to the first result.
-      _focusQtyOnSelect = false; // Don't steal focus from search field
-      if (_searchResults.isNotEmpty) {
-        final stillVisible = _selectedDrug != null &&
-            _searchResults.any((d) => d.id == _selectedDrug!.id);
-        if (!stillVisible) {
-          _selectedDrug = _searchResults.first;
-        }
-      } else {
-        _selectedDrug = null;
-      }
-    });
-
-    // ── Рука допомоги: show after 3s pause, hide when search cleared ─────
+    // ── Рука допомоги + server search (runs regardless of debounce) ─────
     _helpingHandTimer?.cancel();
     if (query.isEmpty) {
       if (_showHelpingHandMarkers) {
@@ -977,15 +949,51 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       );
     } else if (query.length >= 2) {
       // ── Server name search ────────────────────────────────────────────
+      // Normalize Ukrainian → Russian for Caché (stores names in Russian)
+      final serverQuery = query
+          .replaceAll('і', 'и')
+          .replaceAll('І', 'И')
+          .replaceAll('ї', 'и')
+          .replaceAll('Ї', 'И')
+          .replaceAll('є', 'е')
+          .replaceAll('Є', 'Е')
+          .replaceAll('ґ', 'г')
+          .replaceAll('Ґ', 'Г');
       _nameSearchTimer = Timer(
-        const Duration(milliseconds: 500),
-        () => _searchByNameOnServer(query),
+        const Duration(milliseconds: 300),
+        () => _searchByNameOnServer(serverQuery, originalQuery: query),
       );
     }
   }
 
+  void _applyLocalFilter(String query) {
+    if (!mounted) return;
+    setState(() {
+      final existingServerDrugs =
+          _searchResults.where((d) => d.id.startsWith('srv_')).toList();
+
+      if (query.isEmpty) {
+        _searchResults = existingServerDrugs;
+      } else {
+        _searchResults = existingServerDrugs;
+      }
+
+      _focusQtyOnSelect = false;
+      if (_searchResults.isNotEmpty) {
+        final stillVisible = _selectedDrug != null &&
+            _searchResults.any((d) => d.id == _selectedDrug!.id);
+        if (!stillVisible) {
+          _selectedDrug = _searchResults.first;
+        }
+      } else {
+        _selectedDrug = null;
+      }
+    });
+  }
+
   /// Search drugs by name on Caché server; merge results into table.
-  Future<void> _searchByNameOnServer(String query) async {
+  /// [originalQuery] — original user input (for stale-check against search field).
+  Future<void> _searchByNameOnServer(String query, {String? originalQuery}) async {
     if (!mounted) return;
     setState(() => _isServerLookup = true);
 
@@ -1003,7 +1011,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       final uItems = results[1];   // u-codes (all, including zero stock)
 
       // Ignore if user already changed the search query.
-      if (_searchController.text.trim() != query) {
+      final currentText = _searchController.text.trim();
+      if (currentText != query && currentText != (originalQuery ?? query)) {
         setState(() => _isServerLookup = false);
         return;
       }
@@ -1089,6 +1098,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         // Remove old server drugs, prepend new ones before mock results.
         final mockResults =
             _searchResults.where((d) => !d.id.startsWith('srv_')).toList();
+        // Clear SKUDetail cache for new server drugs so they get re-enriched
+        for (final d in serverDrugs) {
+          _skuDetailFetched.remove(d.id);
+        }
         _searchResults = [...serverDrugs, ...mockResults];
         _rebuildEdkOffers(); // оновити ЄДК з новими ukod
         // Always select first server drug when results arrive
@@ -1693,7 +1706,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     setState(() {
       _cart.clear();
       _selectedDrug = null;
-      _searchResults = mockDrugs;
+      _searchResults = [];
       _selectedSymptom = 'Всі';
       _cartOpen = false;
       _prescriptionOpen = false;
@@ -1901,7 +1914,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         // Update phone field to show masked number
         _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
         _loyaltyPhoneController.removeListener(_guardPhoneCursor);
-        _loyaltyPhoneController.text = '$_loyaltyPhonePrefix$masked';
+        _loyaltyPhoneController.text = masked;
         _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
         _loyaltyPhoneController.addListener(_guardPhoneCursor);
       }
@@ -1939,7 +1952,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
   }
 
-  static final List<CartOffer> _allOffers = buildCartOffers(mockDrugs);
+  static final List<CartOffer> _allOffers =
+      ApiConfig.useMock ? buildCartOffers(mockDrugs) : [];
 
   List<CartOffer> get _recommendedOffers {
     final cartIds = _cart.map((item) => item.drug.id).toSet();
@@ -2003,7 +2017,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _totalEarned += earned;
       _cart.clear();
       _selectedDrug = null;   // show ShiftDashboard after payment
-      _searchResults = mockDrugs;
+      _searchResults = [];
       _resetLoyalty();
     });
   }
@@ -2062,7 +2076,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _ordersOpen = false;
       _cart.clear();
       _selectedDrug = null;
-      _searchResults = mockDrugs;
+      _searchResults = [];
       _selectedSymptom = 'Всі';
       _showHelpingHandMarkers = false;
       _helpingHandPrices.clear();
@@ -2077,7 +2091,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   List<Drug> get _analogues {
     final group = _selectedDrug?.analogueGroup;
     if (group == null) return [];
-    return (mockDrugs
+    return (_searchResults
           .where((d) => d.analogueGroup == group && d.id != _selectedDrug!.id)
           .toList()
         ..sort((a, b) =>
@@ -2327,7 +2341,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return PrescriptionPanel(
         key: _prescriptionPanelKey,
         onClose: _togglePrescription,
-        drugCatalog: mockDrugs,
+        drugCatalog: _searchResults,
         onAddToCart: _addPrescriptionToCart,
       );
     }

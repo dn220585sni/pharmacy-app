@@ -1567,46 +1567,354 @@ class OrdersPanelState extends State<OrdersPanel>
   // ── Collected order actions: single "Розрахувати F5" button ────────────────
 
   Widget _buildCollectedActions() {
-    return SizedBox(
-      width: double.infinity,
-      height: 42,
-      child: ElevatedButton(
-        onPressed: _enterOrderCheckout,
-        style: ElevatedButton.styleFrom(
-          foregroundColor: Colors.white,
-          backgroundColor: const Color(0xFF1E7DC8),
-          elevation: 0,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.point_of_sale_rounded, size: 16),
-            const SizedBox(width: 8),
-            const Text('Розрахувати',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: const Color(0x33FFFFFF),
-                borderRadius: BorderRadius.circular(3),
-              ),
-              child: const Text(
-                'F5',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.3,
-                  color: Colors.white,
-                ),
-              ),
+    return Column(
+      children: [
+        SizedBox(
+          width: double.infinity,
+          height: 42,
+          child: ElevatedButton(
+            onPressed: _enterOrderCheckout,
+            style: ElevatedButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: const Color(0xFF1E7DC8),
+              elevation: 0,
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
-          ],
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.point_of_sale_rounded, size: 16),
+                const SizedBox(width: 8),
+                const Text('Розрахувати',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: const Color(0x33FFFFFF),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: const Text(
+                    'F5',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          height: 38,
+          child: OutlinedButton.icon(
+            onPressed: () => _showMergeOrdersDialog(),
+            icon: const Icon(Icons.merge_rounded, size: 15),
+            label: const Text('Об\'єднати',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF1C1C2E),
+              side: const BorderSide(color: Color(0xFFE5E7EB)),
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Merge orders dialog ──────────────────────────────────────────────────
+
+  void _showMergeOrdersDialog() {
+    final currentOrder = _selectedOrder;
+    if (currentOrder == null) return;
+
+    // Collect other collected (not dispensed/paid) orders
+    final candidates = _orders.where((o) =>
+        o.id != currentOrder.id &&
+        o.status != OrderStatus.paidOnline &&
+        o.status != OrderStatus.dispensed &&
+        o.status != OrderStatus.pharmacyRefusal &&
+        o.status != OrderStatus.customerRefusal).toList();
+
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Немає замовлень для об\'єднання')),
+      );
+      return;
+    }
+
+    final selected = <String>{};
+    var searchQuery = '';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final filtered = searchQuery.isEmpty
+              ? candidates
+              : candidates.where((o) =>
+                  o.reserveNumber.toLowerCase().contains(searchQuery) ||
+                  o.id.contains(searchQuery) ||
+                  o.items.any((item) => item.name.toLowerCase().contains(searchQuery))).toList();
+
+          return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 420, maxHeight: 560),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.merge_rounded,
+                        size: 20, color: Color(0xFF1E7DC8)),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Об\'єднати замовлення',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1C1C2E),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () => Navigator.pop(ctx),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Додати товари з обраних замовлень до №${currentOrder.reserveNumber}',
+                  style: const TextStyle(
+                      fontSize: 12, color: Color(0xFF6B7280)),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 36,
+                  child: TextField(
+                    onChanged: (v) => setDialogState(() {
+                      searchQuery = v.trim().toLowerCase();
+                    }),
+                    decoration: InputDecoration(
+                      hintText: 'Пошук по номеру замовлення',
+                      hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                      prefixIcon: const Icon(Icons.search, size: 16, color: Color(0xFF9CA3AF)),
+                      prefixIconConstraints: const BoxConstraints(minWidth: 36),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                      filled: true,
+                      fillColor: const Color(0xFFF9FAFB),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                      ),
+                    ),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: filtered.length,
+                    itemBuilder: (ctx, i) {
+                      final order = filtered[i];
+                      final isChecked = selected.contains(order.id);
+                      final itemNames = order.items
+                          .take(3)
+                          .map((item) => item.name)
+                          .join(', ');
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => setDialogState(() {
+                          if (isChecked) {
+                            selected.remove(order.id);
+                          } else {
+                            selected.add(order.id);
+                          }
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 10),
+                          margin: const EdgeInsets.only(bottom: 4),
+                          decoration: BoxDecoration(
+                            color: isChecked
+                                ? const Color(0xFFEFF6FF)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isChecked
+                                  ? const Color(0xFFBFDBFE)
+                                  : const Color(0xFFE5E7EB),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                isChecked
+                                    ? Icons.check_box_rounded
+                                    : Icons.check_box_outline_blank_rounded,
+                                size: 20,
+                                color: isChecked
+                                    ? const Color(0xFF1E7DC8)
+                                    : const Color(0xFF9CA3AF),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(
+                                          '№${order.reserveNumber}',
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            color: Color(0xFF1C1C2E),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          order.statusLabel,
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: Color(0xFF6B7280),
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        Text(
+                                          '${order.total.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF1C1C2E),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '${order.items.length} поз. · $itemNames',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF9CA3AF),
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 42,
+                  child: ElevatedButton(
+                    onPressed: selected.isEmpty
+                        ? null
+                        : () {
+                            Navigator.pop(ctx);
+                            _mergeOrders(currentOrder, selected);
+                          },
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: const Color(0xFF1E7DC8),
+                      disabledForegroundColor: const Color(0xFF9CA3AF),
+                      disabledBackgroundColor: const Color(0xFFF3F4F6),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                    child: Text(
+                      selected.isEmpty
+                          ? 'Оберіть замовлення'
+                          : 'Об\'єднати ${selected.length} замовл.',
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+        },
       ),
     );
+  }
+
+  void _mergeOrders(InternetOrder target, Set<String> sourceIds) {
+    final targetIdx = _orders.indexWhere((o) => o.id == target.id);
+    if (targetIdx < 0) return;
+
+    // Collect items from source orders
+    final newItems = <OrderItem>[];
+    double addedTotal = 0;
+    for (final srcId in sourceIds) {
+      final srcIdx = _orders.indexWhere((o) => o.id == srcId);
+      if (srcIdx < 0) continue;
+      final srcOrder = _orders[srcIdx];
+      newItems.addAll(srcOrder.items);
+      addedTotal += srcOrder.total;
+    }
+
+    if (newItems.isEmpty) return;
+
+    // Create merged order with combined items
+    final mergedItems = [...target.items, ...newItems];
+    final merged = InternetOrder(
+      id: target.id,
+      reserveNumber: target.reserveNumber,
+      dateTime: target.dateTime,
+      total: target.total + addedTotal,
+      status: target.status,
+      lockerCell: target.lockerCell,
+      type: target.type,
+      items: mergedItems,
+      customerPhone: target.customerPhone,
+      customerName: target.customerName,
+      isUrgent: target.isUrgent,
+      isLockerEligible: target.isLockerEligible,
+      refusalReason: target.refusalReason,
+    );
+
+    setState(() {
+      _orders[targetIdx] = merged;
+      // Remove source orders from the list
+      _orders.removeWhere((o) => sourceIds.contains(o.id));
+      _selectedOrder = merged;
+      _filterOrders();
+    });
+
+    debugPrint('Merged ${sourceIds.length} orders into ${target.id}: '
+        '${mergedItems.length} items, total=${merged.total}');
   }
 
   // ── Not-collected order actions: Розрахувати + Лікомат + Відмовити + Відсутність

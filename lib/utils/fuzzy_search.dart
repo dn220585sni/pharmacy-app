@@ -30,24 +30,49 @@ int _levenshtein(String a, String b) {
 /// Max allowed edit distance based on query length.
 int _maxDistance(int queryLen) => queryLen <= 4 ? 1 : 2;
 
+/// Normalize Russian↔Ukrainian characters for search:
+/// и↔і, е↔є treated as equivalent.
+String _normalizeSearch(String s) => s
+    .replaceAll('и', 'і')
+    .replaceAll('ы', 'і')
+    .replaceAll('э', 'е')
+    .replaceAll('ё', 'е')
+    .replaceAll('є', 'е')
+    .replaceAll('ї', 'і')
+    .replaceAll('ъ', 'ь');
+
+// ── Cached normalized names for fast repeated lookups ──────────────────────
+final _normalizedCache = <String, String>{};
+
+String _cachedNormalize(String s) {
+  return _normalizedCache[s] ??= _normalizeSearch(s.toLowerCase());
+}
+
 /// Fuzzy score of [query] against [text].
 /// Returns 0.0–1.0 (0 = no match, 1 = exact substring).
 double fuzzyScore(String query, String text) {
   if (query.isEmpty) return 1.0;
 
-  final q = query.toLowerCase();
-  final t = text.toLowerCase();
+  final q = _cachedNormalize(query);
+  final t = _cachedNormalize(text);
 
   // 1. Exact substring → best score.
   if (t.contains(q)) return 1.0;
 
-  // 2. Sliding-window fuzzy substring match.
+  // 2. Short queries (1-2 chars): only prefix/substring match, skip expensive fuzzy.
+  if (q.length <= 2) return 0.0;
+
+  // 3. Quick prefix check on first word — early exit if first chars don't match at all.
+  //    If the first character doesn't appear anywhere in the text, skip fuzzy.
+  if (!t.contains(q[0])) return 0.0;
+
+  // 4. Sliding-window fuzzy substring match.
   final maxDist = _maxDistance(q.length);
   int bestDist = q.length; // worst possible
 
   // Window sizes: from (queryLen - maxDist) to (queryLen + maxDist).
   final winMin = max(1, q.length - maxDist);
-  final winMax = q.length + maxDist;
+  final winMax = min(q.length + maxDist, t.length);
 
   for (int winLen = winMin; winLen <= winMax; winLen++) {
     if (winLen > t.length) continue;

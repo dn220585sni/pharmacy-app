@@ -22,7 +22,9 @@ class OrderEdkCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final drug = offer.drug;
-    final bonus = offer.bonus ?? drug.pharmacistBonus;
+    final bonus = (drug.pharmacistBonus != null && drug.pharmacistBonus! > 0)
+        ? drug.pharmacistBonus
+        : offer.bonus;
     final hasBlister = drug.canSplitByBlister;
 
     return Container(
@@ -131,7 +133,28 @@ class OrderEdkCard extends StatelessWidget {
                         ),
                 ),
                 const SizedBox(width: 10),
-                // Name + manufacturer + price
+                // Bonus badge
+                if (bonus != null && bonus > 0) ...[
+                  Container(
+                    width: 26,
+                    height: 26,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFFEF3C7),
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '$bonus',
+                      style: const TextStyle(
+                        color: Color(0xFFB45309),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                // Name + manufacturer
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -158,46 +181,16 @@ class OrderEdkCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // Price + bonus badge
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    if (drug.price > 0)
-                      Text(
-                        '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
-                        style: const TextStyle(
-                          color: Color(0xFF1C1C2E),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    if (bonus != null && bonus > 0) ...[
-                      const SizedBox(height: 2),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFEF3C7),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.star_rounded, size: 11, color: Color(0xFFB45309)),
-                            const SizedBox(width: 2),
-                            Text(
-                              '+$bonus',
-                              style: const TextStyle(
-                                color: Color(0xFFB45309),
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+                // Price
+                if (drug.price > 0)
+                  Text(
+                    '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                    style: const TextStyle(
+                      color: Color(0xFF1C1C2E),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
               ],
             ),
           ),

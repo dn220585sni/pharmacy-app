@@ -136,18 +136,64 @@ class DrugPriceResult {
   bool get isAvailable => totalStock > 0;
 }
 
+/// Аналог товару від Caché (з GetAnalog).
+class AnalogItem {
+  final String ukod;          // u-код товару
+  final String name;          // назва
+  final String manufacturer;  // виробник
+  final double price;         // ціна
+  final int qty;              // залишок
+  final int? bonus;           // бонус фармацевту
+  final bool isAnalog;        // 1=аналог
+  final bool isCtm;           // 1=СТМ (власна торгова марка)
+
+  const AnalogItem({
+    required this.ukod,
+    required this.name,
+    required this.manufacturer,
+    required this.price,
+    required this.qty,
+    this.bonus,
+    this.isAnalog = false,
+    this.isCtm = false,
+  });
+
+  factory AnalogItem.fromJson(Map<String, dynamic> json) {
+    final bonusRaw = json['bonus']?.toString() ?? '';
+    final bonusVal = int.tryParse(bonusRaw);
+    return AnalogItem(
+      ukod: json['UKod']?.toString() ?? json['ukod']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      manufacturer: json['proiz']?.toString() ?? json['manufacturer']?.toString() ?? '',
+      price: double.tryParse(
+            json['price']?.toString().replaceAll(',', '.') ?? '0',
+          ) ?? 0.0,
+      qty: (double.tryParse(
+                json['kol']?.toString().replaceAll(',', '.') ?? json['qty']?.toString() ?? '0',
+              ) ?? 0.0).round(),
+      bonus: (bonusVal != null && bonusVal > 0) ? bonusVal : null,
+      isAnalog: json['analog']?.toString() == '1',
+      isCtm: json['ctm']?.toString() == '1',
+    );
+  }
+}
+
 /// ЄДК-пропозиція заміни від Caché (з GetEdkOffers).
 class EdkApiOffer {
-  final String replacementId;   // с-код заміни
-  final String replacementName; // назва заміни
-  final int replacementBonus;   // бонус
-  final String script;          // мовний модуль
-  final String reason;          // причина ("Аналог", "Дефектура" тощо)
+  final String replacementId;      // с-код заміни
+  final String replacementName;    // назва заміни
+  final double replacementPrice;   // роздрібна ціна заміни
+  final int replacementBonus;      // бонус за ЄДК-зв'язку
+  final int pharmacistBonus;       // бонус фармацевту за продаж товару
+  final String script;             // мовний модуль
+  final String reason;             // причина ("Аналог", "Дефектура" тощо)
 
   const EdkApiOffer({
     required this.replacementId,
     required this.replacementName,
+    required this.replacementPrice,
     required this.replacementBonus,
+    required this.pharmacistBonus,
     required this.script,
     required this.reason,
   });
@@ -156,7 +202,11 @@ class EdkApiOffer {
     return EdkApiOffer(
       replacementId: json['replacementId']?.toString() ?? '',
       replacementName: json['replacementName']?.toString() ?? '',
+      replacementPrice: double.tryParse(
+            json['replacementPrice']?.toString().replaceAll(',', '.') ?? '0',
+          ) ?? 0.0,
       replacementBonus: int.tryParse(json['replacementBonus']?.toString() ?? '') ?? 0,
+      pharmacistBonus: int.tryParse(json['pharmacistBonus']?.toString() ?? '') ?? 0,
       script: json['script']?.toString() ?? '',
       reason: json['reason']?.toString() ?? '',
     );
@@ -560,7 +610,7 @@ class DrugService {
   /// НЕ s-код з SearchByNameSKU).
   ///
   /// Caché: `GET ?ServiceName=GetEdkOffers&ids={ids}`
-  /// Response: `{"Status":"OK","offers":[{"replacementId":"...","replacementName":"...","replacementBonus":"...","script":"...","reason":"..."}]}`
+  /// Response: `{"Status":"OK","offers":[{"replacementId":"...","replacementName":"...","replacementPrice":"...","replacementBonus":"...","script":"...","reason":"..."}]}`
   static Future<List<EdkApiOffer>> fetchEdkOffers(String ids) async {
     if (ApiConfig.useMock || ids.isEmpty) return [];
 
@@ -583,6 +633,73 @@ class DrugService {
     } catch (e) {
       debugPrint('GetEdkOffers ERROR ids=$ids: $e');
       return [];
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Аналоги товару (GetAnalog)
+  // ---------------------------------------------------------------------------
+
+  /// Отримати аналоги товару з Caché.
+  ///
+  /// [skod] — с-код товару (Drug.skuCode / DrugSearchItem.ids)
+  ///
+  /// Caché: `GET ?ServiceName=GetAnalog&SKod={skod}`
+  /// Response: `{"Status":"OK","Analogs":[{"UKod":"...","name":"...","proiz":"...","price":"...","kol":"...","bonus":"...","analog":1,"ctm":0}]}`
+  static Future<List<AnalogItem>> fetchAnalogs(String skod) async {
+    if (ApiConfig.useMock || skod.isEmpty) return [];
+
+    try {
+      final response = await _api.call('GetAnalog', params: {
+        'SKod': skod,
+      });
+
+      if (!response.isOk) {
+        debugPrint('GetAnalog FAIL SKod=$skod: ${response.result}');
+        return [];
+      }
+
+      final analogsJson = (response.data['Analogs']
+          ?? response.data['analogs']) as List<dynamic>?;
+      if (analogsJson == null || analogsJson.isEmpty) return [];
+
+      return analogsJson
+          .whereType<Map<String, dynamic>>()
+          .map((j) => AnalogItem.fromJson(j))
+          .toList();
+    } catch (e) {
+      debugPrint('GetAnalog ERROR SKod=$skod: $e');
+      return [];
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Блокування залишку (sgVRoznSetLock)
+  // ---------------------------------------------------------------------------
+
+  /// Заблокувати/розблокувати залишок товару на складі.
+  ///
+  /// Викликається при зміні кількості товару в кошику.
+  /// [skod] — с-код товару (DrugSearchItem.ids / Drug.skuCode)
+  /// [qty] — кількість для блокування (0 = зняти блокування)
+  ///
+  /// Caché: `GET ?ServiceName=sgVRoznSetLock&SKod={skod}&qty={qty}`
+  static Future<void> setStockLock(String skod, int qty) async {
+    if (ApiConfig.useMock || skod.isEmpty) return;
+
+    try {
+      final response = await _api.call('sgVRoznSetLock', params: {
+        'SKod': skod,
+        'qty': qty.toString(),
+      });
+
+      if (!response.isOk) {
+        debugPrint('sgVRoznSetLock FAIL SKod=$skod qty=$qty: ${response.result}');
+      } else {
+        debugPrint('sgVRoznSetLock OK SKod=$skod qty=$qty');
+      }
+    } catch (e) {
+      debugPrint('sgVRoznSetLock ERROR SKod=$skod qty=$qty: $e');
     }
   }
 

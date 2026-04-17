@@ -543,16 +543,27 @@ class OrdersPanelState extends State<OrdersPanel>
 
       if (!mounted) return;
 
+      // Fetch SKUDetail for replacement drug to get pharmacistBonus
+      SKUDetailResult? replacementDetail;
+      if (offer.replacementId.isNotEmpty) {
+        try {
+          replacementDetail = await DrugService.fetchSKUDetail(offer.replacementId);
+        } catch (_) {}
+      }
+
+      if (!mounted) return;
+
       final replacementDrug = Drug(
         id: 'edk_${offer.replacementId}',
         name: offer.replacementName,
-        manufacturer: '',
-        category: '',
-        price: 0,
+        manufacturer: replacementDetail?.manufacturer ?? '',
+        category: replacementDetail?.category ?? '',
+        price: offer.replacementPrice,
         stock: 1,
         unit: 'шт',
         skuCode: offer.replacementId,
-        imageUrl: imageUrl,
+        imageUrl: imageUrl ?? replacementDetail?.imageUrl,
+        pharmacistBonus: replacementDetail?.pharmacistBonus,
       );
 
       String? promo;
@@ -570,7 +581,9 @@ class OrdersPanelState extends State<OrdersPanel>
           bonus: offer.replacementBonus,
         );
       });
-      debugPrint('ЄДК order: ids=$detailIds → ${offer.replacementName}');
+      debugPrint('ЄДК order: ids=$detailIds → ${offer.replacementName} '
+          '(ціна=${offer.replacementPrice}, бонус ЄДК=${offer.replacementBonus}, '
+          'бонус фарм=${replacementDetail?.pharmacistBonus ?? 0})');
     }).catchError((e) {
       debugPrint('ЄДК order: error for ids=$detailIds: $e');
     });

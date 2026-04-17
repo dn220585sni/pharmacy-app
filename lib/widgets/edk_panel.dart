@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/drug.dart';
 import '../models/edk_offer.dart';
 
 /// Right-panel card proposing a pharmaceutical substitution (ЄДК).
@@ -113,6 +114,27 @@ class EdkPanel extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
               child: Column(
                 children: [
+                  // Pharmacist bonus
+                  if (_bonusValue(offer, drug) > 0) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF3C7),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFDE68A)),
+                      ),
+                      child: Text(
+                        'Ваш бонус - ${_bonusValue(offer, drug)}',
+                        style: const TextStyle(
+                          color: Color(0xFFB45309),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
                   // Image
                   Container(
                     width: 120,
@@ -160,7 +182,7 @@ class EdkPanel extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
 
-                  // Price + bonus row
+                  // Price
                   if (drug.price > 0)
                     Text(
                       '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
@@ -170,32 +192,6 @@ class EdkPanel extends StatelessWidget {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                  if (offer.bonus != null && offer.bonus! > 0) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEF3C7),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFFDE68A)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.star_rounded, size: 16, color: Color(0xFFB45309)),
-                          const SizedBox(width: 5),
-                          Text(
-                            'Бонус фармацевту: +${offer.bonus}',
-                            style: const TextStyle(
-                              color: Color(0xFFB45309),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
                   const SizedBox(height: 14),
 
                   // Script block (speech module)
@@ -376,6 +372,15 @@ class EdkPanel extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Бонус фармацевту: пріоритет — drug.pharmacistBonus (з GetSKUdetail),
+  /// фолбек — offer.bonus (з ЄДК-зв'язки).
+  static int _bonusValue(EdkOffer offer, Drug drug) {
+    if (drug.pharmacistBonus != null && drug.pharmacistBonus! > 0) {
+      return drug.pharmacistBonus!;
+    }
+    return offer.bonus ?? 0;
   }
 
   Widget _placeholderIcon() {

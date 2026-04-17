@@ -89,6 +89,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// Drug ID for which external analogues are currently loaded.
   String? _externalAnaloguesForDrugId;
 
+  // ── Caché analogues (GetAnalog) ────────────────────────────────────────
+  /// Analogues from Caché GetAnalog API (by s-code).
+  List<AnalogItem> _cacheAnalogues = [];
+  /// Drug ID for which Caché analogues are currently loaded.
+  String? _cacheAnaloguesForDrugId;
+
   // ── SKU Detail (Caché GetSKUdetail) ────────────────────────────────────
   /// Drug IDs we've already tried fetching from GetSKUdetail.
   final _skuDetailFetched = <String>{};
@@ -303,6 +309,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _prescriptionOpen = false;
       _cartOpen = true;
     });
+    // Lock stock for prescription items
+    for (final match in selectedMatches) {
+      _lockStock(match.drug, match.selectedQuantity);
+    }
     // Open cart panel for scanning → then F5 to checkout
   }
 
@@ -427,16 +437,27 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
       if (!mounted) return;
 
+      // Fetch SKUDetail for replacement drug to get pharmacistBonus, manufacturer, category etc.
+      SKUDetailResult? replacementDetail;
+      if (offer.replacementId.isNotEmpty) {
+        try {
+          replacementDetail = await DrugService.fetchSKUDetail(offer.replacementId);
+        } catch (_) {}
+      }
+
+      if (!mounted) return;
+
       final replacementDrug = Drug(
         id: 'edk_${offer.replacementId}',
         name: offer.replacementName,
-        manufacturer: '',
-        category: '',
-        price: 0,
+        manufacturer: replacementDetail?.manufacturer ?? '',
+        category: replacementDetail?.category ?? '',
+        price: offer.replacementPrice,
         stock: 1,
         unit: 'шт',
         skuCode: offer.replacementId,
-        imageUrl: imageUrl,
+        imageUrl: imageUrl ?? replacementDetail?.imageUrl,
+        pharmacistBonus: replacementDetail?.pharmacistBonus,
       );
 
       String? promo;
@@ -454,7 +475,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           bonus: offer.replacementBonus,
         );
       });
-      debugPrint('ЄДК: GetEdkOffers ids=$detailIds → ${offer.replacementName} (${offer.reason})');
+      debugPrint('ЄДК: GetEdkOffers ids=$detailIds → ${offer.replacementName} '
+          '(${offer.reason}, ціна=${offer.replacementPrice}, '
+          'бонус ЄДК=${offer.replacementBonus}, '
+          'бонус фарм=${replacementDetail?.pharmacistBonus ?? 0})');
     }).catchError((e) {
       debugPrint('ЄДК: GetEdkOffers error for ids=$detailIds: $e');
     });
@@ -1123,6 +1147,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       if (_selectedDrug != null) {
         _fetchProductBrowserInfo(_selectedDrug!);
         _fetchExternalAnalogues(_selectedDrug!);
+        _fetchCacheAnalogues(_selectedDrug!);
       }
     } catch (_) {
       if (!mounted) return;
@@ -1320,6 +1345,29 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     });
   }
 
+  /// Fetch analogues from Caché GetAnalog API (by s-code).
+  void _fetchCacheAnalogues(Drug drug) {
+    final skod = drug.skuCode;
+    if (skod == null || skod.isEmpty) return;
+    if (_cacheAnaloguesForDrugId == drug.id) return;
+
+    _cacheAnaloguesForDrugId = drug.id;
+    setState(() => _cacheAnalogues = []);
+    debugPrint('CacheAnalog: fetching SKod=$skod for ${drug.name}');
+
+    DrugService.fetchAnalogs(skod).then((results) {
+      if (!mounted) return;
+      if (_selectedDrug?.id != drug.id) return;
+
+      debugPrint('CacheAnalog: found ${results.length} results for SKod=$skod');
+      setState(() {
+        _cacheAnalogues = results;
+      });
+    }).catchError((e) {
+      debugPrint('CacheAnalog: error — $e');
+    });
+  }
+
   // ── Manual barcode input (F4) ───────────────────────────────────────────
   Future<void> _showManualBarcodeDialog() async {
     final barcode = await showBarcodeInputDialog(context: context);
@@ -1405,6 +1453,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _scrollToIndex(0);
         _fetchProductBrowserInfo(drug);
         _fetchExternalAnalogues(drug);
+        _fetchCacheAnalogues(drug);
         _fetchSKUDetail(drug);
       } else {
         setState(() => _isServerLookup = false);
@@ -1436,6 +1485,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _scrollToIndex(newIdx);
     _fetchProductBrowserInfo(newDrug);
     _fetchExternalAnalogues(newDrug);
+    _fetchCacheAnalogues(newDrug);
     _fetchSKUDetail(newDrug);
   }
 
@@ -1467,6 +1517,21 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     return idx >= 0 ? _cart[idx] : null;
   }
 
+  /// Відправити блокування залишку на сервер (fire-and-forget).
+  /// [qty] = 0 знімає блокування.
+  void _lockStock(Drug drug, int qty) {
+    final skod = drug.skuCode;
+    if (skod == null || skod.isEmpty) return;
+    DrugService.setStockLock(skod, qty);
+  }
+
+  /// Зняти блокування для всіх товарів в кошику.
+  void _unlockAllCart() {
+    for (final item in _cart) {
+      _lockStock(item.drug, 0);
+    }
+  }
+
   void _setQuantity(Drug drug, int qty) {
     final wasInCart = _cart.any((item) => item.drug.id == drug.id);
     setState(() {
@@ -1483,6 +1548,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
       }
     });
+    _lockStock(drug, qty <= 0 ? 0 : qty.clamp(1, drug.stock));
     // Show ЄДК offer when a drug is first added to cart
     if (!wasInCart && qty > 0) _tryShowEdk(drug);
   }
@@ -1504,6 +1570,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
       }
     });
+    _lockStock(drug, blisters <= 0 ? 0 : 1);
     if (!wasInCart && blisters > 0) _tryShowEdk(drug);
   }
 
@@ -1542,10 +1609,16 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (activeEdkOffer == null) return;
     final replacement = activeEdkOffer!.drug;
     final donorId = activeEdkOffer!.donorDrugId;
+    // Unlock donor drugs being removed
+    for (final item in _cart) {
+      final match = ApiConfig.useMock
+          ? item.drug.id == donorId
+          : item.drug.ukod == donorId;
+      if (match) _lockStock(item.drug, 0);
+    }
     setState(() {
       dismissedEdkIds.add(donorId);
       activeEdkOffer = null;
-      // Remove the donor — replacement substitutes it.
       _cart.removeWhere((i) =>
           ApiConfig.useMock ? i.drug.id == donorId : i.drug.ukod == donorId);
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
@@ -1556,6 +1629,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       }
       _selectedDrug = replacement;
     });
+    // Lock replacement
+    final cartItem = _cart.firstWhere((i) => i.drug.id == replacement.id);
+    _lockStock(replacement, cartItem.isFractional ? 1 : cartItem.quantity);
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
@@ -1566,6 +1642,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final replacement = activeEdkOffer!.drug;
     final donorId = activeEdkOffer!.donorDrugId;
     if (!replacement.canSplitByBlister) return;
+    // Unlock donor
+    for (final item in _cart) {
+      final match = ApiConfig.useMock
+          ? item.drug.id == donorId
+          : item.drug.ukod == donorId;
+      if (match) _lockStock(item.drug, 0);
+    }
     setState(() {
       dismissedEdkIds.add(donorId);
       activeEdkOffer = null;
@@ -1583,6 +1666,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       }
       _selectedDrug = replacement;
     });
+    _lockStock(replacement, 1);
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
@@ -1605,6 +1689,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       }
       _selectedDrug = replacement;
     });
+    final cartItem = _cart.firstWhere((i) => i.drug.id == replacement.id);
+    _lockStock(replacement, cartItem.quantity);
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
@@ -1628,11 +1714,16 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       }
       _selectedDrug = replacement;
     });
+    _lockStock(replacement, 1);
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
 
-  void _removeFromCart(int index) => setState(() => _cart.removeAt(index));
+  void _removeFromCart(int index) {
+    final drug = _cart[index].drug;
+    setState(() => _cart.removeAt(index));
+    _lockStock(drug, 0);
+  }
 
   void _increaseQty(int index) {
     setState(() {
@@ -1645,25 +1736,36 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         if (item.quantity < item.drug.stock) item.quantity++;
       }
     });
+    final item = _cart[index];
+    _lockStock(item.drug, item.isFractional ? 1 : item.quantity);
   }
 
   void _decreaseQty(int index) {
+    Drug? removedDrug;
     setState(() {
       final item = _cart[index];
       if (item.isFractional) {
         if (item.fractionalQty! > 1) {
           item.fractionalQty = item.fractionalQty! - 1;
         } else {
+          removedDrug = item.drug;
           _cart.removeAt(index);
         }
       } else {
         if (item.quantity > 1) {
           item.quantity--;
         } else {
+          removedDrug = item.drug;
           _cart.removeAt(index);
         }
       }
     });
+    if (removedDrug != null) {
+      _lockStock(removedDrug!, 0);
+    } else if (index < _cart.length) {
+      final item = _cart[index];
+      _lockStock(item.drug, item.isFractional ? 1 : item.quantity);
+    }
   }
 
   double get _cartTotal => _cart.fold(0, (s, i) => s + i.total);
@@ -1695,6 +1797,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   void _clearCart() {
+    // Зняти блокування для всіх товарів перед очищенням
+    _unlockAllCart();
+
     // Reset search without triggering _filterDrugs (which would auto-select)
     _searchController.removeListener(_filterDrugs);
     _searchController.clear();
@@ -1941,6 +2046,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
       }
     });
+    final cartItem = _cart.firstWhere((c) => c.drug.id == drug.id);
+    _lockStock(drug, cartItem.isFractional ? 1 : cartItem.quantity);
   }
 
   void _confirmPhone() {
@@ -1969,6 +2076,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _cart.add(CartItem(drug: drug, quantity: 1));
       }
     });
+    final cartItem = _cart.firstWhere((i) => i.drug.id == drug.id);
+    _lockStock(drug, cartItem.quantity);
   }
 
   void _addOfferBlisterToCart(Drug drug) {
@@ -1984,6 +2093,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _cart.add(CartItem(drug: drug, quantity: 0, fractionalQty: 1));
       }
     });
+    _lockStock(drug, 1);
   }
 
   void _processPayment({double paidByPoints = 0}) {
@@ -2101,6 +2211,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void _selectAnalogue(Drug drug) {
     // Reset analogue tracking so new drug's analogues will be fetched
     _externalAnaloguesForDrugId = null;
+    _cacheAnaloguesForDrugId = null;
 
     // If this drug is already in search results — just select it
     final existingIdx = _searchResults.indexWhere((d) => d.id == drug.id);
@@ -2114,6 +2225,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _scrollToIndex(existingIdx);
       _fetchProductBrowserInfo(_searchResults[existingIdx]);
       _fetchExternalAnalogues(_searchResults[existingIdx]);
+      _fetchCacheAnalogues(_searchResults[existingIdx]);
       _fetchSKUDetail(_searchResults[existingIdx]);
       return;
     }
@@ -2458,6 +2570,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                       drug: _selectedDrug,
                       analogues: _analogues,
                       externalAnalogues: _externalAnalogues,
+                      cacheAnalogues: _cacheAnalogues,
                       onSelectAnalogue: _selectAnalogue,
                       onStorageLocationChanged: _onStorageLocationChanged,
                       earnedAmount: _totalEarned,
@@ -2824,6 +2937,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             });
             _fetchProductBrowserInfo(drug);
             _fetchExternalAnalogues(drug);
+            _fetchCacheAnalogues(drug);
             _fetchSKUDetail(drug);
           },
           onQuantityChanged: (qty) => _setQuantity(drug, qty),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/drug.dart';
 import '../services/farmasell_service.dart';
+import '../services/drug_service.dart';
 import '../services/product_browser_service.dart';
 import 'drug_list_item.dart'; // for kColBadge
 import 'instruction_dialog.dart';
@@ -148,6 +149,7 @@ class DrugDetailPanel extends StatefulWidget {
   final Drug? drug;
   final List<Drug> analogues;
   final List<ProductSearchResult> externalAnalogues;
+  final List<AnalogItem> cacheAnalogues;
   final void Function(Drug) onSelectAnalogue;
   final void Function(StorageLocationType type, String code, bool applyToCart)? onStorageLocationChanged;
   /// Passed through to ShiftDashboard when drug == null.
@@ -166,6 +168,7 @@ class DrugDetailPanel extends StatefulWidget {
     required this.drug,
     required this.analogues,
     this.externalAnalogues = const [],
+    this.cacheAnalogues = const [],
     required this.onSelectAnalogue,
     this.onStorageLocationChanged,
     this.earnedAmount = 0.0,
@@ -464,7 +467,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
   // ── Collapsible section header ────────────────────────────────────────────
 
   Widget _buildAnaloguesBody(Drug drug) {
-    if (widget.externalAnalogues.isEmpty) {
+    if (widget.cacheAnalogues.isEmpty) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
         child: Row(
@@ -473,7 +476,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
                 size: 14, color: Color(0xFFD1D5DB)),
             const SizedBox(width: 6),
             Text(
-              drug.inn != null
+              drug.skuCode != null
                   ? 'Пошук аналогів...'
                   : 'Аналоги відсутні',
               style: TextStyle(
@@ -501,6 +504,15 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
                         fontWeight: FontWeight.w500)),
               ),
               SizedBox(
+                width: 50,
+                child: Text('Зал.',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                        color: Color(0xFF9CA3AF),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500)),
+              ),
+              SizedBox(
                 width: 72,
                 child: Text('Ціна',
                     textAlign: TextAlign.right,
@@ -513,24 +525,27 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
           ),
         ),
         const Divider(height: 1, thickness: 1, color: Color(0xFFF3F4F6)),
-        // Analogue rows
+        // Analogue rows from Caché
         Flexible(
           child: ListView(
-            children: widget.externalAnalogues.asMap().entries.map((e) =>
-                _ExternalAnalogueRow(
-                  product: e.value,
-                  isEven: e.key.isEven,
-                  onTap: () => widget.onSelectAnalogue(Drug(
-                    id: 'anc_${e.value.id}',
-                    name: e.value.name,
-                    manufacturer: e.value.producer ?? '',
-                    category: '',
-                    price: e.value.price,
-                    stock: 0,
-                    unit: 'шт',
-                    imageUrl: e.value.picture,
+            children: [
+              ...widget.cacheAnalogues.asMap().entries.map((e) =>
+                  _CacheAnalogueRow(
+                    item: e.value,
+                    isEven: e.key.isEven,
+                    onTap: () => widget.onSelectAnalogue(Drug(
+                      id: 'srv_u_${e.value.ukod}',
+                      name: e.value.name,
+                      manufacturer: e.value.manufacturer,
+                      category: '',
+                      price: e.value.price,
+                      stock: e.value.qty,
+                      unit: 'шт',
+                      ukod: e.value.ukod.isNotEmpty ? e.value.ukod : null,
+                      pharmacistBonus: e.value.bonus,
+                    )),
                   )),
-                )).toList(),
+            ],
           ),
         ),
       ],
@@ -1330,6 +1345,117 @@ class _UsagePropCell extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════
 // Analogue row (from API search)
 // ═══════════════════════════════════════════════════════════════════════════
+
+class _CacheAnalogueRow extends StatelessWidget {
+  final AnalogItem item;
+  final bool isEven;
+  final VoidCallback? onTap;
+
+  const _CacheAnalogueRow({
+    required this.item,
+    required this.isEven,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final inStock = item.qty > 0;
+    return GestureDetector(
+      onTap: onTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          color: isEven ? const Color(0xFFFAFBFC) : const Color(0xFFF5F6F8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          child: Row(
+            children: [
+              // Badge
+              SizedBox(
+                width: kColBadge,
+                child: Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: inStock
+                        ? const Color(0xFFD1FAE5)
+                        : const Color(0xFFFEE2E2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Icon(
+                      inStock
+                          ? Icons.check_rounded
+                          : Icons.remove_rounded,
+                      size: 14,
+                      color: inStock
+                          ? const Color(0xFF059669)
+                          : const Color(0xFFEF4444),
+                    ),
+                  ),
+                ),
+              ),
+              // Name + manufacturer
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.name,
+                      style: const TextStyle(
+                        color: Color(0xFF1C1C2E),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                    if (item.manufacturer.isNotEmpty)
+                      Text(
+                        item.manufacturer,
+                        style: const TextStyle(
+                          color: Color(0xFFB0B7C3),
+                          fontSize: 10,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+              // Stock
+              SizedBox(
+                width: 50,
+                child: Text(
+                  '${item.qty}',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: inStock
+                        ? const Color(0xFF059669)
+                        : const Color(0xFFEF4444),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              // Price
+              SizedBox(
+                width: 72,
+                child: Text(
+                  '${item.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    color: Color(0xFF1C1C2E),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _ExternalAnalogueRow extends StatelessWidget {
   final ProductSearchResult product;

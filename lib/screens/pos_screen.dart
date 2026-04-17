@@ -1369,6 +1369,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       if (_selectedDrug?.id != drug.id) return;
 
       debugPrint('CacheAnalog: found ${results.length} results for SKod=$effectiveSkod');
+      // Remove the donor drug itself from analogs list
+      results.removeWhere((a) => a.ukod == (drug.ukod ?? '') || a.name == drug.name);
+
+      // Sort: analogs (analog=1) first, then by bonus descending
+      results.sort((a, b) {
+        if (a.isAnalog != b.isAnalog) return a.isAnalog ? -1 : 1;
+        return (b.bonus ?? 0).compareTo(a.bonus ?? 0);
+      });
       setState(() {
         _cacheAnalogues = results;
       });

@@ -1369,26 +1369,40 @@ class _CacheAnalogueRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
           child: Row(
             children: [
-              // Bonus badge
+              // Bonus badge (same style as main drug table)
               SizedBox(
                 width: kColBadge,
-                child: hasBonus
+                child: (hasBonus || item.isCtm)
                     ? Container(
                         width: 26,
                         height: 26,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFFEF3C7),
+                        decoration: BoxDecoration(
+                          color: item.isCtm
+                              ? const Color(0xFFECEEF6)
+                              : const Color(0xFFF5F0E8),
                           shape: BoxShape.circle,
                         ),
                         alignment: Alignment.center,
-                        child: Text(
-                          '${item.bonus}',
-                          style: const TextStyle(
-                            color: Color(0xFFB45309),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
+                        child: hasBonus
+                            ? Text(
+                                '${item.bonus}',
+                                style: const TextStyle(
+                                  color: Color(0xFF6B7280),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              )
+                            : item.isCtm
+                                ? const Text(
+                                    'ВТМ',
+                                    style: TextStyle(
+                                      color: Color(0xFF6B7280),
+                                      fontSize: 7,
+                                      fontWeight: FontWeight.w500,
+                                      letterSpacing: 0.2,
+                                    ),
+                                  )
+                                : null,
                       )
                     : const SizedBox.shrink(),
               ),
@@ -1397,40 +1411,15 @@ class _CacheAnalogueRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        if (item.isCtm) ...[
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF7C3AED).withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                            child: const Text(
-                              'СТМ',
-                              style: TextStyle(
-                                color: Color(0xFF7C3AED),
-                                fontSize: 8,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.3,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                        ],
-                        Expanded(
-                          child: Text(
-                            item.name,
-                            style: const TextStyle(
-                              color: Color(0xFF1C1C2E),
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
-                        ),
-                      ],
+                    Text(
+                      item.name,
+                      style: const TextStyle(
+                        color: Color(0xFF1C1C2E),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                     if (item.manufacturer.isNotEmpty)
                       Text(

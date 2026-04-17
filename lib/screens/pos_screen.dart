@@ -1305,10 +1305,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
       }
 
-      // Fetch EDK offers from Caché using the short ids from GetSKUdetail
+      // Fetch EDK offers using the code from GetSKUdetail
       if (detail.skuCode != null && detail.skuCode!.isNotEmpty) {
         _fetchEdkOffers(drug, detail.skuCode!);
       }
+
+      // Fetch analogues (uses original s-code from drug.id)
+      _fetchCacheAnalogues(drug);
     }).catchError((e) {
       debugPrint('SKUDetail: error for ids="$ids" — $e');
     });
@@ -1346,20 +1349,26 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   /// Fetch analogues from Caché GetAnalog API (by s-code).
+  /// The original s-code from SearchByNameSKU is preserved in drug.id
+  /// as 'srv_{ids}' — extract it since drug.skuCode gets overwritten
+  /// by GetSKUdetail with the reference code.
   void _fetchCacheAnalogues(Drug drug) {
-    final skod = drug.skuCode;
-    if (skod == null || skod.isEmpty) return;
+    // Extract original s-code from drug.id (srv_{ids} format)
+    final effectiveSkod = drug.id.startsWith('srv_u_')
+        ? '' // u-code drugs don't have s-codes
+        : drug.id.replaceFirst('srv_', '');
+    if (effectiveSkod.isEmpty) return;
     if (_cacheAnaloguesForDrugId == drug.id) return;
 
     _cacheAnaloguesForDrugId = drug.id;
     setState(() => _cacheAnalogues = []);
-    debugPrint('CacheAnalog: fetching SKod=$skod for ${drug.name}');
+    debugPrint('CacheAnalog: fetching SKod=$effectiveSkod for ${drug.name}');
 
-    DrugService.fetchAnalogs(skod).then((results) {
+    DrugService.fetchAnalogs(effectiveSkod).then((results) {
       if (!mounted) return;
       if (_selectedDrug?.id != drug.id) return;
 
-      debugPrint('CacheAnalog: found ${results.length} results for SKod=$skod');
+      debugPrint('CacheAnalog: found ${results.length} results for SKod=$effectiveSkod');
       setState(() {
         _cacheAnalogues = results;
       });

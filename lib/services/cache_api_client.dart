@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -61,6 +62,30 @@ class CacheApiClient {
   /// Rlz sessionId — передається в кожному запиті після LoginRlz.
   String? sessionId;
 
+  /// Обмеження паралельних запитів до Caché (ліц��нзії обмежені).
+  /// Максимум 3 одноч��сних запити — запобігає вичерпанню ліцензій.
+  static const _maxConcurrent = 3;
+  int _activeRequests = 0;
+  final _requestQueue = <Completer<void>>[];
+
+  Future<void> _acquireSlot() async {
+    if (_activeRequests < _maxConcurrent) {
+      _activeRequests++;
+      return;
+    }
+    final completer = Completer<void>();
+    _requestQueue.add(completer);
+    await completer.future;
+    _activeRequests++;
+  }
+
+  void _releaseSlot() {
+    _activeRequests--;
+    if (_requestQueue.isNotEmpty) {
+      _requestQueue.removeAt(0).complete();
+    }
+  }
+
   /// Кодек windows-1251 для декодування кирилиці.
   /// Caché може віддавати в цьому кодуванні (залежить від настройки).
   static const _win1251 = 'windows-1251';
@@ -76,6 +101,18 @@ class CacheApiClient {
   static const _retryDelay = Duration(seconds: 2);
 
   Future<CacheResponse> call(
+    String serviceName, {
+    Map<String, String>? params,
+  }) async {
+    await _acquireSlot();
+    try {
+      return await _callInternal(serviceName, params: params);
+    } finally {
+      _releaseSlot();
+    }
+  }
+
+  Future<CacheResponse> _callInternal(
     String serviceName, {
     Map<String, String>? params,
   }) async {

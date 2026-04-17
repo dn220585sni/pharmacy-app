@@ -1359,7 +1359,7 @@ class _CacheAnalogueRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final inStock = item.qty > 0;
+    final hasBonus = item.bonus != null && item.bonus! > 0;
     return GestureDetector(
       onTap: onTap,
       child: MouseRegion(
@@ -1369,45 +1369,68 @@ class _CacheAnalogueRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
           child: Row(
             children: [
-              // Badge
+              // Bonus badge
               SizedBox(
                 width: kColBadge,
-                child: Container(
-                  width: 26,
-                  height: 26,
-                  decoration: BoxDecoration(
-                    color: inStock
-                        ? const Color(0xFFD1FAE5)
-                        : const Color(0xFFFEE2E2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Icon(
-                      inStock
-                          ? Icons.check_rounded
-                          : Icons.remove_rounded,
-                      size: 14,
-                      color: inStock
-                          ? const Color(0xFF059669)
-                          : const Color(0xFFEF4444),
-                    ),
-                  ),
-                ),
+                child: hasBonus
+                    ? Container(
+                        width: 26,
+                        height: 26,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFEF3C7),
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          '${item.bonus}',
+                          style: const TextStyle(
+                            color: Color(0xFFB45309),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
               ),
               // Name + manufacturer
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      item.name,
-                      style: const TextStyle(
-                        color: Color(0xFF1C1C2E),
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
+                    Row(
+                      children: [
+                        if (item.isCtm) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF7C3AED).withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                            child: const Text(
+                              'СТМ',
+                              style: TextStyle(
+                                color: Color(0xFF7C3AED),
+                                fontSize: 8,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
+                        Expanded(
+                          child: Text(
+                            item.name,
+                            style: const TextStyle(
+                              color: Color(0xFF1C1C2E),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                        ),
+                      ],
                     ),
                     if (item.manufacturer.isNotEmpty)
                       Text(
@@ -1427,10 +1450,8 @@ class _CacheAnalogueRow extends StatelessWidget {
                 child: Text(
                   '${item.qty}',
                   textAlign: TextAlign.right,
-                  style: TextStyle(
-                    color: inStock
-                        ? const Color(0xFF059669)
-                        : const Color(0xFFEF4444),
+                  style: const TextStyle(
+                    color: Color(0xFF6B7280),
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),

@@ -677,15 +677,19 @@ class DrugService {
   // Блокування залишку (sgVRoznSetLock)
   // ---------------------------------------------------------------------------
 
-  /// Заблокувати/розблокувати залишок товару на складі.
+  /// Зарезервувати/зняти резервування залишку товару на складі.
   ///
-  /// Викликається при зміні кількості товару в кошику.
-  /// [skod] — с-код товару (DrugSearchItem.ids / Drug.skuCode)
-  /// [qty] — кількість для блокування (0 = зняти блокування)
+  /// Caché записує резервування в локальну базу — інші каси бачать
+  /// зменшений доступний залишок. При qty=0 резервування знімається.
+  ///
+  /// [skod] — с-код товару (оригінальний ids з SearchByNameSKU)
+  /// [qty] — кількість для резервування (0 = зняти)
+  ///
+  /// Повертає true якщо резервування успішне, false якщо не вистачає залишку.
   ///
   /// Caché: `GET ?ServiceName=sgVRoznSetLock&SKod={skod}&qty={qty}`
-  static Future<void> setStockLock(String skod, int qty) async {
-    if (ApiConfig.useMock || skod.isEmpty) return;
+  static Future<bool> setStockLock(String skod, int qty) async {
+    if (ApiConfig.useMock || skod.isEmpty) return true;
 
     try {
       final response = await _api.call('sgVRoznSetLock', params: {
@@ -693,13 +697,18 @@ class DrugService {
         'qty': qty.toString(),
       });
 
+      debugPrint('sgVRoznSetLock RAW SKod=$skod qty=$qty: '
+          'status=${response.isOk}, result="${response.result}", '
+          'keys=${response.data.keys.toList()}, data=${response.data}');
+
       if (!response.isOk) {
         debugPrint('sgVRoznSetLock FAIL SKod=$skod qty=$qty: ${response.result}');
-      } else {
-        debugPrint('sgVRoznSetLock OK SKod=$skod qty=$qty');
+        return false;
       }
+      return true;
     } catch (e) {
       debugPrint('sgVRoznSetLock ERROR SKod=$skod qty=$qty: $e');
+      return false;
     }
   }
 

@@ -354,7 +354,7 @@ class _DrugListItemState extends State<DrugListItem> {
                   SizedBox(
                     width: kColStock,
                     child: Text(
-                      '${drug.stock}',
+                      drug.stockDisplay,
                       textAlign: TextAlign.center,
                       style: TextStyle(color: textSecondary, fontSize: 13),
                     ),

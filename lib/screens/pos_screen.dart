@@ -311,7 +311,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     });
     // Lock stock for prescription items
     for (final match in selectedMatches) {
-      _lockStock(match.drug, match.selectedQuantity);
+      _lockStock(match.drug, match.selectedQuantity.toDouble());
     }
     // Open cart panel for scanning → then F5 to checkout
   }
@@ -1070,6 +1070,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           category: '',
           price: item.price,
           stock: item.qty,
+          stockRaw: item.qtyRaw != item.qty.toDouble() ? item.qtyRaw : null,
           unit: 'шт',
           locationCode: item.shelf.isNotEmpty ? item.shelf : null,
           storageLocations: locations.isNotEmpty ? locations : null,
@@ -1545,17 +1546,27 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Зарезервувати залишок на сервері.
   /// Повертає [StockLockResult] з фактичною зарезервованою кількістю.
+  /// [qty] — десятковий дріб (0.5 = половина упаковки, 1.5 = упаковка + половина).
   /// При qty=0 знімає резервування.
-  Future<StockLockResult> _lockStock(Drug drug, int qty) async {
+  Future<StockLockResult> _lockStock(Drug drug, double qty) async {
     final skod = _stockSkod(drug);
-    if (skod.isEmpty) return StockLockResult(ok: true, grantedQty: qty.toDouble());
+    if (skod.isEmpty) return StockLockResult(ok: true, grantedQty: qty);
     return DrugService.setStockLock(skod, qty);
+  }
+
+  /// Обчислити кількість для резервування з CartItem.
+  /// Цілі упаковки = quantity, блістери = fractionalQty / unitsPerPackage.
+  double _cartItemLockQty(CartItem item) {
+    if (item.isFractional && item.drug.unitsPerPackage != null) {
+      return item.fractionalQty! / item.drug.unitsPerPackage!;
+    }
+    return item.quantity.toDouble();
   }
 
   /// Зняти резервування для всіх товарів в кошику.
   void _unlockAllCart() {
     for (final item in _cart) {
-      _lockStock(item.drug, 0);
+      _lockStock(item.drug, 0.0);
     }
   }
 
@@ -1568,14 +1579,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
         if (idx >= 0) _cart.removeAt(idx);
       });
-      _lockStock(drug, 0);
+      _lockStock(drug, 0.0);
       return;
     }
 
     final clamped = qty.clamp(1, drug.stock);
 
     // Спочатку резервуємо на сервері
-    final result = await _lockStock(drug, clamped);
+    final result = await _lockStock(drug, clamped.toDouble());
     if (!mounted) return;
 
     if (!result.ok) {
@@ -1647,12 +1658,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
         if (idx >= 0) _cart.removeAt(idx);
       });
-      _lockStock(drug, 0);
+      _lockStock(drug, 0.0);
       return;
     }
 
     final clamped = blisters.clamp(1, drug.unitsPerPackage!);
-    final result = await _lockStock(drug, 1);
+    final lockQty = clamped / drug.unitsPerPackage!;
+    final result = await _lockStock(drug, lockQty);
     if (!mounted) return;
     if (!result.ok || result.grantedQty <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1723,7 +1735,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       final match = ApiConfig.useMock
           ? item.drug.id == donorId
           : item.drug.ukod == donorId;
-      if (match) _lockStock(item.drug, 0);
+      if (match) _lockStock(item.drug, 0.0);
     }
     setState(() {
       dismissedEdkIds.add(donorId);
@@ -1740,7 +1752,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     });
     // Lock replacement
     final cartItem = _cart.firstWhere((i) => i.drug.id == replacement.id);
-    _lockStock(replacement, cartItem.isFractional ? 1 : cartItem.quantity);
+    _lockStock(replacement, _cartItemLockQty(cartItem));
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
@@ -1756,7 +1768,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       final match = ApiConfig.useMock
           ? item.drug.id == donorId
           : item.drug.ukod == donorId;
-      if (match) _lockStock(item.drug, 0);
+      if (match) _lockStock(item.drug, 0.0);
     }
     setState(() {
       dismissedEdkIds.add(donorId);
@@ -1775,7 +1787,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       }
       _selectedDrug = replacement;
     });
-    _lockStock(replacement, 1);
+    _lockStock(replacement, _cartItemLockQty(_cart.firstWhere((i) => i.drug.id == replacement.id)));
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
@@ -1799,7 +1811,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _selectedDrug = replacement;
     });
     final cartItem = _cart.firstWhere((i) => i.drug.id == replacement.id);
-    _lockStock(replacement, cartItem.quantity);
+    _lockStock(replacement, _cartItemLockQty(cartItem));
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
@@ -1823,7 +1835,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       }
       _selectedDrug = replacement;
     });
-    _lockStock(replacement, 1);
+    _lockStock(replacement, _cartItemLockQty(_cart.firstWhere((i) => i.drug.id == replacement.id)));
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
@@ -1831,21 +1843,26 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void _removeFromCart(int index) {
     final drug = _cart[index].drug;
     setState(() => _cart.removeAt(index));
-    _lockStock(drug, 0);
+    _lockStock(drug, 0.0);
   }
 
   void _increaseQty(int index) async {
     final item = _cart[index];
-    final newQty = item.isFractional
-        ? 1 // блістери — завжди 1 упаковка
-        : item.quantity + 1;
 
     if (!item.isFractional && item.quantity >= item.drug.stock) return;
     if (item.isFractional && item.fractionalQty! >= item.drug.unitsPerPackage!) return;
 
-    final result = await _lockStock(item.drug, newQty);
+    // Обчислити нову кількість для резервування (десятковий дріб)
+    final double newLockQty;
+    if (item.isFractional && item.drug.unitsPerPackage != null) {
+      newLockQty = (item.fractionalQty! + 1) / item.drug.unitsPerPackage!;
+    } else {
+      newLockQty = (item.quantity + 1).toDouble();
+    }
+
+    final result = await _lockStock(item.drug, newLockQty);
     if (!mounted) return;
-    if (!result.isFullyGranted(newQty)) {
+    if (result.grantedQty < newLockQty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(result.grantedQty > 0
@@ -1887,10 +1904,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       }
     });
     if (removedDrug != null) {
-      _lockStock(removedDrug!, 0);
+      _lockStock(removedDrug!, 0.0);
     } else if (index < _cart.length) {
-      final ci = _cart[index];
-      _lockStock(ci.drug, ci.isFractional ? 1 : ci.quantity);
+      _lockStock(_cart[index].drug, _cartItemLockQty(_cart[index]));
     }
   }
 
@@ -2173,7 +2189,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       }
     });
     final cartItem = _cart.firstWhere((c) => c.drug.id == drug.id);
-    _lockStock(drug, cartItem.isFractional ? 1 : cartItem.quantity);
+    _lockStock(drug, _cartItemLockQty(cartItem));
   }
 
   void _confirmPhone() {
@@ -2203,7 +2219,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       }
     });
     final cartItem = _cart.firstWhere((i) => i.drug.id == drug.id);
-    _lockStock(drug, cartItem.quantity);
+    _lockStock(drug, _cartItemLockQty(cartItem));
   }
 
   void _addOfferBlisterToCart(Drug drug) {

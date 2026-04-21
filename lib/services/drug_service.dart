@@ -19,7 +19,7 @@ class StockLockResult {
   });
 
   /// Чи резервування повне (запитана кількість = отримана).
-  bool isFullyGranted(int requested) => ok && grantedQty >= requested;
+  bool isFullyGranted(double requested) => ok && grantedQty >= requested;
 }
 
 /// Дані про партію товару на складі (з GetSKUprice).
@@ -57,6 +57,7 @@ class DrugSearchItem {
   final String manufacturer;
   final String shelf;
   final int qty;
+  final double qtyRaw;   // реальний залишок з дробовою частиною
   final double price;
   final String? expiryDate;  // термін придатності
   final String? comingPrice; // ціна приходу (для FarmaSell)
@@ -69,6 +70,7 @@ class DrugSearchItem {
     required this.manufacturer,
     required this.shelf,
     required this.qty,
+    this.qtyRaw = 0,
     required this.price,
     this.expiryDate,
     this.comingPrice,
@@ -90,7 +92,10 @@ class DrugSearchItem {
       qty: (double.tryParse(
                 json['qty']?.toString().replaceAll(',', '.') ?? '0',
               ) ?? 0.0)
-              .round(),
+              .floor(),
+      qtyRaw: double.tryParse(
+                json['qty']?.toString().replaceAll(',', '.') ?? '0',
+              ) ?? 0.0,
       price: double.tryParse(
             json['price']?.toString().replaceAll(',', '.') ?? '0',
           ) ??
@@ -188,7 +193,7 @@ class AnalogItem {
           ) ?? 0.0,
       qty: (double.tryParse(
                 json['kol']?.toString().replaceAll(',', '.') ?? json['qty']?.toString() ?? '0',
-              ) ?? 0.0).round(),
+              ) ?? 0.0).floor(),
       bonus: (bonusVal != null && bonusVal > 0) ? bonusVal : null,
       isAnalog: json['analog']?.toString() == '1',
       isCtm: json['ctm']?.toString() == '1',
@@ -705,21 +710,26 @@ class DrugService {
   /// лише 0.5 — повернеться qty=0.5.
   ///
   /// [skod] — с-код товару (оригінальний ids з SearchByNameSKU)
-  /// [qty] — кількість для резервування (0 = зняти)
+  /// [qty] — кількість для резервування (десятковий дріб, 0 = зняти).
+  ///         Наприклад: 1.5 = 1 упаковка + половина (блістер).
   ///
   /// Повертає [StockLockResult] з фактичною зарезервованою кількістю.
   ///
   /// Caché: `GET ?ServiceName=sgVRoznSetLock&SKod={skod}&qty={qty}`
   /// Response: `{"Status":"OK","SKod":"...","qty":N,"cause":"...","causeTitle":"...","causeHelsi":"...","kolPos":N,"sumTov":N}`
-  static Future<StockLockResult> setStockLock(String skod, int qty) async {
+  static Future<StockLockResult> setStockLock(String skod, double qty) async {
     if (ApiConfig.useMock || skod.isEmpty) {
-      return StockLockResult(ok: true, grantedQty: qty.toDouble());
+      return StockLockResult(ok: true, grantedQty: qty);
     }
 
     try {
+      // Передаємо десятковий дріб з крапкою (URL-параметр)
+      final qtyStr = qty == qty.roundToDouble()
+          ? qty.toInt().toString()
+          : qty.toStringAsFixed(2);
       final response = await _api.call('sgVRoznSetLock', params: {
         'SKod': skod,
-        'qty': qty.toString(),
+        'qty': qtyStr,
       });
 
       if (!response.isOk) {

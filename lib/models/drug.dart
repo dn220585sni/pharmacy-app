@@ -57,7 +57,8 @@ class Drug {
   final String manufacturer;
   final String category;
   final double price;
-  final int stock;
+  final int stock;         // ціле число для логіки кошика (floor від реального)
+  final double? stockRaw;  // реальний залишок з дробовою частиною (для відображення)
   final String unit;
   final bool requiresPrescription;
   final String? expiryDate; // "DD.MM.YYYY" (e.g. "01.08.2027")
@@ -109,6 +110,7 @@ class Drug {
     required this.category,
     required this.price,
     required this.stock,
+    this.stockRaw,
     required this.unit,
     this.requiresPrescription = false,
     this.expiryDate,
@@ -143,6 +145,25 @@ class Drug {
   });
 
   bool get isOutOfStock => stock == 0;
+
+  /// Залишок для відображення: дробовий якщо є, інакше цілий.
+  String get stockDisplay {
+    final raw = stockRaw ?? stock.toDouble();
+    if (raw == raw.floorToDouble()) return raw.toInt().toString();
+    // Показати як дріб: 1.5 → "1 1/2", 0.5 → "1/2", інше → "1,5"
+    final whole = raw.floor();
+    final frac = raw - whole;
+    if ((frac - 0.5).abs() < 0.01) {
+      return whole > 0 ? '$whole ½' : '½';
+    }
+    if ((frac - 0.25).abs() < 0.01) {
+      return whole > 0 ? '$whole ¼' : '¼';
+    }
+    if ((frac - 0.75).abs() < 0.01) {
+      return whole > 0 ? '$whole ¾' : '¾';
+    }
+    return raw.toStringAsFixed(1).replaceAll('.', ',');
+  }
 
   /// Чи можна продати товар поблістерно.
   /// true тільки якщо в упаковці більше 1 блістера/одиниці.
@@ -179,6 +200,7 @@ class Drug {
       category: category,
       price: price,
       stock: stock,
+      stockRaw: stockRaw,
       unit: unit,
       requiresPrescription: requiresPrescription,
       expiryDate: expiryDate,
@@ -230,6 +252,7 @@ class Drug {
       category: category,
       price: price,
       stock: stock,
+      stockRaw: stockRaw,
       unit: unit,
       requiresPrescription: requiresPrescription,
       expiryDate: expiryDate,
@@ -303,6 +326,7 @@ class Drug {
           : this.category,
       price: price,
       stock: stock,
+      stockRaw: stockRaw,
       unit: unit,
       requiresPrescription: requiresPrescription ?? this.requiresPrescription,
       expiryDate: expiryDate ?? this.expiryDate,

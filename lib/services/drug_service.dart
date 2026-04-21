@@ -4,6 +4,24 @@ import '../models/drug.dart';
 import 'api_config.dart';
 import 'cache_api_client.dart';
 
+/// Результат резервування залишку (sgVRoznSetLock).
+class StockLockResult {
+  final bool ok;              // сервер відповів
+  final double grantedQty;    // фактично зарезервована кількість
+  final String? cause;        // причина обмеження (рецептурний, заблокований тощо)
+  final String? causeTitle;   // текст обмеження для відображення
+
+  const StockLockResult({
+    required this.ok,
+    required this.grantedQty,
+    this.cause,
+    this.causeTitle,
+  });
+
+  /// Чи резервування повне (запитана кількість = отримана).
+  bool isFullyGranted(int requested) => ok && grantedQty >= requested;
+}
+
 /// Дані про партію товару на складі (з GetSKUprice).
 class StockBatch {
   final String skod;
@@ -682,14 +700,21 @@ class DrugService {
   /// Caché записує резервування в локальну базу — інші каси бачать
   /// зменшений доступний залишок. При qty=0 резервування знімається.
   ///
+  /// Сервер завжди повертає Status=OK (якщо запит коректний), але в полі
+  /// qty — фактично зарезервована кількість. Якщо запитали 3, а доступно
+  /// лише 0.5 — повернеться qty=0.5.
+  ///
   /// [skod] — с-код товару (оригінальний ids з SearchByNameSKU)
   /// [qty] — кількість для резервування (0 = зняти)
   ///
-  /// Повертає true якщо резервування успішне, false якщо не вистачає залишку.
+  /// Повертає [StockLockResult] з фактичною зарезервованою кількістю.
   ///
   /// Caché: `GET ?ServiceName=sgVRoznSetLock&SKod={skod}&qty={qty}`
-  static Future<bool> setStockLock(String skod, int qty) async {
-    if (ApiConfig.useMock || skod.isEmpty) return true;
+  /// Response: `{"Status":"OK","SKod":"...","qty":N,"cause":"...","causeTitle":"...","causeHelsi":"...","kolPos":N,"sumTov":N}`
+  static Future<StockLockResult> setStockLock(String skod, int qty) async {
+    if (ApiConfig.useMock || skod.isEmpty) {
+      return StockLockResult(ok: true, grantedQty: qty.toDouble());
+    }
 
     try {
       final response = await _api.call('sgVRoznSetLock', params: {
@@ -697,18 +722,29 @@ class DrugService {
         'qty': qty.toString(),
       });
 
-      debugPrint('sgVRoznSetLock RAW SKod=$skod qty=$qty: '
-          'status=${response.isOk}, result="${response.result}", '
-          'keys=${response.data.keys.toList()}, data=${response.data}');
-
       if (!response.isOk) {
         debugPrint('sgVRoznSetLock FAIL SKod=$skod qty=$qty: ${response.result}');
-        return false;
+        return StockLockResult(ok: false, grantedQty: 0);
       }
-      return true;
+
+      final grantedQty = double.tryParse(
+            response.data['qty']?.toString().replaceAll(',', '.') ?? '0',
+          ) ?? 0.0;
+      final cause = response.data['cause']?.toString() ?? '';
+      final causeTitle = response.data['causeTitle']?.toString() ?? '';
+
+      debugPrint('sgVRoznSetLock OK SKod=$skod requested=$qty granted=$grantedQty'
+          '${cause.isNotEmpty ? ' cause=$cause' : ''}');
+
+      return StockLockResult(
+        ok: true,
+        grantedQty: grantedQty,
+        cause: cause.isNotEmpty ? cause : null,
+        causeTitle: causeTitle.isNotEmpty ? causeTitle : null,
+      );
     } catch (e) {
       debugPrint('sgVRoznSetLock ERROR SKod=$skod qty=$qty: $e');
-      return false;
+      return StockLockResult(ok: false, grantedQty: 0);
     }
   }
 

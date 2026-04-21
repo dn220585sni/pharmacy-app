@@ -1158,9 +1158,8 @@ class _DrugPhoto extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      // Width fixed; height stretches to match the sibling text column via
-      // IntrinsicHeight in the parent Row.
       width: 90,
+      constraints: const BoxConstraints(minHeight: 90),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),

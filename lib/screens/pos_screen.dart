@@ -1544,11 +1544,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   /// Зарезервувати залишок на сервері.
-  /// Повертає true якщо резервування успішне.
-  /// При qty=0 знімає резервування (завжди true).
-  Future<bool> _lockStock(Drug drug, int qty) async {
+  /// Повертає [StockLockResult] з фактичною зарезервованою кількістю.
+  /// При qty=0 знімає резервування.
+  Future<StockLockResult> _lockStock(Drug drug, int qty) async {
     final skod = _stockSkod(drug);
-    if (skod.isEmpty) return true;
+    if (skod.isEmpty) return StockLockResult(ok: true, grantedQty: qty.toDouble());
     return DrugService.setStockLock(skod, qty);
   }
 
@@ -1575,11 +1575,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final clamped = qty.clamp(1, drug.stock);
 
     // Спочатку резервуємо на сервері
-    final ok = await _lockStock(drug, clamped);
-    if (!ok && mounted) {
+    final result = await _lockStock(drug, clamped);
+    if (!mounted) return;
+
+    if (!result.ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Недостатній залишок: ${drug.name}'),
+          content: Text('Помилка резервування: ${drug.name}'),
           duration: const Duration(seconds: 2),
           behavior: SnackBarBehavior.floating,
         ),
@@ -1587,14 +1589,49 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return;
     }
 
-    if (!mounted) return;
+    // Сервер міг видати менше ніж запитали (інша каса вже зарезервувала)
+    final granted = result.grantedQty.round();
+    if (granted <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${drug.name} — залишок зарезервовано іншою касою'),
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final actualQty = granted < clamped ? granted : clamped;
+    if (granted < clamped) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${drug.name} — доступно лише $granted шт (решта зарезервована)'),
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+
+    // Показати cause/causeTitle якщо є обмеження
+    if (result.causeTitle != null && result.causeTitle!.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${drug.name}: ${result.causeTitle}'),
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFFB45309),
+        ),
+      );
+    }
+
     setState(() {
       final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
       if (idx >= 0) {
-        _cart[idx].quantity = clamped;
+        _cart[idx].quantity = actualQty;
         _cart[idx].fractionalQty = null; // exit fractional mode
       } else {
-        _cart.add(CartItem(drug: drug, quantity: clamped));
+        _cart.add(CartItem(drug: drug, quantity: actualQty));
       }
     });
     // Show ЄДК offer when a drug is first added to cart
@@ -1615,19 +1652,18 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
 
     final clamped = blisters.clamp(1, drug.unitsPerPackage!);
-    final ok = await _lockStock(drug, 1);
-    if (!ok && mounted) {
+    final result = await _lockStock(drug, 1);
+    if (!mounted) return;
+    if (!result.ok || result.grantedQty <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Недостатній залишок: ${drug.name}'),
-          duration: const Duration(seconds: 2),
+          content: Text('${drug.name} — залишок зарезервовано іншою касою'),
+          duration: const Duration(seconds: 3),
           behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
-
-    if (!mounted) return;
     setState(() {
       final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
       if (idx >= 0) {
@@ -1807,19 +1843,20 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (!item.isFractional && item.quantity >= item.drug.stock) return;
     if (item.isFractional && item.fractionalQty! >= item.drug.unitsPerPackage!) return;
 
-    final ok = await _lockStock(item.drug, newQty);
-    if (!ok && mounted) {
+    final result = await _lockStock(item.drug, newQty);
+    if (!mounted) return;
+    if (!result.isFullyGranted(newQty)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Недостатній залишок: ${item.drug.name}'),
-          duration: const Duration(seconds: 2),
+          content: Text(result.grantedQty > 0
+              ? '${item.drug.name} — доступно лише ${result.grantedQty.round()} шт'
+              : '${item.drug.name} — залишок зарезервовано іншою касою'),
+          duration: const Duration(seconds: 3),
           behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
-
-    if (!mounted) return;
     setState(() {
       if (item.isFractional) {
         item.fractionalQty = item.fractionalQty! + 1;

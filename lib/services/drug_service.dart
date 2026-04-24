@@ -89,7 +89,7 @@ class DrugSearchItem {
       ids: json['ids']?.toString() ?? '',
       ukod: json['ukod']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
-      nameUkr: _nonEmpty(json['NameUkr']),
+      nameUkr: _nonEmpty(json['nameukr'] ?? json['NameUkr']),
       manufacturer: json['manufacturer']?.toString() ?? '',
       shelf: json['shelf']?.toString() ?? '',
       qty: (double.tryParse(
@@ -299,7 +299,7 @@ class SKUDetailResult {
 
     return SKUDetailResult(
       name: _nonEmpty(json['name']),
-      nameUkr: _nonEmpty(json['NameUkr']),
+      nameUkr: _nonEmpty(json['nameukr'] ?? json['NameUkr']),
       manufacturer: _nonEmpty(json['manufacturer']),
       category: _nonEmpty(json['category']),
       inn: _nonEmpty(json['inn']),

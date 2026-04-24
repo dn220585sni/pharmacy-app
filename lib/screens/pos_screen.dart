@@ -1065,7 +1065,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         final hasHH = item.comingPrice != null && item.comingCode != null;
         serverDrugs.add(Drug(
           id: 'srv_${item.ids}',
-          name: item.name,
+          name: item.nameUkr ?? item.name,
+          nameUkr: item.nameUkr,
           manufacturer: item.manufacturer,
           category: '',
           price: item.price,
@@ -1090,7 +1091,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         if (item.qty > 0) continue; // skip in-stock (already in s-codes)
         serverDrugs.add(Drug(
           id: 'srv_u_${item.ids}',
-          name: item.name,
+          name: item.nameUkr ?? item.name,
+          nameUkr: item.nameUkr,
           manufacturer: item.manufacturer,
           category: '',
           price: item.price,
@@ -1256,6 +1258,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           orElse: () => drug,
         );
         final updatedDrug = currentDrug.copyWithSKUDetail(
+          nameUkr: detail.nameUkr,
           inn: detail.inn,
           dosageForm: detail.dosageForm,
           dosage: detail.dosage,
@@ -1449,7 +1452,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
         final drug = Drug(
           id: 'srv_$barcode',
-          name: result.name ?? 'Невідомо',
+          name: result.nameUkr ?? result.name ?? 'Невідомо',
+          nameUkr: result.nameUkr,
           manufacturer: result.manufacturer ?? '',
           category: '',
           price: result.retailPrice,

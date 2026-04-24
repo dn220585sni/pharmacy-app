@@ -53,7 +53,8 @@ class StockBatch {
 class DrugSearchItem {
   final String ids;         // s-код (унікальний код приходу)
   final String ukod;        // u-код (код товару в цілому, для GetSKUdetail)
-  final String name;
+  final String name;        // назва (оригінальна, зазвичай рос.)
+  final String? nameUkr;    // назва українською (з NameUkr)
   final String manufacturer;
   final String shelf;
   final int qty;
@@ -67,6 +68,7 @@ class DrugSearchItem {
     required this.ids,
     this.ukod = '',
     required this.name,
+    this.nameUkr,
     required this.manufacturer,
     required this.shelf,
     required this.qty,
@@ -87,6 +89,7 @@ class DrugSearchItem {
       ids: json['ids']?.toString() ?? '',
       ukod: json['ukod']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
+      nameUkr: _nonEmpty(json['NameUkr']),
       manufacturer: json['manufacturer']?.toString() ?? '',
       shelf: json['shelf']?.toString() ?? '',
       qty: (double.tryParse(
@@ -111,6 +114,7 @@ class DrugSearchItem {
 class DrugLookupResult {
   final bool found;
   final String? name;
+  final String? nameUkr;
   final String? manufacturer;
   final String? shelf;
   final String? error;
@@ -118,6 +122,7 @@ class DrugLookupResult {
   DrugLookupResult({
     required this.found,
     this.name,
+    this.nameUkr,
     this.manufacturer,
     this.shelf,
     this.error,
@@ -128,6 +133,7 @@ class DrugLookupResult {
 class DrugPriceResult {
   final bool found;
   final String? name;
+  final String? nameUkr;
   final String? manufacturer;
   final String? stelazh;
   final String? vitrina;
@@ -139,6 +145,7 @@ class DrugPriceResult {
   DrugPriceResult({
     required this.found,
     this.name,
+    this.nameUkr,
     this.manufacturer,
     this.stelazh,
     this.vitrina,
@@ -255,12 +262,14 @@ class SKUDetailResult {
   final String? analogueGroup;
   final String? imageUrl;
   final String? intakeWarning;
+  final String? nameUkr;     // українська назва
   final String? skuCode;      // числовий код товару (ids з відповіді API)
   final String? comingPrice;  // ціна приходу (for FarmaSell Helping Hand)
   final String? comingCode;   // код приходу (for FarmaSell Helping Hand)
 
   SKUDetailResult({
     this.name,
+    this.nameUkr,
     this.manufacturer,
     this.category,
     this.inn,
@@ -290,6 +299,7 @@ class SKUDetailResult {
 
     return SKUDetailResult(
       name: _nonEmpty(json['name']),
+      nameUkr: _nonEmpty(json['NameUkr']),
       manufacturer: _nonEmpty(json['manufacturer']),
       category: _nonEmpty(json['category']),
       inn: _nonEmpty(json['inn']),
@@ -442,6 +452,7 @@ class DrugService {
     return DrugLookupResult(
       found: true,
       name: response.data['Name']?.toString(),
+      nameUkr: response.data['NameUkr']?.toString(),
       manufacturer: response.data['Proiz']?.toString(),
       shelf: response.data['Shelf']?.toString(),
     );
@@ -466,6 +477,7 @@ class DrugService {
     return DrugLookupResult(
       found: true,
       name: response.data['Name']?.toString(),
+      nameUkr: response.data['NameUkr']?.toString(),
       manufacturer: response.data['Proiz']?.toString(),
       shelf: response.data['Shelf']?.toString(),
     );
@@ -510,6 +522,7 @@ class DrugService {
     return DrugPriceResult(
       found: true,
       name: response.data['Name']?.toString(),
+      nameUkr: response.data['NameUkr']?.toString(),
       manufacturer: response.data['Proiz']?.toString(),
       stelazh: response.data['stelazh']?.toString(),
       vitrina: response.data['vitrina']?.toString(),

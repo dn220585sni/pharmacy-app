@@ -75,7 +75,7 @@ class CartItemWidget extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  item.drug.name,
+                  item.drug.displayName,
                   style: TextStyle(
                     color: isScanned
                         ? const Color(0xFF1E7DC8)

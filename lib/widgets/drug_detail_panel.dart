@@ -358,7 +358,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    drug.name,
+                    drug.displayName,
                     style: const TextStyle(
                       color: Color(0xFF1C1C2E),
                       fontSize: 13.5,

@@ -160,7 +160,7 @@ class EdkPanel extends StatelessWidget {
 
                   // Name
                   Text(
-                    drug.name,
+                    drug.displayName,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Color(0xFF1C1C2E),

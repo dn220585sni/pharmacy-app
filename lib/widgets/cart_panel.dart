@@ -1604,7 +1604,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              item.drug.name,
+                              item.drug.displayName,
                               style: const TextStyle(
                                 color: Color(0xFF92400E),
                                 fontSize: 11.5,

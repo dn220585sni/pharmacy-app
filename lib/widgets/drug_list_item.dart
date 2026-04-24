@@ -295,7 +295,7 @@ class _DrugListItemState extends State<DrugListItem> {
                       children: [
                         Expanded(
                           child: Text(
-                            drug.name,
+                            drug.displayName,
                             style: TextStyle(
                               color: textPrimary,
                               fontSize: 13.5,

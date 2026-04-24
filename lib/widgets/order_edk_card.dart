@@ -160,7 +160,7 @@ class OrderEdkCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        drug.name,
+                        drug.displayName,
                         style: const TextStyle(
                           color: Color(0xFF1C1C2E),
                           fontSize: 13,

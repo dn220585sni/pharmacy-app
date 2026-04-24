@@ -54,6 +54,7 @@ class DrugUsageInfo {
 class Drug {
   final String id;
   final String name;
+  final String? nameUkr;   // українська назва (з NameUkr)
   final String manufacturer;
   final String category;
   final double price;
@@ -106,6 +107,7 @@ class Drug {
   const Drug({
     required this.id,
     required this.name,
+    this.nameUkr,
     required this.manufacturer,
     required this.category,
     required this.price,
@@ -143,6 +145,9 @@ class Drug {
     this.comingPrice,
     this.comingCode,
   });
+
+  /// Назва для відображення: українська якщо є, інакше оригінальна.
+  String get displayName => (nameUkr != null && nameUkr!.isNotEmpty) ? nameUkr! : name;
 
   bool get isOutOfStock => stock == 0;
 
@@ -196,6 +201,7 @@ class Drug {
     return Drug(
       id: id,
       name: name,
+      nameUkr: nameUkr,
       manufacturer: manufacturer,
       category: category,
       price: price,
@@ -248,6 +254,7 @@ class Drug {
     return Drug(
       id: id,
       name: name,
+      nameUkr: nameUkr,
       manufacturer: manufacturer,
       category: category,
       price: price,
@@ -290,6 +297,7 @@ class Drug {
 
   /// Create copy enriched with data from GetSKUdetail API.
   Drug copyWithSKUDetail({
+    String? nameUkr,
     String? inn,
     String? dosageForm,
     String? dosage,
@@ -317,7 +325,8 @@ class Drug {
 
     return Drug(
       id: id,
-      name: name,
+      name: nameUkr ?? this.nameUkr ?? name,
+      nameUkr: nameUkr ?? this.nameUkr,
       manufacturer: (manufacturer != null && this.manufacturer.isEmpty)
           ? manufacturer
           : this.manufacturer,

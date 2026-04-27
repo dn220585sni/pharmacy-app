@@ -358,6 +358,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   final Map<String, double> _helpingHandPrices = {}; // drugId → discounted price
   bool _showHelpingHandMarkers = false;
   Timer? _helpingHandTimer;
+  bool _helpingHandSuppressed = false; // true = не показувати сердечка для поточного пошуку
 
   @override
   void initState() {
@@ -954,13 +955,16 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
     // ── Рука допомоги + server search (runs regardless of debounce) ─────
     _helpingHandTimer?.cancel();
+    _helpingHandSuppressed = false; // новий пошук — скидаємо suppress
     if (query.isEmpty) {
       if (_showHelpingHandMarkers) {
         setState(() => _showHelpingHandMarkers = false);
       }
     } else if (!_showHelpingHandMarkers) {
-      _helpingHandTimer = Timer(const Duration(seconds: 3), () {
-        if (mounted) setState(() => _showHelpingHandMarkers = true);
+      _helpingHandTimer = Timer(const Duration(seconds: 7), () {
+        if (mounted && !_helpingHandSuppressed) {
+          setState(() => _showHelpingHandMarkers = true);
+        }
       });
     }
 
@@ -1492,6 +1496,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void _moveSelection(int delta) {
     if (_searchResults.isEmpty) return;
 
+    // Suppress helping hand markers on cursor movement
+    _suppressHelpingHand();
+
     final currentIdx = _selectedDrug == null
         ? -1
         : _searchResults.indexWhere((d) => d.id == _selectedDrug!.id);
@@ -1567,6 +1574,18 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     return item.quantity.toDouble();
   }
 
+  /// Придушити показ сердечок Рука допомоги для поточного пошуку.
+  /// Спрацьовує при русі курсором або введенні кількості.
+  void _suppressHelpingHand() {
+    if (!_helpingHandSuppressed) {
+      _helpingHandSuppressed = true;
+      _helpingHandTimer?.cancel();
+      if (_showHelpingHandMarkers) {
+        setState(() => _showHelpingHandMarkers = false);
+      }
+    }
+  }
+
   /// Зняти резервування для всіх товарів в кошику.
   void _unlockAllCart() {
     for (final item in _cart) {
@@ -1575,6 +1594,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   void _setQuantity(Drug drug, int qty) async {
+    _suppressHelpingHand();
     final wasInCart = _cart.any((item) => item.drug.id == drug.id);
 
     if (qty <= 0) {
@@ -1654,6 +1674,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   void _setFractionalQuantity(Drug drug, int blisters) async {
+    _suppressHelpingHand();
     if (!drug.canSplitByBlister) return;
     final wasInCart = _cart.any((item) => item.drug.id == drug.id);
 

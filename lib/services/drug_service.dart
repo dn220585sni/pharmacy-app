@@ -63,6 +63,10 @@ class DrugSearchItem {
   final String? expiryDate;  // термін придатності
   final String? comingPrice; // ціна приходу (для FarmaSell)
   final String? comingCode;  // код приходу (для FarmaSell)
+  final int? bonus;          // бонус фармацевту
+  final bool isOwnBrand;     // СТМ
+  final String? category;    // категорія
+  final String? dosageForm;  // лікарська форма
 
   DrugSearchItem({
     required this.ids,
@@ -77,6 +81,10 @@ class DrugSearchItem {
     this.expiryDate,
     this.comingPrice,
     this.comingCode,
+    this.bonus,
+    this.isOwnBrand = false,
+    this.category,
+    this.dosageForm,
   });
 
   static String? _nonEmpty(dynamic v) {
@@ -90,7 +98,7 @@ class DrugSearchItem {
       ukod: json['ukod']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       nameUkr: _nonEmpty(json['nameukr'] ?? json['NameUkr']),
-      manufacturer: json['manufacturer']?.toString() ?? '',
+      manufacturer: (json['manufacturer'] ?? json['manufacture'])?.toString() ?? '',
       shelf: json['shelf']?.toString() ?? '',
       qty: (double.tryParse(
                 json['qty']?.toString().replaceAll(',', '.') ?? '0',
@@ -106,6 +114,10 @@ class DrugSearchItem {
       expiryDate: _nonEmpty(json['expiryDate']),
       comingPrice: _nonEmpty(json['comingPrice']),
       comingCode: _nonEmpty(json['comingCode']),
+      bonus: int.tryParse(json['bonus']?.toString() ?? ''),
+      isOwnBrand: json['isOwnBrand']?.toString() == '1',
+      category: _nonEmpty(json['category']),
+      dosageForm: _nonEmpty(json['dosageForm']),
     );
   }
 }
@@ -768,6 +780,58 @@ class DrugService {
     } catch (e) {
       debugPrint('sgVRoznSetLock ERROR SKod=$skod qty=$qty: $e');
       return StockLockResult(ok: false, grantedQty: 0);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Топ-препарати для кешу (GetTopDrugs)
+  // ---------------------------------------------------------------------------
+
+  /// Завантажити топ популярних препаратів для локального кешу.
+  ///
+  /// Викликається один раз при старті зміни. Результати використовуються
+  /// для миттєвого пошуку без звернення до сервера.
+  ///
+  /// Caché: `GET ?ServiceName=GetTopDrugs`
+  static Future<List<DrugSearchItem>> fetchTopDrugs() async {
+    if (ApiConfig.useMock) return [];
+
+    try {
+      final response = await _api.call('GetTopDrugs');
+
+      debugPrint('GetTopDrugs RAW: status=${response.isOk}, '
+          'keys=${response.data.keys.toList()}');
+
+      if (!response.isOk) {
+        debugPrint('GetTopDrugs FAIL: ${response.result}');
+        return [];
+      }
+
+      // Try common array keys
+      final itemsJson = (response.data['items']
+          ?? response.data['Items']
+          ?? response.data['drugs']
+          ?? response.data['Drugs']) as List<dynamic>?;
+
+      if (itemsJson == null || itemsJson.isEmpty) {
+        debugPrint('GetTopDrugs: no items array found');
+        // Maybe the items are at root level?
+        if (response.data.containsKey('ids') || response.data.containsKey('name')) {
+          debugPrint('GetTopDrugs: single item at root?');
+        }
+        return [];
+      }
+
+      debugPrint('GetTopDrugs: found ${itemsJson.length} items, '
+          'first keys=${itemsJson.first is Map ? (itemsJson.first as Map).keys.toList() : "not a map"}');
+
+      return itemsJson
+          .whereType<Map<String, dynamic>>()
+          .map((j) => DrugSearchItem.fromJson(j))
+          .toList();
+    } catch (e) {
+      debugPrint('GetTopDrugs ERROR: $e');
+      return [];
     }
   }
 

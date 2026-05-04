@@ -81,6 +81,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   Timer? _localFilterTimer;
   bool _isServerLookup = false;
 
+  // ── Top drugs cache (pre-loaded at shift start) ────────────────────────
+  /// Cached top drugs for instant local search.
+  List<DrugSearchItem> _topDrugsCache = [];
+
   // ── Product Browser (drug safety tags + external analogues) ─────────────
   /// Drug IDs we've already tried fetching from Product Browser.
   final _productBrowserFetched = <String>{};
@@ -533,6 +537,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             if (!r.success) debugPrint('Skarb login warning: ${r.error}');
           });
         }
+        // Pre-load top drugs cache for instant search
+        _loadTopDrugsCache();
       }
     });
   }
@@ -1005,7 +1011,42 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       if (query.isEmpty) {
         _searchResults = existingServerDrugs;
       } else {
-        _searchResults = existingServerDrugs;
+        // Show instant results from top drugs cache while server searches
+        if (existingServerDrugs.isEmpty && _topDrugsCache.isNotEmpty) {
+          final lowerQuery = query.toLowerCase();
+          final cached = _topDrugsCache
+              .where((item) =>
+                  item.name.toLowerCase().contains(lowerQuery) ||
+                  (item.nameUkr?.toLowerCase().contains(lowerQuery) ?? false))
+              .take(30)
+              .map((item) => Drug(
+                    id: 'srv_${item.ids}',
+                    name: item.nameUkr ?? item.name,
+                    nameUkr: item.nameUkr,
+                    manufacturer: item.manufacturer,
+                    category: item.category ?? '',
+                    price: item.price,
+                    stock: item.qty,
+                    stockRaw: item.qtyRaw != item.qty.toDouble() ? item.qtyRaw : null,
+                    unit: 'шт',
+                    locationCode: item.shelf.isNotEmpty ? item.shelf : null,
+                    expiryDate: item.expiryDate,
+                    comingPrice: item.comingPrice,
+                    comingCode: item.comingCode,
+                    ukod: item.ukod.isNotEmpty ? item.ukod : null,
+                    skuCode: item.ids,
+                    pharmacistBonus: item.bonus,
+                    isOwnBrand: item.isOwnBrand,
+                    dosageForm: item.dosageForm,
+                    hasHelpingHand: item.comingPrice != null && item.comingCode != null,
+                  ))
+              .toList();
+          if (cached.isNotEmpty) {
+            _searchResults = cached;
+          }
+        } else {
+          _searchResults = existingServerDrugs;
+        }
       }
 
       _focusQtyOnSelect = false;
@@ -1018,6 +1059,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       } else {
         _selectedDrug = null;
       }
+    });
+  }
+
+  /// Pre-load top drugs from Caché for instant local search.
+  void _loadTopDrugsCache() {
+    DrugService.fetchTopDrugs().then((items) {
+      if (!mounted) return;
+      _topDrugsCache = items;
+      debugPrint('TopDrugsCache: loaded ${items.length} items');
+    }).catchError((e) {
+      debugPrint('TopDrugsCache: error — $e');
     });
   }
 

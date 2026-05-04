@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../models/drug.dart';
 import '../models/edk_offer.dart';
 import '../models/nearby_pharmacy.dart';
+import '../services/drug_service.dart';
+import 'drug_detail_panel.dart' show CacheAnalogueRow;
+import 'drug_list_item.dart' show kColBadge;
 
 /// Right-panel card shown when a pharmacist selects an out-of-stock drug.
 ///
@@ -17,6 +20,12 @@ class OutOfStockPanel extends StatefulWidget {
 
   /// Nearby pharmacies that have this drug in stock.
   final List<NearbyPharmacy> nearbyPharmacies;
+
+  /// Analogues from Caché GetAnalog API.
+  final List<AnalogItem> cacheAnalogues;
+
+  /// Called when user selects an analogue.
+  final void Function(Drug)? onSelectAnalogue;
 
   /// Whether the loyalty phone number has been entered.
   final bool hasPhone;
@@ -38,6 +47,8 @@ class OutOfStockPanel extends StatefulWidget {
     this.onAddBlister,
     required this.onDismissEdk,
     this.nearbyPharmacies = const [],
+    this.cacheAnalogues = const [],
+    this.onSelectAnalogue,
     this.hasPhone = false,
     required this.onFocusPhone,
     this.onReserve,
@@ -642,6 +653,10 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
   Widget _buildAlternativeOptions() {
     return Column(
       children: [
+        // ── Analogues section ─────────────────────────────────────────
+        if (widget.cacheAnalogues.isNotEmpty)
+          _buildAnaloguesSection(),
+
         // ── Segmented toggle ──────────────────────────────────────────
         _buildAltToggle(),
 
@@ -678,6 +693,67 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
             icon: Icons.local_shipping_outlined,
             onAction: () => widget.onOrderForClient?.call(),
           ),
+      ],
+    );
+  }
+
+  // ── Analogues section ────────────────────────────────────────────────────────
+
+  Widget _buildAnaloguesSection() {
+    final analogs = widget.cacheAnalogues.take(5).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+          child: Row(
+            children: [
+              SizedBox(width: kColBadge),
+              const Expanded(
+                child: Text('Аналоги в наявності',
+                    style: TextStyle(
+                        color: Color(0xFF1E7DC8),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(
+                width: 50,
+                child: Text('Зал.',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                        color: Color(0xFF9CA3AF),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500)),
+              ),
+              const SizedBox(
+                width: 72,
+                child: Text('Ціна',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                        color: Color(0xFF9CA3AF),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500)),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1, thickness: 1, color: Color(0xFFF3F4F6)),
+        ...analogs.asMap().entries.map((e) => CacheAnalogueRow(
+              item: e.value,
+              isEven: e.key.isEven,
+              onTap: () => widget.onSelectAnalogue?.call(Drug(
+                id: 'srv_u_${e.value.ukod}',
+                name: e.value.name,
+                manufacturer: e.value.manufacturer,
+                category: '',
+                price: e.value.price,
+                stock: e.value.qty,
+                unit: 'шт',
+                ukod: e.value.ukod.isNotEmpty ? e.value.ukod : null,
+                pharmacistBonus: e.value.bonus,
+              )),
+            )),
+        const Divider(height: 8, color: Color(0xFFE5E7EB)),
       ],
     );
   }
@@ -891,7 +967,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
             const Padding(
               padding: EdgeInsets.all(14),
               child: Text(
-                'Немає аптек з наявністю поруч',
+                'В радіусі 10 км аптек з наявністю цього препарату не виявлено.\n\nЗапропонуйте клієнту аналог з переліку вище або замовте доставку препарату в вашу аптеку протягом 1-2 днів.',
                 style: TextStyle(
                   color: Color(0xFF9CA3AF),
                   fontSize: 12.5,

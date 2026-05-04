@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/drug.dart';
+import '../models/nearby_pharmacy.dart';
 
 /// Product Browser API (anc.ua) — drug safety tags & product info.
 ///
@@ -282,6 +284,126 @@ class ProductBrowserService {
         return UsageStatus.unknown;
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Pharmacy availability & booking (network search)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Fetch list of pharmacies that have a specific product in stock.
+  ///
+  /// [slug] — product slug (e.g. "bepanten-maz-5--tuba-30-g-606")
+  /// Returns list of [NearbyPharmacy] with stock, price, address, hours.
+  static Future<List<NearbyPharmacy>> fetchPharmaciesWithStock(
+    String slug, {
+    int city = _defaultCity,
+  }) async {
+    if (slug.isEmpty) return [];
+    try {
+      final url = Uri.parse('$_baseUrl/$slug/pharmacies?city=$city');
+      final response = await _client.get(url, headers: {
+        'Accept': 'application/json',
+      }).timeout(const Duration(seconds: 12));
+
+      if (response.statusCode != 200) return [];
+
+      final json = jsonDecode(utf8.decode(response.bodyBytes))
+          as Map<String, dynamic>;
+      final pharmacies = json['pharmacies'] as List? ?? [];
+
+      debugPrint('PharmacySearch: found ${pharmacies.length} pharmacies for $slug');
+
+      return pharmacies
+          .map((p) => NearbyPharmacy.fromProductBrowserJson(
+              p as Map<String, dynamic>))
+          .where((ph) => ph.stockQty > 0)
+          .toList();
+    } catch (e) {
+      debugPrint('PharmacySearch ERROR: $e');
+      return [];
+    }
+  }
+
+  /// Create an unregistered order (booking) at a pharmacy for a customer.
+  ///
+  /// [pharmacyId] — target pharmacy ID
+  /// [productId] — product code from ProductBrowser
+  /// [price] — price at that pharmacy
+  /// [quantity] — number of packages
+  /// [phone] — customer phone number (+380...)
+  /// [employeeName] — pharmacist who placed the order
+  static Future<BookingResult> createBooking({
+    required String pharmacyId,
+    required String productId,
+    required double price,
+    int quantity = 1,
+    required String phone,
+    String? employeeName,
+  }) async {
+    try {
+      final url = Uri.parse(
+        'https://anc.ua/productbrowser/v2/ru/basket/order/unregistered',
+      );
+
+      final body = {
+        'pharmacy_id': pharmacyId,
+        'phone_number': phone,
+        'payment_type': 'CASH',
+        'source': 'OTHERSHOP',
+        'first_name': '',
+        'middle_name': '',
+        'coupon': '',
+        'farmasell': <dynamic>[],
+        'additional_info': employeeName != null
+            ? 'Бронювання з іншої аптеки (employee:$employeeName)'
+            : 'Бронювання з іншої аптеки',
+        'items': [
+          {
+            'product_id': productId,
+            'quantity': quantity,
+            'price': price,
+            'numerator': 1,
+          },
+        ],
+      };
+
+      final response = await _client
+          .post(
+            url,
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final json = jsonDecode(utf8.decode(response.bodyBytes))
+            as Map<String, dynamic>;
+        final orderId = json['id']?.toString() ?? '';
+        debugPrint('Booking OK: orderId=$orderId pharmacyId=$pharmacyId');
+        return BookingResult(success: true, orderId: orderId);
+      } else {
+        debugPrint('Booking FAIL: HTTP ${response.statusCode} ${response.body}');
+        return BookingResult(
+          success: false,
+          error: 'Помилка бронювання (${response.statusCode})',
+        );
+      }
+    } catch (e) {
+      debugPrint('Booking ERROR: $e');
+      return BookingResult(success: false, error: 'Помилка з\'єднання');
+    }
+  }
+}
+
+/// Result of a booking (reservation) at a pharmacy.
+class BookingResult {
+  final bool success;
+  final String? orderId;
+  final String? error;
+
+  const BookingResult({required this.success, this.orderId, this.error});
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

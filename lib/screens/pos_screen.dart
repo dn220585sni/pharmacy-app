@@ -39,7 +39,6 @@ import '../widgets/robot_panel.dart';
 import '../services/api_config.dart';
 import '../data/mock_messages.dart';
 import '../models/prescription.dart';
-import '../data/mock_nearby_pharmacies.dart';
 import '../models/nearby_pharmacy.dart';
 import '../widgets/top_bar.dart';
 import '../widgets/drug_list_item.dart';
@@ -84,6 +83,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   // ── Top drugs cache (pre-loaded at shift start) ────────────────────────
   /// Cached top drugs for instant local search.
   List<DrugSearchItem> _topDrugsCache = [];
+
+  // ── Nearby pharmacies (for out-of-stock drugs) ─────────────────────────
+  List<NearbyPharmacy> _nearbyPharmacies = [];
+  String? _nearbyPharmaciesForDrugId;
 
   // ── Product Browser (drug safety tags + external analogues) ─────────────
   /// Drug IDs we've already tried fetching from Product Browser.
@@ -985,19 +988,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       );
     } else if (query.length >= 2) {
       // ── Server name search ────────────────────────────────────────────
-      // Normalize Ukrainian → Russian for Caché (stores names in Russian)
-      final serverQuery = query
-          .replaceAll('і', 'и')
-          .replaceAll('І', 'И')
-          .replaceAll('ї', 'и')
-          .replaceAll('Ї', 'И')
-          .replaceAll('є', 'е')
-          .replaceAll('Є', 'Е')
-          .replaceAll('ґ', 'г')
-          .replaceAll('Ґ', 'Г');
+      // Send original query — Caché now searches both name and nameukr
       _nameSearchTimer = Timer(
         const Duration(milliseconds: 300),
-        () => _searchByNameOnServer(serverQuery, originalQuery: query),
+        () => _searchByNameOnServer(query),
       );
     }
   }
@@ -1059,6 +1053,56 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       } else {
         _selectedDrug = null;
       }
+    });
+  }
+
+  /// Fetch pharmacies that have the selected out-of-stock drug.
+  void _fetchNearbyPharmacies(Drug drug) {
+    if (_nearbyPharmaciesForDrugId == drug.id) return;
+    if (!drug.isOutOfStock) return;
+
+    _nearbyPharmaciesForDrugId = drug.id;
+    setState(() => _nearbyPharmacies = []);
+
+    // Need slug from ProductBrowser — use the one we've already fetched
+    final slug = drug.productBrowserSlug;
+    if (slug == null || slug.isEmpty) {
+      // Try to find slug by searching
+      ProductBrowserService.searchProducts(drug.name, limit: 1).then((results) {
+        if (!mounted || results.isEmpty) return;
+        if (_selectedDrug?.id != drug.id) return;
+        _fetchPharmaciesBySlug(drug, results.first.link);
+      });
+      return;
+    }
+    _fetchPharmaciesBySlug(drug, slug);
+  }
+
+  void _fetchPharmaciesBySlug(Drug drug, String slug) {
+    ProductBrowserService.fetchPharmaciesWithStock(
+      slug,
+      city: ApiConfig.cityId,
+    ).then((pharmacies) {
+      if (!mounted) return;
+      if (_selectedDrug?.id != drug.id) return;
+      // Розрахувати відстань і відсортувати від найближчої
+      final withDistance = pharmacies
+          .map((ph) => ph.withDistanceFrom(
+                ApiConfig.pharmacyLat, ApiConfig.pharmacyLng))
+          .toList()
+        ..sort((a, b) {
+          // Open first, then by distance
+          if (a.isOpen != b.isOpen) return a.isOpen ? -1 : 1;
+          return (a.distanceKm ?? 999).compareTo(b.distanceKm ?? 999);
+        });
+      // Показати макс. 3 найближчі аптеки в радіусі 10 км
+      final nearby = withDistance
+          .where((ph) => ph.distanceKm != null && ph.distanceKm! <= 10.0)
+          .take(3)
+          .toList();
+      setState(() => _nearbyPharmacies = nearby);
+    }).catchError((e) {
+      debugPrint('NearbyPharmacies: error — $e');
     });
   }
 
@@ -1209,6 +1253,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _fetchProductBrowserInfo(_selectedDrug!);
         _fetchExternalAnalogues(_selectedDrug!);
         _fetchCacheAnalogues(_selectedDrug!);
+        if (_selectedDrug!.isOutOfStock) _fetchNearbyPharmacies(_selectedDrug!);
       }
     } catch (_) {
       if (!mounted) return;
@@ -1570,6 +1615,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _fetchExternalAnalogues(newDrug);
     _fetchCacheAnalogues(newDrug);
     _fetchSKUDetail(newDrug);
+    if (newDrug.isOutOfStock) _fetchNearbyPharmacies(newDrug);
   }
 
   void _scrollToIndex(int index) {
@@ -1990,18 +2036,64 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   double get _cartTotal => _cart.fold(0, (s, i) => s + i.total);
   int get _cartItemCount => _cart.length;
 
-  void _reserveAtPharmacy(NearbyPharmacy pharmacy) {
-    final drugName = _selectedDrug?.name ?? '';
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => ReservationSuccessDialog(
-        drugName: drugName,
-        pharmacyAddress: pharmacy.displayAddress,
-      ),
-    ).then((_) {
-      _clearCart();
-    });
+  void _reserveAtPharmacy(NearbyPharmacy pharmacy) async {
+    final drug = _selectedDrug;
+    if (drug == null) return;
+
+    // Get product ID from ProductBrowser slug
+    final slug = drug.productBrowserSlug;
+    String? productId;
+    if (slug != null && slug.isNotEmpty) {
+      // Extract ID from slug: "bepanten-maz-5--tuba-30-g-606" → "606"
+      final parts = slug.split('-');
+      productId = parts.isNotEmpty ? parts.last : null;
+    }
+
+    if (productId == null) {
+      // Try search to find product ID
+      final results = await ProductBrowserService.searchProducts(drug.name, limit: 1);
+      if (results.isNotEmpty) {
+        productId = results.first.id.toString();
+      }
+    }
+
+    if (productId == null || !mounted) return;
+
+    // Get customer phone
+    final phone = _customerLoyalty?.phone ?? '';
+    final employeeName = _currentPharmacist?.user;
+
+    // Create booking via API
+    final result = await ProductBrowserService.createBooking(
+      pharmacyId: pharmacy.id,
+      productId: productId,
+      price: pharmacy.price,
+      phone: phone.isNotEmpty ? phone : '+380000000000',
+      employeeName: employeeName,
+    );
+
+    if (!mounted) return;
+
+    if (result.success) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => ReservationSuccessDialog(
+          drugName: drug.displayName,
+          pharmacyAddress: pharmacy.displayAddress,
+        ),
+      ).then((_) {
+        _clearCart();
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.error ?? 'Помилка бронювання'),
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   void _orderForClient() {
@@ -2449,13 +2541,21 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return;
     }
 
-    // External analogue (from anc.ua) — search by name to find in our catalog
-    final searchName = drug.name
-        .replaceAll(RegExp(r'[№#].*'), '') // strip trailing "№30" etc.
-        .trim();
-    if (searchName.length >= 2) {
-      _searchController.text = searchName;
-      // _filterDrugs is triggered by listener; server search follows
+    // Analogue not in current search results — look up Ukrainian name by ukod
+    // then search by it.
+    if (drug.ukod != null && drug.ukod!.isNotEmpty) {
+      DrugService.searchByNameUcodes(drug.name).then((items) {
+        if (!mounted) return;
+        // Find item with matching ukod to get nameukr
+        final match = items.cast<DrugSearchItem?>().firstWhere(
+          (item) => item!.ukod == drug.ukod,
+          orElse: () => null,
+        );
+        final searchName = match?.nameUkr ?? match?.name ?? drug.name;
+        _searchController.text = searchName;
+      });
+    } else if (drug.name.length >= 2) {
+      _searchController.text = drug.name;
     }
   }
 
@@ -2778,7 +2878,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                               ? () => _addOosEdkBlister(_selectedDrug!)
                               : null,
                       onDismissEdk: () {},
-                      nearbyPharmacies: mockNearbyPharmacies,
+                      nearbyPharmacies: _nearbyPharmacies,
+                      cacheAnalogues: _cacheAnalogues,
+                      onSelectAnalogue: _selectAnalogue,
                       hasPhone: _isCustomerAuthorized,
                       onFocusPhone: _focusPhoneField,
                       onReserve: _reserveAtPharmacy,
@@ -3158,6 +3260,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             _fetchExternalAnalogues(drug);
             _fetchCacheAnalogues(drug);
             _fetchSKUDetail(drug);
+            if (drug.isOutOfStock) _fetchNearbyPharmacies(drug);
           },
           onQuantityChanged: (qty) => _setQuantity(drug, qty),
           onFractionalChanged: (blisters) =>

@@ -20,4 +20,13 @@ class ApiConfig {
   /// true  = кнопка «Робот» видима, per-item привезення активне
   /// false = функціонал робота прихований
   static const bool hasRobot = true;
+
+  /// Поточна аптека.
+  /// Дніпро, вул. Сергієнка Василя, 48 (АНЦ), GlobID=152
+  static const String pharmacyGlobId = '152';
+  static const double pharmacyLat = 48.4394;
+  static const double pharmacyLng = 35.0156;
+
+  /// Місто для ProductBrowser API (5 = Дніпро).
+  static const int cityId = 5;
 }

@@ -530,7 +530,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
           child: ListView(
             children: [
               ...widget.cacheAnalogues.asMap().entries.map((e) =>
-                  _CacheAnalogueRow(
+                  CacheAnalogueRow(
                     item: e.value,
                     isEven: e.key.isEven,
                     onTap: () => widget.onSelectAnalogue(Drug(
@@ -1345,12 +1345,12 @@ class _UsagePropCell extends StatelessWidget {
 // Analogue row (from API search)
 // ═══════════════════════════════════════════════════════════════════════════
 
-class _CacheAnalogueRow extends StatelessWidget {
+class CacheAnalogueRow extends StatelessWidget {
   final AnalogItem item;
   final bool isEven;
   final VoidCallback? onTap;
 
-  const _CacheAnalogueRow({
+  const CacheAnalogueRow({
     required this.item,
     required this.isEven,
     this.onTap,

@@ -462,8 +462,8 @@ class _DrugListItemState extends State<DrugListItem> {
                               style: TextStyle(
                                 color:
                                     isDimmed ? textSecondary : const Color(0xFF1C1C2E),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
+                                fontSize: 14.5,
+                                fontWeight: widget.isSelected ? FontWeight.w700 : FontWeight.w600,
                               ),
                             ),
                           ],

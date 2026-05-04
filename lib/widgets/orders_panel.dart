@@ -1628,7 +1628,7 @@ class OrdersPanelState extends State<OrdersPanel>
           height: 38,
           child: OutlinedButton.icon(
             onPressed: () => _showMergeOrdersDialog(),
-            icon: const Icon(Icons.merge_rounded, size: 15),
+            icon: const _MergeIcon(size: 15),
             label: const Text('Об\'єднати',
                 style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
             style: OutlinedButton.styleFrom(
@@ -1690,8 +1690,7 @@ class OrdersPanelState extends State<OrdersPanel>
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.merge_rounded,
-                        size: 20, color: Color(0xFF1E7DC8)),
+                    const _MergeIcon(size: 20, color: Color(0xFF1E7DC8)),
                     const SizedBox(width: 10),
                     const Expanded(
                       child: Text(
@@ -3503,6 +3502,50 @@ class _OrderItemRow extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Merge icon — two intersecting circles (Mastercard-style)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _MergeIcon extends StatelessWidget {
+  final double size;
+  final Color color;
+
+  const _MergeIcon({required this.size, this.color = const Color(0xFF1C1C2E)});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(painter: _MergeIconPainter(color: color)),
+    );
+  }
+}
+
+class _MergeIconPainter extends CustomPainter {
+  final Color color;
+  const _MergeIconPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.height * 0.38;
+    final overlap = size.width * 0.15;
+    final cy = size.height / 2;
+    final cx = size.width / 2;
+
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size.height * 0.12;
+
+    canvas.drawCircle(Offset(cx - overlap, cy), r, paint);
+    canvas.drawCircle(Offset(cx + overlap, cy), r, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _MergeIconPainter old) => old.color != color;
 }
 
 

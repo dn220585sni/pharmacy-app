@@ -181,7 +181,8 @@ class DrugPriceResult {
 /// Аналог товару від Caché (з GetAnalog).
 class AnalogItem {
   final String ukod;          // u-код товару
-  final String name;          // назва
+  final String name;          // назва (оригінальна)
+  final String? nameUkr;     // назва українською
   final String manufacturer;  // виробник
   final double price;         // ціна
   final int qty;              // залишок
@@ -189,9 +190,13 @@ class AnalogItem {
   final bool isAnalog;        // 1=аналог
   final bool isCtm;           // 1=СТМ (власна торгова марка)
 
+  /// Назва для відображення: українська якщо є, інакше оригінальна.
+  String get displayName => (nameUkr != null && nameUkr!.isNotEmpty) ? nameUkr! : name;
+
   const AnalogItem({
     required this.ukod,
     required this.name,
+    this.nameUkr,
     required this.manufacturer,
     required this.price,
     required this.qty,
@@ -206,6 +211,9 @@ class AnalogItem {
     return AnalogItem(
       ukod: json['UKod']?.toString() ?? json['ukod']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
+      nameUkr: (json['nameukr'] ?? json['NameUkr'])?.toString().isNotEmpty == true
+          ? (json['nameukr'] ?? json['NameUkr']).toString()
+          : null,
       manufacturer: json['proiz']?.toString() ?? json['manufacturer']?.toString() ?? '',
       price: double.tryParse(
             json['price']?.toString().replaceAll(',', '.') ?? '0',

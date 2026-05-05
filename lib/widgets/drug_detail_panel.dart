@@ -535,7 +535,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
                     isEven: e.key.isEven,
                     onTap: () => widget.onSelectAnalogue(Drug(
                       id: 'srv_u_${e.value.ukod}',
-                      name: e.value.name,
+                      name: e.value.displayName,
                       manufacturer: e.value.manufacturer,
                       category: '',
                       price: e.value.price,
@@ -1411,7 +1411,7 @@ class CacheAnalogueRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      item.name,
+                      item.displayName,
                       style: const TextStyle(
                         color: Color(0xFF1C1C2E),
                         fontSize: 11.5,

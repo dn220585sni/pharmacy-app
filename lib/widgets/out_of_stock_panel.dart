@@ -743,7 +743,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
               isEven: e.key.isEven,
               onTap: () => widget.onSelectAnalogue?.call(Drug(
                 id: 'srv_u_${e.value.ukod}',
-                name: e.value.name,
+                name: e.value.displayName,
                 manufacturer: e.value.manufacturer,
                 category: '',
                 price: e.value.price,

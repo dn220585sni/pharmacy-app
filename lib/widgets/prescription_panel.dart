@@ -16,6 +16,7 @@ import 'prescription_refusal_dialog.dart';
 class PrescriptionPanel extends StatefulWidget {
   final VoidCallback onClose;
   final List<Drug> drugCatalog;
+  final Future<List<Drug>> Function(String query)? onSearchDrugs;
   final void Function(List<PrescriptionMatch> selectedMatches,
       Prescription prescription, SkarbPrescriptionData? skarbData) onAddToCart;
 
@@ -23,6 +24,7 @@ class PrescriptionPanel extends StatefulWidget {
     super.key,
     required this.onClose,
     required this.drugCatalog,
+    this.onSearchDrugs,
     required this.onAddToCart,
   });
 
@@ -290,6 +292,8 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
       _matches = matches;
       _errorMessage = null;
     });
+
+    _searchServerIfEmpty(rx);
   }
 
   /// Lookup prescription from CIET 1303 API.
@@ -350,6 +354,8 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
       _matches = matches;
       _errorMessage = null;
     });
+
+    _searchServerIfEmpty(rx);
   }
 
   /// Lookup prescription from Skarb Cloud API.
@@ -411,6 +417,47 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
       _matches = matches;
       _errorMessage = null;
     });
+
+    // If no local matches — search server
+    _searchServerIfEmpty(rx, skarbParticipants: skarbData.participants);
+  }
+
+  /// If local matches are empty, search server by medication name/INN.
+  Future<void> _searchServerIfEmpty(Prescription rx, {
+    List<SkarbParticipant>? skarbParticipants,
+  }) async {
+    if (_matches.isNotEmpty || widget.onSearchDrugs == null) return;
+
+    // Search by each item's medication name
+    final allDrugs = <Drug>[];
+    final searchTerms = <String>{};
+    for (final item in rx.items) {
+      if (item.inn != null && item.inn!.isNotEmpty) searchTerms.add(item.inn!);
+      if (item.helsiName.isNotEmpty) searchTerms.add(item.helsiName);
+    }
+    if (searchTerms.isEmpty && rx.medication.isNotEmpty) {
+      searchTerms.add(rx.medication);
+    }
+
+    for (final term in searchTerms) {
+      // Search by first word (brand/INN name) — full name with dosage won't match
+      final firstWord = term.split(RegExp(r'\s+')).first;
+      if (firstWord.length < 2) continue;
+      final drugs = await widget.onSearchDrugs!(firstWord);
+      allDrugs.addAll(drugs);
+    }
+
+    if (!mounted || allDrugs.isEmpty) return;
+
+    final matches = findPrescriptionMatches(
+      rx,
+      allDrugs,
+      skarbParticipants: skarbParticipants,
+    );
+
+    if (matches.isNotEmpty) {
+      setState(() => _matches = matches);
+    }
   }
 
   static PrescriptionStatus _parseSkarbStatus(String raw) {
@@ -646,9 +693,11 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
                       const Icon(Icons.error_outline,
                           size: 15, color: Color(0xFFEF4444)),
                       const SizedBox(width: 8),
-                      Text(_errorMessage!,
-                          style: const TextStyle(
-                              fontSize: 12, color: Color(0xFFDC2626))),
+                      Expanded(
+                        child: Text(_errorMessage!,
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFFDC2626))),
+                      ),
                     ],
                   ),
                 ),

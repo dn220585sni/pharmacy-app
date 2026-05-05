@@ -187,13 +187,20 @@ List<PrescriptionMatch> findPrescriptionMatches(
 }) {
   final matches = <PrescriptionMatch>[];
   for (final item in rx.items) {
-    if (item.inn == null) continue;
-    final innLower = item.inn!.toLowerCase();
+    final innLower = item.inn?.toLowerCase();
+    final nameLower = item.helsiName.toLowerCase().split(RegExp(r'\s+')).first;
+
     final candidates = drugs
-        .where((d) =>
-            d.inn != null &&
-            d.inn!.toLowerCase() == innLower &&
-            d.stock > 0)
+        .where((d) {
+          if (d.stock <= 0) return false;
+          // Match by INN (exact)
+          if (innLower != null && d.inn != null &&
+              d.inn!.toLowerCase() == innLower) return true;
+          // Match by name (contains first word of medication name)
+          if (nameLower.length >= 3 &&
+              d.name.toLowerCase().contains(nameLower)) return true;
+          return false;
+        })
         .toList();
     // Sort: lowest copayment first (best for patient)
     candidates.sort((a, b) {

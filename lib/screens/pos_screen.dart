@@ -287,6 +287,32 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     });
   }
 
+  /// Search drugs on server for prescription matching.
+  Future<List<Drug>> _searchDrugsForPrescription(String query) async {
+    if (query.isEmpty) return [];
+    try {
+      final items = await DrugService.searchByName(query);
+      return items
+          .where((item) => item.qty > 0)
+          .map((item) => Drug(
+                id: 'srv_${item.ids}',
+                name: item.nameUkr ?? item.name,
+                nameUkr: item.nameUkr,
+                manufacturer: item.manufacturer,
+                category: '',
+                price: item.price,
+                stock: item.qty,
+                stockRaw: item.qtyRaw != item.qty.toDouble() ? item.qtyRaw : null,
+                unit: 'шт',
+                ukod: item.ukod.isNotEmpty ? item.ukod : null,
+                skuCode: item.ids,
+              ))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   void _addPrescriptionToCart(
       List<PrescriptionMatch> selectedMatches,
       Prescription rx,
@@ -2773,6 +2799,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         key: _prescriptionPanelKey,
         onClose: _togglePrescription,
         drugCatalog: _searchResults,
+        onSearchDrugs: _searchDrugsForPrescription,
         onAddToCart: _addPrescriptionToCart,
       );
     }

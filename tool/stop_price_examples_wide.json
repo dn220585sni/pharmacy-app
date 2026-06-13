@@ -1,0 +1,63 @@
+﻿{
+    "generatedAt":  "2026-06-09T07:54:56.1324641Z",
+    "source":  {
+                   "baseUrl":  "http://10.90.77.66:57772/csp/user/Kab.Service.cls",
+                   "loginUser":  "Audit",
+                   "prefixes":  [
+                                    "а",
+                                    "б",
+                                    "в",
+                                    "г",
+                                    "д",
+                                    "е",
+                                    "ж",
+                                    "з",
+                                    "и",
+                                    "й",
+                                    "к",
+                                    "л",
+                                    "м",
+                                    "н",
+                                    "о",
+                                    "п",
+                                    "р",
+                                    "с",
+                                    "т",
+                                    "у",
+                                    "ф",
+                                    "х",
+                                    "ц",
+                                    "ч",
+                                    "ш",
+                                    "щ",
+                                    "ъ",
+                                    "ы",
+                                    "ь",
+                                    "э",
+                                    "ю",
+                                    "я",
+                                    "ґ",
+                                    "є",
+                                    "і",
+                                    "ї"
+                                ],
+                   "ukodsScanned":  554
+               },
+    "summary":  {
+                    "withActions":  0,
+                    "withoutActions":  554,
+                    "errors":  0,
+                    "totalActionsObserved":  0,
+                    "uniqueActionIds":  0,
+                    "uniquePraviloStrings":  0
+                },
+    "uniqueIds":  {
+
+                  },
+    "uniquePraviloss":  {
+
+                        },
+    "examples":  [
+
+                 ]
+}

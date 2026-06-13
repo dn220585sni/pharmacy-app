@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../models/social_project.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // SOCIAL PROJECTS PANEL — right-panel selector for social programs.
@@ -9,12 +10,15 @@ class SocialProjectsPanel extends StatefulWidget {
   final VoidCallback onClose;
   final String? selectedProject;
   final ValueChanged<String?> onProjectSelected;
+  /// Список соц-програм (server + always-shown local) — з `pos_screen`.
+  final List<SocialProject> projects;
 
   const SocialProjectsPanel({
     super.key,
     required this.onClose,
     required this.selectedProject,
     required this.onProjectSelected,
+    required this.projects,
   });
 
   @override
@@ -25,26 +29,12 @@ class SocialProjectsPanelState extends State<SocialProjectsPanel> {
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode();
 
-  static const _projects = [
-    'Пакунок малюка',
-    'єПідтримка',
-    'Нацкешбек',
-    'Дарниця +',
-    'Знижка УБД',
-    'Медикард',
-    'EPRUF',
-    'АЗОВ супровід',
-    'Серце Азовсталі',
-    'Серце Азовсталі Ліки',
-    'Асістанс',
-    'Карітас',
-    'Сонафарм',
-  ];
-
-  List<String> get _filtered {
+  List<SocialProject> get _filtered {
     final q = _searchController.text.trim().toLowerCase();
-    if (q.isEmpty) return _projects;
-    return _projects.where((p) => p.toLowerCase().contains(q)).toList();
+    if (q.isEmpty) return widget.projects;
+    return widget.projects
+        .where((p) => p.name.toLowerCase().contains(q))
+        .toList();
   }
 
   @override
@@ -209,11 +199,11 @@ class SocialProjectsPanelState extends State<SocialProjectsPanel> {
       itemCount: filtered.length,
       itemBuilder: (context, index) {
         final project = filtered[index];
-        final isSelected = widget.selectedProject == project;
+        final isSelected = widget.selectedProject == project.name;
 
         return GestureDetector(
           onTap: () {
-            widget.onProjectSelected(isSelected ? null : project);
+            widget.onProjectSelected(isSelected ? null : project.name);
           },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
@@ -234,7 +224,7 @@ class SocialProjectsPanelState extends State<SocialProjectsPanel> {
             child: Row(
               children: [
                 Icon(
-                  _projectIcon(project),
+                  _projectIcon(project.name),
                   size: 18,
                   color: isSelected
                       ? const Color(0xFF1E7DC8)
@@ -243,7 +233,7 @@ class SocialProjectsPanelState extends State<SocialProjectsPanel> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    project,
+                    project.name,
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight:

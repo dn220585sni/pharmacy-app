@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/cart_item.dart';
+import '../models/stop_price_action.dart';
+import 'stop_price_info_dialog.dart';
 
 class CartItemWidget extends StatelessWidget {
   final CartItem item;
@@ -13,6 +15,17 @@ class CartItemWidget extends StatelessWidget {
   /// Callback when the pharmacist taps the price (simulates barcode scan).
   final VoidCallback? onScan;
 
+  /// Ціна за одиницю після всіх знижок з сервера (`GetSumSkid`).
+  /// Якщо менша за `drug.price` — UI показує style "стара → нова" (як рука допомоги).
+  final double? serverUnitPrice;
+
+  /// Підсумок по позиції з сервера. Якщо `null` — рендеримо локальний `item.total`.
+  final double? serverCost;
+
+  /// Активні акції/стоп-ціни на товар (з `GetStopPriceUKod`).
+  /// Якщо непустий — під ціною показуємо бейдж із коротким `opis`.
+  final List<StopPriceAction> actions;
+
   const CartItemWidget({
     super.key,
     required this.item,
@@ -21,11 +34,142 @@ class CartItemWidget extends StatelessWidget {
     required this.onRemove,
     this.isScanned = false,
     this.onScan,
+    this.serverUnitPrice,
+    this.serverCost,
+    this.actions = const [],
   });
+
+  /// Чи є будь-яка знижка (серверна або локальна "рука допомоги").
+  bool get _hasAnyDiscount {
+    if (item.hasDiscount) return true;
+    if (serverUnitPrice == null) return false;
+    return serverUnitPrice! < item.drug.price - 0.001;
+  }
+
+  /// Ціна за одиницю для відображення — server pricing якщо є, інакше effective.
+  double get _displayUnitPrice => serverUnitPrice ?? item.effectivePrice;
+
+  /// Найвигідніша знижка (за реальною економією в грн), що ВЖЕ діє на рядок при
+  /// поточній кількості [qty] — базове правило (безумовне) + qty-правила, поріг
+  /// яких досягнуто (`kol ≤ qty`). Умовні правила з недосягнутим порогом не
+  /// враховуються. null — якщо жодна знижка ще не діє.
+  StopPriceRule? _bestAppliedRule(int qty) {
+    final unit = item.drug.price;
+    StopPriceRule? best;
+    double bestSaving = 0;
+    for (final a in actions) {
+      // Акції з набором діють у зв'язці з іншим препаратом — умовні; їх
+      // застосовує лише сервер (ловимо через _serverUnitDiscount). Не рахуємо
+      // їх власним правилом, інакше знижка показалась би передчасно.
+      if (a.nabor.isNotEmpty) continue;
+      for (final r in a.appliedRules(qty)) {
+        final pct = r.discountPercent;
+        final uah = r.discountUah;
+        final saving = pct != null ? unit * pct.abs() / 100 : (uah ?? 0);
+        if (saving <= 0) continue;
+        if (saving > bestSaving) {
+          bestSaving = saving;
+          best = r;
+        }
+      }
+    }
+    return best;
+  }
+
+  /// Серверна знижка на одиницю (роздріб − [serverUnitPrice]), якщо сервер уже
+  /// застосував її до позиції (`GetSumSkid`). Покриває умови, що залежать від
+  /// усього кошика — напр. знижку у зв'язці з іншим препаратом. 0 якщо нема.
+  double get _serverUnitDiscount {
+    final sp = serverUnitPrice;
+    final retail = item.drug.price;
+    if (sp == null || retail <= 0 || sp >= retail - 0.001) return 0;
+    return retail - sp;
+  }
+
+  /// Пояснювальний бейдж знижки + явна іконка «і». Показує знижку, що ВЖЕ діє на
+  /// позицію: безумовну (з 1 уп), або умовну коли умову виконано — досягнуто
+  /// поріг кількості, чи сервер застосував знижку у зв'язці з іншим препаратом.
+  /// Поки умова не виконана — бейджа нема.
+  /// По кліку на «і» відкривається попап з поясненням акції.
+  /// Повертає null, якщо знижка на позицію ще не діє.
+  Widget? _buildDiscountBadge(BuildContext context) {
+    if (actions.isEmpty) return null;
+    // 1) Знижка з власного правила (безумовна або qty-поріг досягнуто).
+    var appliedText = _bestAppliedRule(item.quantity)?.appliedText;
+    // 2) Інакше — якщо сервер усе ж знизив ціну (напр. зв'язка з іншим товаром).
+    if (appliedText == null) {
+      final disc = _serverUnitDiscount;
+      if (disc > 0) {
+        final pct = disc / item.drug.price * 100;
+        final f = pct == pct.roundToDouble()
+            ? pct.toStringAsFixed(0)
+            : pct.toStringAsFixed(1);
+        appliedText = '−$f%';
+      }
+    }
+    if (appliedText == null) return null;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xFFDCFCE7),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: const Color(0xFF86EFAC)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.local_offer_rounded,
+                  size: 10, color: Color(0xFF16A34A)),
+              const SizedBox(width: 4),
+              Text(
+                appliedText,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: Color(0xFF15803D),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 5),
+        // Явна іконка «і» — попап з поясненням акції (замість hover-tooltip).
+        InkWell(
+          onTap: () => _showActionInfo(context),
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 18,
+            height: 18,
+            decoration: const BoxDecoration(
+              color: Color(0xFFE8F3FB),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.info_outline_rounded,
+                size: 12, color: Color(0xFF1E7DC8)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Попап з поясненням акції(й) — спільний хелпер (той самий, що в картці).
+  void _showActionInfo(BuildContext context) {
+    showStopPriceInfoDialog(
+      context,
+      drugName: item.drug.displayName,
+      actions: actions,
+      qty: item.quantity,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final canScan = onScan != null && !isScanned;
+    final discountBadge = _buildDiscountBadge(context);
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -96,33 +240,31 @@ class CartItemWidget extends StatelessWidget {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                ] else if (item.hasDiscount) ...[
+                ] else if (_hasAnyDiscount) ...[
                   Row(
                     children: [
-                      // Heart icon
-                      const Icon(Icons.favorite_rounded, size: 10, color: Color(0xFFE8A0B4)),
-                      const SizedBox(width: 4),
-                      // Original price crossed out
+                      // Стара ціна — закреслена, контрастний сірий
                       Text(
                         '${item.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
                         style: const TextStyle(
-                          color: Color(0xFFD1D5DB),
+                          color: Color(0xFF9CA3AF),
                           fontSize: 10.5,
+                          fontWeight: FontWeight.w500,
                           decoration: TextDecoration.lineThrough,
-                          decorationColor: Color(0xFFD1D5DB),
+                          decorationColor: Color(0xFF9CA3AF),
                         ),
                       ),
-                      const SizedBox(width: 5),
-                      // Arrow
-                      const Icon(Icons.arrow_forward_rounded, size: 10, color: Color(0xFF9CA3AF)),
-                      const SizedBox(width: 5),
-                      // Discount price
+                      const SizedBox(width: 6),
+                      // Тег-іконка + акційна ціна — єдиний стиль з таблицею/карткою
+                      const Icon(Icons.local_offer_rounded,
+                          size: 10, color: Color(0xFF16A34A)),
+                      const SizedBox(width: 3),
                       Text(
-                        '${item.effectivePrice.toStringAsFixed(2).replaceAll('.', ',')} ₴ × ${item.displayQty}',
+                        '${_displayUnitPrice.toStringAsFixed(2).replaceAll('.', ',')} ₴ × ${item.displayQty}',
                         style: const TextStyle(
-                          color: Color(0xFF1E7DC8),
+                          color: Color(0xFF15803D),
                           fontSize: 11,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
@@ -137,6 +279,10 @@ class CartItemWidget extends StatelessWidget {
                       fontSize: 11,
                     ),
                   ),
+                if (discountBadge != null) ...[
+                  const SizedBox(height: 4),
+                  discountBadge,
+                ],
               ],
             ),
           ),
@@ -197,7 +343,7 @@ class CartItemWidget extends StatelessWidget {
                       )
                     : null,
                 child: Text(
-                  '${item.total.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                  '${(serverCost ?? item.total).toStringAsFixed(2).replaceAll('.', ',')} ₴',
                   textAlign: TextAlign.right,
                   style: TextStyle(
                     color: isScanned

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/drug.dart';
+import '../services/pakunok_service.dart';
 
 // Fixed column widths — must match the header in pos_screen.dart
 const double kColBadge = 44.0;
@@ -12,6 +13,12 @@ const double kColManufacturer = 82.0;
 
 class DrugListItem extends StatefulWidget {
   final Drug drug;
+
+  /// Готова безумовна акційна ціна зі стоп-ціни (вже з урахуванням % або грн) —
+  /// для показу прямо в таблиці (без закресленої старої). Рахується в
+  /// `StopPriceService.promoPrice`. null = безумовної акції немає.
+  final double? promoPrice;
+
   final bool isSelected;
   final bool shouldFocusQty;
   final bool isEvenRow;
@@ -29,6 +36,7 @@ class DrugListItem extends StatefulWidget {
   const DrugListItem({
     super.key,
     required this.drug,
+    this.promoPrice,
     required this.isSelected,
     required this.shouldFocusQty,
     required this.isEvenRow,
@@ -258,6 +266,73 @@ class _DrugListItemState extends State<DrugListItem> {
     );
   }
 
+  /// Комірка ціни. Якщо діє безумовна стоп-ціна — показуємо ЛИШЕ акційну ціну
+  /// (роздрібну рахуємо приховано) з маркером-тегом, щоб фармацевт одразу називав
+  /// знижену ціну. Яка саме акція — видно в кошику (попап «і»). Інакше — звичайна
+  /// ціна + опційний маркер «руки допомоги».
+  Widget _buildPriceCell(bool isDimmed, Color textSecondary) {
+    final drug = widget.drug;
+    final promo = widget.promoPrice;
+    final hasPromo = promo != null && promo > 0 && promo < drug.price;
+
+    if (hasPromo) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(right: 3),
+            child: Icon(Icons.local_offer_rounded,
+                size: 11, color: Color(0xFF16A34A)),
+          ),
+          Text(
+            promo.toStringAsFixed(2).replaceAll('.', ','),
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              color: isDimmed ? textSecondary : const Color(0xFF15803D),
+              fontSize: 14.5,
+              fontWeight: widget.isSelected ? FontWeight.w700 : FontWeight.w600,
+            ),
+          ),
+        ],
+      );
+    }
+
+    final showHand =
+        drug.hasHelpingHand && !isDimmed && widget.showHelpingHandMarker;
+    return MouseRegion(
+      cursor: showHand ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: showHand ? widget.onHelpingHandTap : null,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (showHand)
+              const Padding(
+                padding: EdgeInsets.only(right: 3),
+                child: Icon(Icons.favorite_rounded,
+                    size: 10, color: Color(0xFFE8A0B4)),
+              ),
+            Text(
+              drug.price > 0
+                  ? drug.price.toStringAsFixed(2).replaceAll('.', ',')
+                  : '—',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                color: isDimmed ? textSecondary : const Color(0xFF1C1C2E),
+                fontSize: 14.5,
+                fontWeight:
+                    widget.isSelected ? FontWeight.w700 : FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final drug = widget.drug;
@@ -306,28 +381,28 @@ class _DrugListItemState extends State<DrugListItem> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if (drug.id.startsWith('srv_'))
+                        if (PakunokService.isPakunok(drug))
                           Container(
                             margin: const EdgeInsets.only(left: 6),
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 5, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFEFF6FF),
+                              color: const Color(0xFFFCE7F3),
                               borderRadius: BorderRadius.circular(3),
                               border: Border.all(
-                                color: const Color(0xFFBFDBFE), width: 0.5),
+                                color: const Color(0xFFF9A8D4), width: 0.5),
                             ),
                             child: const Text(
-                              'Caché',
+                              'ПМ',
                               style: TextStyle(
-                                color: Color(0xFF2563EB),
+                                color: Color(0xFFBE185D),
                                 fontSize: 9,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 0.2,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.3,
                               ),
                             ),
-                          )
-                        else if (drug.requiresPrescription && !isDimmed)
+                          ),
+                        if (drug.requiresPrescription && !isDimmed)
                           Container(
                             margin: const EdgeInsets.only(left: 6),
                             padding: const EdgeInsets.symmetric(
@@ -425,51 +500,10 @@ class _DrugListItemState extends State<DrugListItem> {
                         : const SizedBox(),
                   ),
 
-                  // Price (+ helping hand tap zone)
+                  // Price — акційна стоп-ціна (якщо є) або роздрібна (+ рука допомоги)
                   SizedBox(
                     width: kColPrice,
-                    child: MouseRegion(
-                      cursor: drug.hasHelpingHand && !isDimmed && widget.showHelpingHandMarker
-                          ? SystemMouseCursors.click
-                          : SystemMouseCursors.basic,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: drug.hasHelpingHand && !isDimmed && widget.showHelpingHandMarker
-                            ? widget.onHelpingHandTap
-                            : null,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (drug.hasHelpingHand && !isDimmed && widget.showHelpingHandMarker)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 3),
-                                child: AnimatedOpacity(
-                                  opacity: 1.0,
-                                  duration: const Duration(milliseconds: 400),
-                                  child: Icon(
-                                    Icons.favorite_rounded,
-                                    size: 10,
-                                    color: const Color(0xFFE8A0B4),
-                                  ),
-                                ),
-                              ),
-                            Text(
-                              drug.price > 0
-                                  ? drug.price.toStringAsFixed(2).replaceAll('.', ',')
-                                  : '—',
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                color:
-                                    isDimmed ? textSecondary : const Color(0xFF1C1C2E),
-                                fontSize: 14.5,
-                                fontWeight: widget.isSelected ? FontWeight.w700 : FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                    child: _buildPriceCell(isDimmed, textSecondary),
                   ),
                   const SizedBox(width: 8),
 

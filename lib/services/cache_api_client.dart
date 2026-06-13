@@ -162,7 +162,7 @@ class CacheApiClient {
         final bodyString = _decodeBody(response);
 
         if (_logRaw) {
-          debugPrint('CacheAPI RAW (${bodyString.length} chars): ${bodyString.substring(0, bodyString.length > 300 ? 300 : bodyString.length)}');
+          debugPrint('CacheAPI RAW $serviceName (${bodyString.length} chars): ${bodyString.substring(0, bodyString.length > 300 ? 300 : bodyString.length)}');
         }
 
         // Fix Caché JSON: деякі процедури пропускають } між об'єктами
@@ -172,6 +172,11 @@ class CacheApiClient {
         // Fix Caché JSON: GetOrders — відсутня кома між об'єктами замовлень
         // "}{"orderId" → "},{"orderId"
         fixedBody = fixedBody.replaceAll('}{"orderId"', '},{"orderId"');
+
+        // Fix Caché JSON: GetStopPriceUKod — для пустого rules вставляє
+        // зайву ": "rules":[]" → "rules":[].
+        // Кома між полями вже присутня в оригіналі — не дублюємо.
+        fixedBody = fixedBody.replaceAll('"rules":[]"', '"rules":[]');
 
         // Fix Caché JSON: відсутній ]} в кінці (масив + об'єкт не закриті)
         final trimmed = fixedBody.trimRight();

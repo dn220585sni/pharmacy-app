@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../mixins/checkout_mixin.dart';
@@ -7,13 +8,19 @@ import '../models/customer_loyalty.dart';
 import '../models/drug.dart';
 import '../models/payment_method.dart';
 import '../models/prescription.dart';
+import '../models/social_project.dart';
+import '../models/stop_price_action.dart';
 import '../services/api_config.dart';
+import '../services/cart_price_service.dart';
+import '../services/prro_queue.dart';
+import '../services/prro_service.dart';
 import '../services/skarb_service.dart';
 import 'cart_item_widget.dart';
 import 'cart_offer_card.dart';
 import 'checkout/bonus_discount_block.dart';
 import 'checkout/cash_change_section.dart';
 import 'checkout/payment_method_toggle.dart';
+import 'prro_receipt_dialog.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CartPanel — inline cart shown in the right detail panel.
@@ -33,6 +40,18 @@ class CartPanel extends StatefulWidget {
   final void Function(Drug drug) onAddOfferBlister;
   final CustomerLoyalty? loyalty;
   final VoidCallback? onFocusPhone;
+  /// Серверна калькуляція цін (`GetSumSkid`) — джерело правди для UI.
+  /// Обчислюється у `PosScreen` (parent), щоб глобальний UI бачив ту ж суму.
+  final CartPricing? serverPricing;
+  /// Чи зараз триває запит до сервера. UI показує спінер біля суми.
+  final bool isLoadingPricing;
+  /// Перелік соц-програм (server + always-shown local) — з `pos_screen`.
+  final List<SocialProject> socialProjects;
+  /// Активні акції на товари кошика (key = `drug.ukod`).
+  final Map<String, List<StopPriceAction>> stopPrices;
+  /// Чи активний режим "Пакунок Малюка". Накладає обмеження на оплату:
+  /// тільки картка, тільки контактна (чіп/магнітна стрічка), без NFC.
+  final bool isPakunokMode;
 
   const CartPanel({
     super.key,
@@ -48,6 +67,11 @@ class CartPanel extends StatefulWidget {
     required this.onAddOfferBlister,
     this.loyalty,
     this.onFocusPhone,
+    this.serverPricing,
+    this.isLoadingPricing = false,
+    this.socialProjects = const [],
+    this.stopPrices = const {},
+    this.isPakunokMode = false,
   });
 
   @override
@@ -91,7 +115,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   @override
   double get finalTotal {
-    final raw = baseTotal - discountAmount - effectiveBonusAmount + _cashWithdrawalAmount;
+    // Якщо є відповідь з сервера — пріоритет. Cash withdrawal накладаємо
+    // зверху бо це окрема операція (видача готівки), не частина чеку.
+    final base = widget.serverPricing?.total ??
+        (baseTotal - discountAmount - effectiveBonusAmount);
+    final raw = base + _cashWithdrawalAmount;
     return raw < 0 ? 0 : raw;
   }
 
@@ -106,8 +134,15 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   /// Whether payment can be processed.
   /// For cash/mixed: requires entered amount ≥ finalTotal.
   /// For card: always allowed.
+  /// Завжди вимагає актуальної ціни з сервера (бо інакше можемо взяти
+  /// застарілу/локальну калькуляцію).
   bool get _canProcessPayment {
     if (widget.cart.isEmpty) return false;
+    if (widget.isLoadingPricing || widget.serverPricing == null) return false;
+    // Пакунок Малюка — тільки безготівка через термінал.
+    if (widget.isPakunokMode && paymentMethod != PaymentMethod.card) {
+      return false;
+    }
     if (paymentMethod == PaymentMethod.card) return true;
     // Cash or mixed — must have sufficient cash entered
     final text =
@@ -216,7 +251,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   }
 
   /// Public method — F5 processes payment when already in checkout
-  void processPayment() => _processPayment();
+  void processPayment() => unawaited(_processPayment());
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -288,17 +323,37 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   // ── Payment ───────────────────────────────────────────────────────────────
 
-  void _processPayment() {
+  Future<void> _processPayment() async {
     if (!_canProcessPayment || _isProcessingPayment) return;
 
-    // Bonus write-off is handled by Sparta LoyaltyService.sale()
-    // in POS._processPayment() — fire-and-forget, no blocking here.
-    // Capture prescription state BEFORE onPay (which clears the cart).
+    // Пакунок Малюка — показати інструкцію оплати перед фіскалізацією.
+    if (widget.isPakunokMode) {
+      final ok = await _showPakunokPaymentInstruction();
+      if (ok != true) return;
+    }
+
+    // Capture state BEFORE clearing cart.
     final hadPrescription = _hasPrescriptionItems;
     final neededRedemption = _needsRedemptionCode;
     final rxDataSnapshot = _prescriptionData;
     final wasFullyReimbursed = _isFullyReimbursed;
 
+    setState(() => _isProcessingPayment = true);
+
+    // Skip PRRO for fully-reimbursed prescription checkouts (no money, no fiscal check).
+    final skipPrro = wasFullyReimbursed;
+
+    if (!skipPrro) {
+      final ok = await _sendFiscalReceipt();
+      if (!mounted) return;
+      if (!ok) {
+        setState(() => _isProcessingPayment = false);
+        return;
+      }
+    }
+
+    // Bonus write-off is handled by Sparta LoyaltyService.sale()
+    // in POS._processPayment() — fire-and-forget, no blocking here.
     widget.onPay(paidByPoints: effectiveBonusAmount);
     setState(() {
       _isProcessingPayment = false;
@@ -326,6 +381,178 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         if (mounted) _closeAfterPayment();
       });
     }
+  }
+
+  /// Зареєструвати фіскальний чек у ПРРО.
+  ///
+  /// Повертає `true` якщо можна продовжити продаж:
+  /// - успіх → показав preview, далі onPay
+  /// - connection error → поклав у чергу, продовжуємо
+  /// - логічна помилка ПРРО → блок (`false`)
+  Future<bool> _sendFiscalReceipt() async {
+    final products = _buildPrroProducts();
+    final saleTotal = products.fold<double>(0, (s, p) => s + p.cost);
+    // Payments вирівнюються з sum(products.cost) — інакше ПРРО відхилить
+    // ("payments not equal products sum"). Округлення на чек (skidka_sumcheck)
+    // і cash_withdrawal — поки не передаємо у ПРРО.
+    final payments = _buildPrroPayments(saleTotal);
+
+    // TODO(local_number): підмінити timestamp на реальний номер з sgVRoznSale
+    // (Caché реєстрація роздрібного продажу) коли її буде реалізовано.
+    final localNumber = DateTime.now().millisecondsSinceEpoch % 10000000000;
+
+    final result = await PrroService.createSaleReceipt(
+      products: products,
+      payments: payments,
+      totalSum: saleTotal,
+      localNumber: localNumber,
+    );
+
+    if (!mounted) return false;
+
+    if (result.success) {
+      await PrroReceiptDialog.show(context, result);
+      // Спробувати скинути попередньо відкладені чеки у фоні.
+      unawaited(PrroQueue.flush());
+      return mounted;
+    }
+
+    if (result.errorKind == PrroErrorKind.connection) {
+      await PrroQueue.enqueueSale(
+        products: products,
+        payments: payments,
+        totalSum: saleTotal,
+        localNumber: localNumber,
+        error: result.error,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'ПРРО недоступний — чек відкладено в чергу '
+              '(буде надіслано пізніше)',
+            ),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: const Color(0xFFB45309),
+          ),
+        );
+      }
+      return mounted;
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Помилка ПРРО: ${result.error ?? "невідома"}'),
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFFDC2626),
+        ),
+      );
+    }
+    return false;
+  }
+
+  /// Сформувати список товарів для фіскального чеку.
+  ///
+  /// Якщо є server pricing (`GetSumSkid`) — беремо `cost`/`unitPrice` звідти,
+  /// щоб сума products точно дорівнювала payments (інакше ПРРО відхилить).
+  /// Fallback — клієнтська калькуляція з пропорційним розподілом знижки.
+  List<PrroProduct> _buildPrroProducts() {
+    final items = widget.cart;
+    if (items.isEmpty) return const [];
+
+    final pricing = widget.serverPricing;
+
+    return List.generate(items.length, (i) {
+      final item = items[i];
+      final isFractional = item.isFractional;
+      final amount = isFractional
+          ? item.fractionalQty! / item.drug.unitsPerPackage!
+          : item.quantity.toDouble();
+
+      final p = pricing?.itemAt(i);
+      final unitPrice = p?.unitPrice ?? item.effectivePrice;
+      final cost = p?.cost ?? item.total;
+      final lineDiscount = p?.lineDiscount;
+
+      return PrroProduct.classified(
+        name: item.drug.displayName,
+        amount: amount,
+        price: unitPrice,
+        cost: cost,
+        isMedicine: item.drug.isMedicine,
+        code: item.drug.skuCode,
+        barcode: item.drug.barcode,
+        unitName: isFractional ? 'блістер' : 'штука',
+        discount: (lineDiscount != null && lineDiscount > 0)
+            ? lineDiscount
+            : null,
+      );
+    }, growable: false);
+  }
+
+  /// Інструкція оплати для Пакунка Малюка — лише контактна оплата
+  /// (NFC заборонено, треба вставити чіп або провести магнітною стрічкою).
+  Future<bool?> _showPakunokPaymentInstruction() {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        icon: const Icon(Icons.credit_card,
+            color: Color(0xFF1E7DC8), size: 36),
+        title: const Text(
+          'Пакунок Малюка — оплата',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Картка Пакунка Малюка приймає лише КОНТАКТНУ оплату.',
+              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 12),
+            Text(
+              '✓ Вставте картку чіпом у термінал\n'
+              '✓ Або проведіть магнітною стрічкою\n\n'
+              '✗ NFC (безконтактно) НЕ приймається',
+              style: TextStyle(fontSize: 13, height: 1.5),
+            ),
+          ],
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Скасувати'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E7DC8),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Продовжити оплату'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Сформувати список оплат. Сума має точно співпадати з `sum(products.cost)`
+  /// (звідси параметр [saleAmount]), інакше ПРРО відхилить.
+  /// Cash withdrawal (видача готівки понад чек) поки не передається у ПРРО.
+  List<PrroPayment> _buildPrroPayments(double saleAmount) {
+    if (paymentMethod == PaymentMethod.card) {
+      return [PrroPayment.card(sum: saleAmount)];
+    }
+    final providedText = cashCtr.text.replaceAll(',', '.');
+    final provided = double.tryParse(providedText) ?? saleAmount;
+    return [PrroPayment.cash(sum: saleAmount, provided: provided)];
   }
 
   /// Show warning when pharmacist tries to exit with unredeemed prescription.
@@ -582,6 +809,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
             onRemove: () => setState(() => widget.onRemove(i)),
             isScanned: _scannedDrugIds.contains(widget.cart[i].drug.id),
             onScan: () => _scanCartItem(widget.cart[i]),
+            serverUnitPrice: widget.serverPricing?.itemAt(i)?.unitPrice,
+            serverCost: widget.serverPricing?.itemAt(i)?.cost,
+            actions: widget.stopPrices[widget.cart[i].drug.ukod] ?? const [],
           ),
         // Offers sit right under items
         if (widget.offers.isNotEmpty) _buildOffersSection(),
@@ -604,10 +834,12 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   // ── Cart footer (simple total + "Розрахувати" button) ─────────────────────
 
   Widget _buildCartFooter() {
+    // Показуємо серверну фінальну суму (з усіма знижками) — `finalTotal`
+    // повертає її коли є server pricing, інакше fallback на baseTotal.
     final formattedTotal =
-        baseTotal.toStringAsFixed(2).replaceAll('.', ',');
+        finalTotal.toStringAsFixed(2).replaceAll('.', ',');
     final hasItems = widget.cart.isNotEmpty;
-    final canCheckout = hasItems && _allCartScanned;
+    final canCheckout = hasItems && _allCartScanned && !widget.isLoadingPricing;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
@@ -629,12 +861,27 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                 ),
               ),
               const Spacer(),
-              Text(
-                '$formattedTotal ₴',
-                style: const TextStyle(
-                  color: Color(0xFF1E7DC8),
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
+              if (widget.isLoadingPricing) ...[
+                const SizedBox(
+                  width: 13,
+                  height: 13,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1E7DC8)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              AnimatedOpacity(
+                opacity: widget.isLoadingPricing ? 0.45 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                child: Text(
+                  '$formattedTotal ₴',
+                  style: const TextStyle(
+                    color: Color(0xFF1E7DC8),
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ],
@@ -810,21 +1057,6 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   // ── Social projects section ─────────────────────────────────────────────
 
-  static const _socialProjects = [
-    'Пакунок малюка',
-    'єПідтримка',
-    'Нацкешбек',
-    'Дарниця +',
-    'Знижка УБД',
-    'Медикард',
-    'EPRUF',
-    'АЗОВ супровід',
-    'Серце Азовсталі',
-    'Серце Азовсталі Ліки',
-    'Асістанс',
-    'Карітас',
-    'Сонафарм',
-  ];
 
   Widget _buildSocialProjectsSection() {
     final isSelected = _selectedSocialProject != null;
@@ -867,7 +1099,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
             ),
             if (isSelected) ...[
               GestureDetector(
-                onTap: () => setState(() => _selectedSocialProject = null),
+                onTap: () {
+                  setState(() => _selectedSocialProject = null);
+                },
                 child: const Padding(
                   padding: EdgeInsets.only(left: 4),
                   child: Icon(Icons.close_rounded,
@@ -901,17 +1135,17 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       color: Colors.white,
       elevation: 6,
-      items: _socialProjects.map((name) {
-        final isActive = _selectedSocialProject == name;
+      items: widget.socialProjects.map((p) {
+        final isActive = _selectedSocialProject == p.name;
         return PopupMenuItem<String>(
-          value: name,
+          value: p.name,
           height: 34,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
               Expanded(
                 child: Text(
-                  name,
+                  p.name,
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight:
@@ -1271,12 +1505,27 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                 ),
               ),
               const Spacer(),
-              Text(
-                '$formattedTotal ₴',
-                style: const TextStyle(
-                  color: Color(0xFF1E7DC8),
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
+              if (widget.isLoadingPricing) ...[
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1E7DC8)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              AnimatedOpacity(
+                opacity: widget.isLoadingPricing ? 0.45 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                child: Text(
+                  '$formattedTotal ₴',
+                  style: const TextStyle(
+                    color: Color(0xFF1E7DC8),
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ],

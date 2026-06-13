@@ -4,8 +4,14 @@ import 'package:flutter/services.dart';
 import '../data/cart_offers.dart';
 import '../data/edk_offers.dart';
 import '../data/mock_drugs.dart';
+import '../models/social_project.dart';
+import '../models/stop_price_action.dart';
 import '../services/auth_service.dart';
+import '../services/cart_price_service.dart';
 import '../services/drug_service.dart';
+import '../services/pakunok_service.dart';
+import '../services/social_projects_service.dart';
+import '../services/stop_price_service.dart';
 import '../services/farmasell_service.dart';
 import '../services/loyalty_service.dart';
 import '../services/product_browser_service.dart';
@@ -113,6 +119,25 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// Whether the cart panel is shown in the right column.
   bool _cartOpen = false;
 
+  // ── Server-side pricing state (GetSumSkid) ─────────────────────────────
+  /// Останнє обчислення цін з сервера (з усіма знижками + округленням).
+  CartPricing? _serverPricing;
+  bool _isLoadingPricing = false;
+  Timer? _pricingDebounce;
+  /// Sequence — захист від race conditions при швидких змінах кошика.
+  int _pricingRequestSeq = 0;
+  String _lastPricingKey = '';
+  static const _pricingDebounceDuration = Duration(milliseconds: 500);
+
+  /// Список соц-програм (server + always-shown local). Завантажується
+  /// один раз після логіну.
+  List<SocialProject> _socialProjects = const [];
+
+  /// Versioning лічильник — інкрементується після prefetch акцій,
+  /// щоб тригернути rebuild cart позицій що читають з `StopPriceService`.
+  int _stopPriceVersion = 0;
+  String _lastStopPriceUkods = '';
+
   /// Whether the internet orders panel is shown in the right column.
   bool _ordersOpen = false;
 
@@ -145,6 +170,91 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Currently selected social project (shared with cart).
   String? _selectedSocialProject;
+
+  /// Активний режим "Пакунок Малюка". Активується вибором цього соц-проекту.
+  /// Накладає обмеження: тільки товари зі списку ПМ, тільки картка, тільки
+  /// контактна оплата, потрібна прив'язка каси до терміналу.
+  bool get _isPakunokMode =>
+      _selectedSocialProject == PakunokService.displayName;
+
+  /// Перевірити чи можна додати товар у кошик у поточному ПМ-режимі.
+  /// Повертає `true` якщо немає ПМ-режиму, або товар входить у програму.
+  /// При відмові показує snackbar.
+  bool _assertPakunokAllowed(Drug drug) {
+    if (!_isPakunokMode) return true;
+    if (PakunokService.isPakunok(drug)) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${drug.displayName} не входить у Пакунок Малюка'),
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFFDC2626),
+      ),
+    );
+    return false;
+  }
+
+  /// Активація соц-проекту з перевіркою для Пакунка Малюка.
+  /// Якщо в кошику є товари не зі списку ПМ — пропонує очистити їх.
+  /// Після успішного вибору — панель соц-проектів закривається автоматично.
+  Future<void> _onSocialProjectSelected(String? p) async {
+    if (p == PakunokService.displayName) {
+      final invalid = _cart
+          .where((i) => !PakunokService.isPakunok(i.drug))
+          .toList(growable: false);
+      if (invalid.isNotEmpty) {
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            icon: const Icon(Icons.warning_amber_rounded,
+                color: Color(0xFFF59E0B), size: 36),
+            title: const Text('У кошику є товари не з програми',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            content: Text(
+              'Знайдено ${invalid.length} позицій, що не входять у Пакунок Малюка:\n'
+              '${invalid.take(3).map((i) => "• ${i.drug.displayName}").join("\n")}'
+              '${invalid.length > 3 ? "\n…ще ${invalid.length - 3}" : ""}\n\n'
+              'Видалити їх з кошика для активації режиму?',
+              style: const TextStyle(fontSize: 13.5, height: 1.4),
+            ),
+            actionsAlignment: MainAxisAlignment.center,
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Скасувати'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFDC2626),
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Видалити та активувати'),
+              ),
+            ],
+          ),
+        );
+        if (confirm != true) return;
+        // Зняти з server cart і видалити локально.
+        for (final item in invalid) {
+          _lockStock(item.drug, 0.0);
+        }
+        setState(() {
+          _cart.removeWhere((i) => !PakunokService.isPakunok(i.drug));
+        });
+      }
+    }
+    setState(() => _selectedSocialProject = p);
+    if (p != null && _socialProjectsOpen) {
+      // Невелика затримка — щоб фармацевт побачив галочку "обрано"
+      // у панелі перед її закриттям.
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
+      setState(() => _socialProjectsOpen = false);
+    }
+  }
 
   /// Key for accessing SocialProjectsPanelState.
   final _socialProjectsPanelKey = GlobalKey<SocialProjectsPanelState>();
@@ -293,7 +403,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     try {
       final items = await DrugService.searchByName(query);
       return items
-          .where((item) => item.qty > 0)
+          .where((item) => item.qtyRaw > 0)
           .map((item) => Drug(
                 id: 'srv_${item.ids}',
                 name: item.nameUkr ?? item.name,
@@ -568,6 +678,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
         // Pre-load top drugs cache for instant search
         _loadTopDrugsCache();
+        // Завантажити перелік соц-програм для аптеки.
+        _loadSocialProjects();
       }
     });
   }
@@ -672,6 +784,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   @override
   void dispose() {
+    _pricingDebounce?.cancel();
     // Зняти резервування всіх товарів у кошику при закритті
     _unlockAllCart();
     // LogoutRlz — fire-and-forget при закритті додатка
@@ -1029,7 +1142,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           _searchResults.where((d) => d.id.startsWith('srv_')).toList();
 
       if (query.isEmpty) {
-        _searchResults = existingServerDrugs;
+        // Очистити попередні результати пошуку (Esc / хрестик).
+        _searchResults = const [];
+        _selectedDrug = null;
       } else {
         // Show instant results from top drugs cache while server searches
         if (existingServerDrugs.isEmpty && _topDrugsCache.isNotEmpty) {
@@ -1080,6 +1195,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _selectedDrug = null;
       }
     });
+    // Ліниво підтягнути стоп-ціни для видимих результатів (гібрид).
+    _prefetchStopPriceUkods(_searchResults.map((d) => d.ukod));
   }
 
   /// Fetch pharmacies that have the selected out-of-stock drug.
@@ -1138,6 +1255,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       if (!mounted) return;
       _topDrugsCache = items;
       debugPrint('TopDrugsCache: loaded ${items.length} items');
+      // Гібрид: фоновий префетч стоп-цін для топ-500 (де сконцентровані акції) —
+      // популярні товари показують акційну ціну в таблиці миттєво.
+      _prefetchStopPriceUkods(items.map((i) => i.ukod));
     }).catchError((e) {
       debugPrint('TopDrugsCache: error — $e');
     });
@@ -1178,7 +1298,20 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       final serverDrugs = <Drug>[];
       final seenUkods = <String>{};
 
+      // Індекс u-codes за ukod — щоб виявити дробові залишки яких немає в s-codes.
+      final uByUkod = <String, DrugSearchItem>{};
+      for (final u in uItems) {
+        if (u.ids.isNotEmpty) uByUkod[u.ids] = u;
+      }
+
       for (final item in skuItems) {
+        // Якщо s-code з qty=0 але в u-codes для того ж ukod є дробовий
+        // залишок (qtyRaw>0) — пропускаємо s-code. u-code додасться нижче з
+        // правильним stockRaw, інакше в seenUkods він би заблокувався.
+        if (item.qty == 0 && item.qtyRaw == 0) {
+          final uMatch = uByUkod[item.ukod];
+          if (uMatch != null && uMatch.qtyRaw > 0) continue;
+        }
         if (item.ukod.isNotEmpty) seenUkods.add(item.ukod);
         final locations = <StorageLocation>[];
         if (item.shelf.isNotEmpty) {
@@ -1210,11 +1343,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         ));
       }
 
-      // Add out-of-stock items from u-codes (not already covered by s-codes)
+      // Add items from u-codes not already covered by s-codes.
+      // Включає як out-of-stock (qtyRaw=0), так і дробові залишки (qtyRaw<1,
+      // які SearchByNameSKU фільтрує, бо там qty має бути ≥1).
       for (final item in uItems) {
         if (item.ids.isEmpty) continue;
         if (seenUkods.contains(item.ids)) continue; // u-code already has s-codes
-        if (item.qty > 0) continue; // skip in-stock (already in s-codes)
+        if (item.qty > 0) continue; // skip integer in-stock (already in s-codes)
         serverDrugs.add(Drug(
           id: 'srv_u_${item.ids}',
           name: item.nameUkr ?? item.name,
@@ -1222,7 +1357,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           manufacturer: item.manufacturer,
           category: '',
           price: item.price,
-          stock: 0,
+          stock: item.qty,
+          stockRaw: item.qtyRaw > 0 ? item.qtyRaw : null,
           unit: 'шт',
           locationCode: item.shelf.isNotEmpty ? item.shelf : null,
           ukod: item.ids, // u-code ids IS the ukod
@@ -1270,6 +1406,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
         _isServerLookup = false;
       });
+      // Ліниво підтягнути стоп-ціни для видимих результатів (гібрид).
+      _prefetchStopPriceUkods(_searchResults.map((d) => d.ukod));
       // Fetch SKU detail for ALL server drugs
       for (final drug in serverDrugs) {
         _fetchSKUDetail(drug);
@@ -1721,6 +1859,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _suppressHelpingHand();
     final wasInCart = _cart.any((item) => item.drug.id == drug.id);
 
+    // ПМ-режим: блокуємо додавання товарів не зі списку Пакунок Малюка.
+    if (qty > 0 && !wasInCart && !_assertPakunokAllowed(drug)) return;
+
     if (qty <= 0) {
       // Видалення з кошика — зняти резервування
       setState(() {
@@ -2060,6 +2201,131 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   double get _cartTotal => _cart.fold(0, (s, i) => s + i.total);
+
+  // ── Server pricing (GetSumSkid) ─────────────────────────────────────────
+
+  /// Сума до показу в UI: серверна якщо є валідний `_serverPricing`,
+  /// інакше fallback на локальну `_cartTotal`.
+  double get _displayCartTotal => _serverPricing?.total ?? _cartTotal;
+
+  /// Snapshot тих параметрів, що впливають на калькуляцію цін на сервері.
+  String _pricingKey() {
+    final cartPart = _cart
+        .map((i) => '${i.drug.id}:${i.quantity}:${i.fractionalQty ?? 0}')
+        .join('|');
+    final loyaltyPart = _customerLoyalty?.cardNo ?? _customerLoyalty?.phone ?? '';
+    return '$cartPart#$loyaltyPart';
+  }
+
+  /// Перевірити чи треба перерахувати ціни. Викликається з build().
+  void _maybeSchedulePricing() {
+    final key = _pricingKey();
+    if (key == _lastPricingKey) return;
+    _lastPricingKey = key;
+    _schedulePricingRefresh();
+    _maybePrefetchStopPrices();
+  }
+
+  /// Eager-prefetch активних акцій для всіх ukod-ів у поточному кошику.
+  /// Лічильник версії інкрементується після завершення → cart rebuild'иться.
+  void _maybePrefetchStopPrices() {
+    final ukods = <String>{};
+    for (final item in _cart) {
+      final u = item.drug.ukod;
+      if (u != null && u.isNotEmpty) ukods.add(u);
+    }
+    final ukodsKey = (ukods.toList()..sort()).join(',');
+    if (ukodsKey == _lastStopPriceUkods) return;
+    _lastStopPriceUkods = ukodsKey;
+    if (ukods.isEmpty) return;
+    unawaited(
+      StopPriceService.prefetch(ukods).then((_) {
+        if (!mounted) return;
+        setState(() => _stopPriceVersion++);
+      }),
+    );
+  }
+
+  /// Префетч стоп-цін для довільного набору ukod-ів (таблиця пошуку / топ-500).
+  /// Гібрид: топ-500 тягнемо у фоні після логіну, видимі результати — ліниво.
+  /// Прогресивно інкрементуємо версію → таблиця rebuild'иться з акційними цінами
+  /// по мірі надходження даних.
+  void _prefetchStopPriceUkods(Iterable<String?> ukods) {
+    final set = <String>{};
+    for (final u in ukods) {
+      if (u != null && u.isNotEmpty) set.add(u);
+    }
+    if (set.isEmpty) return;
+    unawaited(
+      StopPriceService.prefetch(
+        set,
+        onBatch: () {
+          if (mounted) setState(() => _stopPriceVersion++);
+        },
+      ),
+    );
+  }
+
+  /// Зібрати акції для кожної позиції кошика — для проброса в `cart_panel`.
+  Map<String, List<StopPriceAction>> get _cartStopPrices {
+    final result = <String, List<StopPriceAction>>{};
+    for (final item in _cart) {
+      final u = item.drug.ukod;
+      if (u == null || u.isEmpty) continue;
+      final actions = StopPriceService.get(u);
+      if (actions != null && actions.isNotEmpty) result[u] = actions;
+    }
+    return result;
+  }
+
+  void _schedulePricingRefresh() {
+    _pricingDebounce?.cancel();
+    if (_cart.isEmpty) {
+      _pricingRequestSeq++;
+      _serverPricing = CartPricing.empty();
+      _isLoadingPricing = false;
+      return;
+    }
+    if (CartPriceService.isStubMode) {
+      unawaited(_fetchPricing(showLoading: false));
+      return;
+    }
+    if (!_isLoadingPricing) {
+      _isLoadingPricing = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
+    _pricingDebounce = Timer(_pricingDebounceDuration, _fetchPricing);
+  }
+
+  Future<void> _fetchPricing({bool showLoading = true}) async {
+    final mySeq = ++_pricingRequestSeq;
+    try {
+      final pricing = await CartPriceService.fetchTotals(
+        cart: _cart,
+        loyalty: _customerLoyalty,
+        typeProject: _isPakunokMode ? PakunokService.typeProjectTag : null,
+      );
+      if (!mounted || mySeq != _pricingRequestSeq) return;
+      setState(() {
+        _serverPricing = pricing;
+        if (showLoading) _isLoadingPricing = false;
+      });
+    } catch (e) {
+      debugPrint('CartPriceService FAIL: $e');
+      if (!mounted || mySeq != _pricingRequestSeq) return;
+      if (showLoading) setState(() => _isLoadingPricing = false);
+    }
+  }
+
+  /// Завантажити перелік соц-програм для аптеки (один раз після логіну).
+  Future<void> _loadSocialProjects() async {
+    final list = await SocialProjectsService.fetchAvailable();
+    if (!mounted) return;
+    setState(() => _socialProjects = list);
+  }
+
   int get _cartItemCount => _cart.length;
 
   void _reserveAtPharmacy(NearbyPharmacy pharmacy) async {
@@ -2405,6 +2671,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   void _addOfferToCart(Drug drug) {
+    if (!_assertPakunokAllowed(drug)) return;
     setState(() {
       final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
       if (idx >= 0) {
@@ -2419,6 +2686,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   void _addOfferBlisterToCart(Drug drug) {
     if (!drug.canSplitByBlister) return;
+    if (!_assertPakunokAllowed(drug)) return;
     setState(() {
       final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
       if (idx >= 0) {
@@ -2454,6 +2722,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (_customerLoyalty != null && _customerLoyalty!.cardNo != null) {
       _registerLoyaltySale(paidByPoints: paidByPoints);
     }
+
+    // Очистити server-side cart (sgVRoznSetLock з qty=0 для кожної позиції) —
+    // інакше товари залишаться в server-side кошику і GetSumSkid буде
+    // повертати їх у наступних викликах разом з новими.
+    _unlockAllCart();
 
     // Bypass the listener so _filterDrugs doesn't auto-select a drug,
     // then reset everything including _selectedDrug → ShiftDashboard appears.
@@ -2518,6 +2791,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _searchController.clear();
     _searchController.addListener(_filterDrugs);
     _helpingHandTimer?.cancel();
+    // Очистити server-side cart перед локальним.
+    _unlockAllCart();
     setState(() {
       _totalEarned += amount;
       _ordersOpen = false;
@@ -2636,6 +2911,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    // Перевірити чи cart змінився → запустити debounced GetSumSkid.
+    _maybeSchedulePricing();
+
     return Scaffold(
       backgroundColor: const Color(0xFFF4F5F8),
       body: Column(
@@ -2737,6 +3015,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                     prescriptionActive: _prescriptionOpen,
                     onSocialProjectsTap: _toggleSocialProjects,
                     socialProjectsActive: _socialProjectsOpen,
+                    socialProjectsHasSelection: _selectedSocialProject != null,
                     onMessagesTap: _toggleMessages,
                     messagesActive: _messagesOpen,
                     unreadMessageCount: mockMessages
@@ -2775,6 +3054,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         onAddOfferBlister: _addOfferBlisterToCart,
         loyalty: _customerLoyalty,
         onFocusPhone: _focusPhoneField,
+        serverPricing: _serverPricing,
+        isLoadingPricing: _isLoadingPricing,
+        socialProjects: _socialProjects,
+        stopPrices: _cartStopPrices,
+        isPakunokMode: _isPakunokMode,
       );
     }
     if (_ordersOpen) {
@@ -2806,9 +3090,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (_socialProjectsOpen) {
       return SocialProjectsPanel(
         key: _socialProjectsPanelKey,
+        projects: _socialProjects,
         onClose: _toggleSocialProjects,
         selectedProject: _selectedSocialProject,
-        onProjectSelected: (p) => setState(() => _selectedSocialProject = p),
+        onProjectSelected: _onSocialProjectSelected,
       );
     }
     if (_messagesOpen) {
@@ -2916,6 +3201,16 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                   : DrugDetailPanel(
                       key: const ValueKey('detail'),
                       drug: _selectedDrug,
+                      promoPrice: (_selectedDrug?.ukod != null &&
+                              _selectedDrug!.ukod!.isNotEmpty)
+                          ? StopPriceService.promoPrice(
+                              _selectedDrug!.ukod!, _selectedDrug!.price)
+                          : null,
+                      stopPriceActions: (_selectedDrug?.ukod != null &&
+                              _selectedDrug!.ukod!.isNotEmpty)
+                          ? (StopPriceService.get(_selectedDrug!.ukod!) ??
+                              const [])
+                          : const [],
                       analogues: _analogues,
                       externalAnalogues: _externalAnalogues,
                       cacheAnalogues: _cacheAnalogues,
@@ -3181,7 +3476,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             const SizedBox(width: 6),
             Text(
               hasItems
-                  ? '$_cartItemCount поз.  |  ${_cartTotal.toStringAsFixed(2).replaceAll('.', ',')} ₴'
+                  ? '$_cartItemCount поз.  |  ${_displayCartTotal.toStringAsFixed(2).replaceAll('.', ',')} ₴'
                   : 'Кошик',
               style: TextStyle(
                 color: isActive ? Colors.white : const Color(0xFF6B7280),
@@ -3242,16 +3537,20 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   Widget _buildDrugList() {
     if (_searchResults.isEmpty) {
+      final hasQuery = _searchController.text.trim().isNotEmpty;
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off_rounded,
-                color: Colors.grey.shade300, size: 48),
+            Icon(
+              hasQuery ? Icons.search_off_rounded : Icons.search_rounded,
+              color: Colors.grey.shade300,
+              size: 48,
+            ),
             const SizedBox(height: 10),
-            const Text(
-              'Нічого не знайдено',
-              style: TextStyle(color: Color(0xFFB0B7C3), fontSize: 15),
+            Text(
+              hasQuery ? 'Нічого не знайдено' : 'Розпочніть пошук, будь ласка',
+              style: const TextStyle(color: Color(0xFFB0B7C3), fontSize: 15),
             ),
           ],
         ),
@@ -3265,9 +3564,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         final drug = _searchResults[index];
         final isSelected = _selectedDrug?.id == drug.id;
         final cartItem = _getCartItem(drug.id);
+        final ukod = drug.ukod;
+        final promoPrice = (ukod != null && ukod.isNotEmpty)
+            ? StopPriceService.promoPrice(ukod, drug.price)
+            : null;
         return DrugListItem(
           key: ValueKey(drug.id),
           drug: drug,
+          promoPrice: promoPrice,
           isSelected: isSelected,
           shouldFocusQty: isSelected && _focusQtyOnSelect,
           isEvenRow: index.isEven,

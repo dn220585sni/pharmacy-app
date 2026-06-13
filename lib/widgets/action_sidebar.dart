@@ -33,6 +33,9 @@ class ActionSidebar extends StatelessWidget {
   /// Whether the social projects panel is currently open.
   final bool socialProjectsActive;
 
+  /// Чи зараз обрана якась соц-програма (для відображення індикатора).
+  final bool socialProjectsHasSelection;
+
   /// Callback when "Повідомлення" button is tapped.
   final VoidCallback? onMessagesTap;
 
@@ -62,6 +65,7 @@ class ActionSidebar extends StatelessWidget {
     this.prescriptionActive = false,
     this.onSocialProjectsTap,
     this.socialProjectsActive = false,
+    this.socialProjectsHasSelection = false,
     this.onMessagesTap,
     this.messagesActive = false,
     this.unreadMessageCount = 0,
@@ -101,6 +105,7 @@ class ActionSidebar extends StatelessWidget {
         tooltip: 'Соціальні проекти',
         onTap: onSocialProjectsTap,
         isActive: socialProjectsActive,
+        hasIndicator: socialProjectsHasSelection,
         hotkeyLabel: 'Ctrl S',
       ),
       _SidebarItem(
@@ -156,6 +161,8 @@ class _SidebarItem {
   final VoidCallback? onTap;
   final bool isActive;
   final int badgeCount;
+  /// Точкова мітка (для бінарних станів типу "обрана соц-програма").
+  final bool hasIndicator;
 
   _SidebarItem({
     this.icon,
@@ -165,6 +172,7 @@ class _SidebarItem {
     this.onTap,
     this.isActive = false,
     this.badgeCount = 0,
+    this.hasIndicator = false,
   }) : assert(icon != null || customChild != null);
 }
 
@@ -287,6 +295,20 @@ class _SidebarButtonState extends State<_SidebarButton> {
                           height: 1,
                         ),
                       ),
+                    ),
+                  ),
+                )
+              else if (widget.item.hasIndicator)
+                Positioned(
+                  top: -2,
+                  right: -2,
+                  child: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF22C55E),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
                     ),
                   ),
                 ),

@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import '../models/drug.dart';
+import '../models/stop_price_action.dart';
 import '../services/farmasell_service.dart';
 import '../services/drug_service.dart';
 import '../services/product_browser_service.dart';
 import 'drug_list_item.dart'; // for kColBadge
 import 'instruction_dialog.dart';
 import 'shift_dashboard.dart';
+import 'stop_price_info_dialog.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Location chip widget
@@ -155,6 +157,14 @@ class DrugDetailPanel extends StatefulWidget {
   /// Passed through to ShiftDashboard when drug == null.
   final double earnedAmount;
 
+  /// Безумовна акційна ціна зі стоп-ціни (`StopPriceService.promoPrice`). Якщо
+  /// задана й нижча за роздріб — у хедері показуємо закреслену стару + нову.
+  final double? promoPrice;
+
+  /// Активні акції товара (`StopPriceService.get`) — для попапа «Деталі акції»
+  /// по кліку на (ⓘ) біля акційної ціни.
+  final List<StopPriceAction> stopPriceActions;
+
   // ── Рука допомоги ──────────────────────────────────────────────────────
   final bool isCustomerAuthorized;
   final int helpingHandRemaining;
@@ -172,6 +182,8 @@ class DrugDetailPanel extends StatefulWidget {
     required this.onSelectAnalogue,
     this.onStorageLocationChanged,
     this.earnedAmount = 0.0,
+    this.promoPrice,
+    this.stopPriceActions = const [],
     this.isCustomerAuthorized = false,
     this.helpingHandRemaining = 10,
     this.helpingHandPrice,
@@ -375,20 +387,100 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
             // ── Price (toggle: _showPriceInHeader) ───────────────────────────
             if (_showPriceInHeader && drug.price > 0) ...[
               const SizedBox(width: 8),
-              Center(
-                child: Text(
-                  '${drug.price.toStringAsFixed(2)} ₴',
-                  style: const TextStyle(
-                    color: Color(0xFF1E7DC8),
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
+              Center(child: _buildHeaderPrice(drug)),
             ],
           ],
         ),
       ),
+    );
+  }
+
+  /// Ціна в хедері: при безумовній стоп-ціні — закреслена стара + акційна нова +
+  /// тег; інакше звичайна ціна.
+  Widget _buildHeaderPrice(Drug drug) {
+    final promo = widget.promoPrice;
+    final hasPromo = promo != null && promo > 0 && promo < drug.price;
+    if (!hasPromo) {
+      return Text(
+        '${drug.price.toStringAsFixed(2)} ₴',
+        style: const TextStyle(
+          color: Color(0xFF1E7DC8),
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '${drug.price.toStringAsFixed(2)} ₴',
+          style: const TextStyle(
+            color: Color(0xFF9CA3AF),
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            decoration: TextDecoration.lineThrough,
+            decorationColor: Color(0xFF9CA3AF),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(right: 4),
+              child: Icon(Icons.local_offer_rounded,
+                  size: 16, color: Color(0xFF16A34A)),
+            ),
+            Text(
+              '${promo.toStringAsFixed(2)} ₴',
+              style: const TextStyle(
+                color: Color(0xFF15803D),
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Акційна ціна',
+                style: TextStyle(
+                  color: Color(0xFF15803D),
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (widget.stopPriceActions.isNotEmpty) ...[
+                const SizedBox(width: 5),
+                InkWell(
+                  onTap: () => showStopPriceInfoDialog(
+                    context,
+                    drugName: drug.displayName,
+                    actions: widget.stopPriceActions,
+                  ),
+                  customBorder: const CircleBorder(),
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFE8F3FB),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.info_outline_rounded,
+                        size: 12, color: Color(0xFF1E7DC8)),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
     );
   }
 

@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'screens/pos_screen.dart';
 import 'services/auth_service.dart';
+import 'services/prro_queue.dart';
+import 'services/prro_service.dart';
 
 void main() {
   final binding = WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +18,14 @@ void main() {
 
   // Logout active session when the app window is closed
   binding.addObserver(_AppCloseObserver());
+
+  // ПРРО: підняти кешований токен і чергу відкладених чеків.
+  // Спроба flush у фоні — якщо мережа є, відкладені чеки відразу пушнуться.
+  unawaited(() async {
+    await PrroService.loadCachedToken();
+    await PrroQueue.load();
+    if (PrroQueue.count > 0) await PrroQueue.flush();
+  }());
 
   runApp(const PharmacyApp());
 }

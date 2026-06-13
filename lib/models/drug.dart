@@ -98,6 +98,11 @@ class Drug {
   // ── Рука допомоги (social discount program) ────────────────────────────
   final bool hasHelpingHand;
 
+  // ── Класифікація для ПДВ ───────────────────────────────────────────────
+  /// true = лікарський засіб (ПДВ 7%, літера "В").
+  /// false = нелікарський (косметика, медтехніка, БАД — ПДВ 20%, літера "А").
+  final bool isMedicine;
+
   // ── Caché codes ──────────────────────────────────────────────────────
   final String? ukod;          // u-код товару (код довідника, напр. "762*1*47*6****")
   final String? skuCode;       // s-код або числовий код товару
@@ -140,6 +145,7 @@ class Drug {
     this.barcode,
     this.availabilityStatus,
     this.hasHelpingHand = false,
+    this.isMedicine = true,
     this.ukod,
     this.skuCode,
     this.comingPrice,
@@ -149,26 +155,58 @@ class Drug {
   /// Назва для відображення: українська якщо є, інакше оригінальна.
   String get displayName => (nameUkr != null && nameUkr!.isNotEmpty) ? nameUkr! : name;
 
-  bool get isOutOfStock => stock == 0;
+  /// Чи товар відсутній на складі. Дробові залишки (наприклад 0.5 упаковки —
+  /// блістерами) НЕ вважаються відсутніми — їх можна додати в кошик блістерно.
+  bool get isOutOfStock => (stockRaw ?? stock.toDouble()) <= 0;
 
-  /// Залишок для відображення: дробовий якщо є, інакше цілий.
+  /// Залишок для відображення: завжди натуральним дробом (½, ⅓, ¾, ⅛...),
+  /// або текстом "n/m" якщо немає Unicode-гліфа.
   String get stockDisplay {
     final raw = stockRaw ?? stock.toDouble();
     if (raw == raw.floorToDouble()) return raw.toInt().toString();
-    // Показати як дріб: 1.5 → "1 1/2", 0.5 → "1/2", інше → "1,5"
     final whole = raw.floor();
     final frac = raw - whole;
-    if ((frac - 0.5).abs() < 0.01) {
-      return whole > 0 ? '$whole ½' : '½';
-    }
-    if ((frac - 0.25).abs() < 0.01) {
-      return whole > 0 ? '$whole ¼' : '¼';
-    }
-    if ((frac - 0.75).abs() < 0.01) {
-      return whole > 0 ? '$whole ¾' : '¾';
-    }
-    return raw.toStringAsFixed(1).replaceAll('.', ',');
+    final fracText = _fractionToText(frac);
+    if (whole > 0) return '$whole $fracText';
+    return fracText;
   }
+
+  /// Конвертувати дробову частину (0..1) у Unicode-дріб або "n/m".
+  /// Шукає найкращу апроксимацію зі знаменником ≤ 12.
+  static String _fractionToText(double frac) {
+    if (frac <= 0) return '0';
+    var bestN = 0, bestD = 1;
+    var bestErr = double.infinity;
+    for (var d = 2; d <= 12; d++) {
+      final n = (frac * d).round();
+      if (n <= 0 || n >= d) continue;
+      final err = (n / d - frac).abs();
+      if (err < bestErr) {
+        bestErr = err;
+        bestN = n;
+        bestD = d;
+      }
+    }
+    if (bestN == 0) return '0';
+    final g = _gcd(bestN, bestD);
+    bestN ~/= g;
+    bestD ~/= g;
+    return _fractionGlyphs['$bestN/$bestD'] ?? '$bestN/$bestD';
+  }
+
+  static int _gcd(int a, int b) => b == 0 ? a : _gcd(b, a % b);
+
+  static const _fractionGlyphs = <String, String>{
+    '1/2': '½',
+    '1/3': '⅓', '2/3': '⅔',
+    '1/4': '¼', '3/4': '¾',
+    '1/5': '⅕', '2/5': '⅖', '3/5': '⅗', '4/5': '⅘',
+    '1/6': '⅙', '5/6': '⅚',
+    '1/7': '⅐',
+    '1/8': '⅛', '3/8': '⅜', '5/8': '⅝', '7/8': '⅞',
+    '1/9': '⅑',
+    '1/10': '⅒',
+  };
 
   /// Чи можна продати товар поблістерно.
   /// true тільки якщо в упаковці більше 1 блістера/одиниці.
@@ -235,6 +273,7 @@ class Drug {
       barcode: barcode,
       availabilityStatus: availabilityStatus,
       hasHelpingHand: hasHelpingHand,
+      isMedicine: isMedicine,
       ukod: ukod,
       skuCode: skuCode,
       comingPrice: comingPrice,
@@ -288,6 +327,7 @@ class Drug {
       barcode: barcode,
       availabilityStatus: availabilityStatus,
       hasHelpingHand: hasHelpingHand,
+      isMedicine: isMedicine,
       ukod: ukod,
       skuCode: skuCode,
       comingPrice: comingPrice,
@@ -363,6 +403,7 @@ class Drug {
       barcode: barcode ?? this.barcode,
       availabilityStatus: availabilityStatus,
       hasHelpingHand: hh || hasHelpingHand,
+      isMedicine: isMedicine,
       ukod: ukod,
       skuCode: skuCode ?? this.skuCode,
       comingPrice: comingPrice ?? this.comingPrice,

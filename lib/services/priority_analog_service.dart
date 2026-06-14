@@ -15,11 +15,11 @@ class PriorityAnalogConfig {
   static const procedureUrl =
       'http://www.apiator.anctm.biz/procedure/call/2040030682960363520/GET_PRIORITY_ANALOGS_BASEID';
 
-  static const basicAuth =
-      'QVBJdW0yMDQwMDMwNjgyOTYwMzYzNTIwOktoaU9aSD88NnAvd1p6cGYscFYia3g/MzNmQyk2NnBRP1dNTSZFYiFCTyl6Plt1VnQn';
+  // Секрети — через --dart-define-from-file=dart_define.json (gitignored).
+  static const basicAuth = String.fromEnvironment('APIATOR_BASIC_AUTH');
   static const clientId = 'APIum2040030682960363520';
-  static const username = 'InuhtemuJF';
-  static const password = 'nlAb8_UA3.-GZRaACq0.1FBUf50r7.';
+  static const username = String.fromEnvironment('APIATOR_USERNAME');
+  static const password = String.fromEnvironment('APIATOR_PASSWORD');
 
   /// Ідентифікатор юридичної особи (2 = Магнолія).
   static const int baseId = 2;

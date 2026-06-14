@@ -6,8 +6,9 @@ import 'package:http/http.dart' as http;
 class SplConfig {
   static const baseUrl = 'https://demo.spartaloyalty.com/TestAnc2/api';
   static const apiUser = 'anc_pos';
-  static const apiToken = 'ukw4kztxvael528f5ufpnk67r6xzyvc5fm2dghu7';
-  static const posKey = '87SNRM9ERH7YP6J6';
+  // Секрети — через --dart-define-from-file=dart_define.json (gitignored).
+  static const apiToken = String.fromEnvironment('SPL_API_TOKEN');
+  static const posKey = String.fromEnvironment('SPL_POS_KEY');
   static const partnerCode = 'ANC';
   static const placeCode = 'MR_TEST_PLACE';
   static const ver = 4;

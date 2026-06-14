@@ -1,0 +1,17 @@
+{
+  "_comment": "Шаблон секретів. Скопіюй у dart_define.json (gitignored) і встав реальні значення. Збірка/запуск: flutter run -d windows --dart-define-from-file=dart_define.json",
+
+  "PRRO_EMAIL": "<prro-email>",
+  "PRRO_PASSWORD": "<prro-password>",
+
+  "SPL_API_TOKEN": "<sparta-loyalty-api-token>",
+  "SPL_POS_KEY": "<sparta-loyalty-pos-key>",
+
+  "SKARB_API_KEY": "<skarb-api-key>",
+  "SKARB_EMAIL": "<skarb-pharmacist-email>",
+  "SKARB_PASSWORD": "<skarb-pharmacist-password>",
+
+  "APIATOR_BASIC_AUTH": "<apiator-basic-auth-base64>",
+  "APIATOR_USERNAME": "<apiator-username>",
+  "APIATOR_PASSWORD": "<apiator-password>"
+}

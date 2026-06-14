@@ -33,6 +33,10 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Secrets — реальні значення через --dart-define-from-file (НЕ комітити).
+# Шаблон з плейсхолдерами: dart_define.example.json (комітиться).
+dart_define.json
+
 # Symbolication related
 app.*.symbols
 

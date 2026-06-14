@@ -32,8 +32,10 @@ class PrroConfig {
   static const environment = PrroEnvironment.cloudTest;
 
   /// Облікові дані для авторизації.
-  static const email = '4000952779@anc.net.ua';
-  static const password = '123456';
+  /// Передаються через --dart-define-from-file=dart_define.json (gitignored).
+  /// Порожні за замовчуванням — без файлу авторизація впаде явно.
+  static const email = String.fromEnvironment('PRRO_EMAIL');
+  static const password = String.fromEnvironment('PRRO_PASSWORD');
 
   /// Developer ID (обов'язковий заголовок).
   static const developerId = 'ANC';

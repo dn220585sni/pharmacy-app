@@ -19,11 +19,12 @@ class SkarbConfig {
   static const testBaseUrl = 'https://test-skarb.phrm.pro/api/v2';
 
   /// API-Key (отримати від Skarb Cloud).
-  static const apiKey = '2a_c43eiilL2-ZHJceqJbCbLKcBEukh3';
+  /// Через --dart-define-from-file=dart_define.json (gitignored).
+  static const apiKey = String.fromEnvironment('SKARB_API_KEY');
 
-  /// Credentials для авторизації фармацевта (тестове середовище).
-  static const email = 'smartsign+2@openpharma.global';
-  static const password = '123';
+  /// Credentials для авторизації фармацевта.
+  static const email = String.fromEnvironment('SKARB_EMAIL');
+  static const password = String.fromEnvironment('SKARB_PASSWORD');
 
   /// Таймаут запитів.
   static const timeout = Duration(seconds: 15);

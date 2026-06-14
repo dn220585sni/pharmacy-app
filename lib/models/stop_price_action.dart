@@ -1,3 +1,5 @@
+import 'money.dart';
+
 /// Активна акція/правило знижки на товар з API `GetStopPriceUKod`.
 class StopPriceAction {
   /// ID акції — узгоджено з `pravilo` поля у GetSumSkid Goods.
@@ -299,16 +301,23 @@ class StopPriceRule {
     return null;
   }
 
-  /// Акційна ціна при роздрібній [retail]: для % → `retail×(1−%)`, для грн →
-  /// `retail−грн`. `null` якщо знижки нема або ціна некоректна.
-  double? promoPrice(double retail) {
-    if (retail <= 0) return null;
+  /// Акційна ціна при роздрібній [retail] у копійках: для % → `retail×(1−%)`,
+  /// для грн → `retail−грн`. `null` якщо знижки нема або ціна некоректна.
+  /// Округлення в копійку — без float-похибок.
+  Money? promoPriceMoney(Money retail) {
+    if (!retail.isPositive) return null;
     final pct = discountPercent;
-    if (pct != null && pct < 0) return retail * (1 + pct / 100);
+    if (pct != null && pct < 0) return retail.percent(100 + pct);
     final uah = discountUah;
-    if (uah != null) return (retail - uah).clamp(0, retail).toDouble();
+    if (uah != null) {
+      return (retail - Money.fromHryvnia(uah)).clampMoney(Money.zero, retail);
+    }
     return null;
   }
+
+  /// Акційна ціна як `double` (делегує [promoPriceMoney]).
+  double? promoPrice(double retail) =>
+      promoPriceMoney(Money.fromHryvnia(retail))?.toHryvnia();
 
   /// Короткий текст: "Купи 2+ → −10%" / "Купи 2+ → −32 грн". `null` якщо нема знижки.
   String? get incentiveText {

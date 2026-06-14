@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import '../models/checkout_totals.dart';
 import '../models/customer_loyalty.dart';
+import '../models/money.dart';
 import '../models/payment_method.dart';
 
 /// Shared checkout state & calculation logic.
@@ -38,24 +40,23 @@ mixin CheckoutMixin<T extends StatefulWidget> on State<T> {
 
   // ── Computed getters ───────────────────────────────────────────────────
 
-  double get discountAmount {
-    if (personalDiscount == null) return 0;
-    return baseTotal * personalDiscount! / 100;
-  }
+  /// Розрахунок чекауту у копійках (без float-похибок). Публічні getter-и
+  /// нижче конвертують у `double` на межі, тож споживачі не змінюються.
+  CheckoutTotals get _totals => CheckoutTotals(
+        base: Money.fromHryvnia(baseTotal),
+        discountPct: personalDiscount,
+        useBonuses: useBonuses && checkoutLoyalty != null,
+        enteredBonus: Money.tryParse(bonusCtr.text) ?? Money.zero,
+        bonusBalance: checkoutLoyalty == null
+            ? Money.zero
+            : Money.fromHryvnia(checkoutLoyalty!.bonusBalance),
+      );
 
-  double get effectiveBonusAmount {
-    if (!useBonuses || checkoutLoyalty == null) return 0;
-    final text = bonusCtr.text.replaceAll(',', '.');
-    final entered = double.tryParse(text) ?? 0;
-    final maxByBalance = checkoutLoyalty!.bonusBalance;
-    final maxByTotal = baseTotal - discountAmount;
-    return entered.clamp(0, maxByBalance).clamp(0, maxByTotal).toDouble();
-  }
+  double get discountAmount => _totals.discount.toHryvnia();
 
-  double get finalTotal {
-    final raw = baseTotal - discountAmount - effectiveBonusAmount;
-    return raw < 0 ? 0 : raw;
-  }
+  double get effectiveBonusAmount => _totals.bonus.toHryvnia();
+
+  double get finalTotal => _totals.finalTotal.toHryvnia();
 
   // ── Methods ────────────────────────────────────────────────────────────
 

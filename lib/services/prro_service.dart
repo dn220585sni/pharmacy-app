@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../models/money.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -887,7 +888,7 @@ class PrroService {
   }
 
   static String _money(double v) =>
-      v.toStringAsFixed(2).replaceAll('.', ',');
+      v.asMoney;
 
   static List<String> _formatProductLines(PrroProduct p) {
     final qty = p.amount == p.amount.floorToDouble()

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import '../models/cart_item.dart';
 import 'cart_item_widget.dart';
 
@@ -226,7 +227,7 @@ class _CartDialogState extends State<CartDialog> {
               ),
               const Spacer(),
               Text(
-                '${_cartTotal.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                '${_cartTotal.asMoney} ₴',
                 style: const TextStyle(
                   color: Color(0xFF1E7DC8),
                   fontSize: 22,

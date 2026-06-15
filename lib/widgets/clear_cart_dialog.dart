@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 
 /// Shows a confirmation dialog for clearing the cart.
 /// Returns `true` if the user confirmed, `null`/`false` otherwise.
@@ -43,7 +44,7 @@ Future<bool?> showClearCartDialog({
               Text(
                 'Ви дійсно хочете очистити кошик?\n'
                 '$itemCount поз. на суму '
-                '${cartTotal.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                '${cartTotal.asMoney} ₴',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 13,

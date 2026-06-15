@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../models/money.dart';
 import 'package:flutter/services.dart';
 import '../../models/customer_loyalty.dart';
 
@@ -105,7 +106,7 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                         if (hasLoyalty)
                           TextSpan(
                             text:
-                                ' (доступно ${widget.loyalty!.bonusBalance.toStringAsFixed(2).replaceAll('.', ',')})',
+                                ' (доступно ${widget.loyalty!.bonusBalance.asMoney})',
                             style: const TextStyle(
                                 color: Color(0xFF9CA3AF), fontSize: 11.5),
                           ),
@@ -171,7 +172,7 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                 if (widget.effectiveBonusAmount > 0) ...[
                   const SizedBox(width: 8),
                   Text(
-                    '-${widget.effectiveBonusAmount.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                    '-${widget.effectiveBonusAmount.asMoney} ₴',
                     style: const TextStyle(
                       color: Color(0xFF10B981),
                       fontSize: 12,
@@ -253,7 +254,7 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                         if (widget.personalDiscount != null)
                           TextSpan(
                             text:
-                                '  -${widget.discountAmount.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                                '  -${widget.discountAmount.asMoney} ₴',
                             style: const TextStyle(
                               color: Color(0xFF10B981),
                               fontSize: 12,
@@ -263,7 +264,7 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                         else if (hasLoyalty && widget.availableDiscountAmount != null && widget.availableDiscountAmount! > 0)
                           TextSpan(
                             text:
-                                ' (${widget.availableDiscountAmount!.toStringAsFixed(2).replaceAll('.', ',')} ₴)',
+                                ' (${widget.availableDiscountAmount!.asMoney} ₴)',
                             style: const TextStyle(
                               color: Color(0xFF9CA3AF),
                               fontSize: 11.5,

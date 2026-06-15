@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import '../models/drug.dart';
 import '../models/edk_offer.dart';
 import '../models/nearby_pharmacy.dart';
@@ -430,7 +431,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                      '${drug.price.asMoney} ₴',
                       style: const TextStyle(
                         color: Color(0xFF1C1C2E),
                         fontSize: 20,
@@ -1068,7 +1069,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        '${ph.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                        '${ph.price.asMoney} ₴',
                         style: const TextStyle(
                           color: Color(0xFF1C1C2E),
                           fontSize: 12,

@@ -130,4 +130,15 @@ void main() {
       expect(Money.fromHryvnia(-5.5).format(), '-5,50');
     });
   });
+
+  group('MoneyFormatNum extension (UI)', () {
+    test('asMoney збігається зі старим toStringAsFixed(2).replaceAll', () {
+      for (final v in [0.0, 7, 19.99, 125.5, 1234.56, 670.91]) {
+        expect(v.asMoney, v.toStringAsFixed(2).replaceAll('.', ','));
+      }
+    });
+    test('asMoneySymbol додає ₴', () {
+      expect(19.99.asMoneySymbol, '19,99 ${String.fromCharCode(0x20B4)}');
+    });
+  });
 }

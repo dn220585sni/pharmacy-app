@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../models/money.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../data/cart_offers.dart';
@@ -3478,7 +3479,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             const SizedBox(width: 6),
             Text(
               hasItems
-                  ? '$_cartItemCount поз.  |  ${_displayCartTotal.toStringAsFixed(2).replaceAll('.', ',')} ₴'
+                  ? '$_cartItemCount поз.  |  ${_displayCartTotal.asMoney} ₴'
                   : 'Кошик',
               style: TextStyle(
                 color: isActive ? Colors.white : const Color(0xFF6B7280),

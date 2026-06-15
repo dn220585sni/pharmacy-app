@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import 'package:flutter/services.dart';
 import '../models/prescription.dart';
 import '../models/drug.dart';
@@ -1524,7 +1525,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
           _summaryItem('Кількість', '$_totalQty'),
           Container(
               width: 1, height: 20, color: const Color(0xFFBBF7D0)),
-          _summaryItem('Сума', _totalPrice.toStringAsFixed(2)),
+          _summaryItem('Сума', _totalPrice.asMoney),
           Container(
               width: 1, height: 20, color: const Color(0xFFBBF7D0)),
           Expanded(
@@ -1535,7 +1536,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
                         fontSize: 9,
                         color: Color(0xFF16A34A),
                         fontWeight: FontWeight.w500)),
-                Text(_totalCopayment.toStringAsFixed(2),
+                Text(_totalCopayment.asMoney,
                     style: const TextStyle(
                         fontSize: 14,
                         color: Color(0xFF16A34A),
@@ -1728,7 +1729,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
             ),
             SizedBox(
               width: 60,
-              child: Text(match.drug.price.toStringAsFixed(2),
+              child: Text(match.drug.price.asMoney,
                   textAlign: TextAlign.right,
                   style: const TextStyle(
                       fontSize: 11,
@@ -1739,7 +1740,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
               width: 60,
               child: Text(
                   match.reimbursementPrice > 0
-                      ? match.reimbursementPrice.toStringAsFixed(2)
+                      ? match.reimbursementPrice.asMoney
                       : '—',
                   textAlign: TextAlign.right,
                   style: const TextStyle(
@@ -1749,7 +1750,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
             ),
             SizedBox(
               width: 60,
-              child: Text(match.copayment.toStringAsFixed(2),
+              child: Text(match.copayment.asMoney,
                   textAlign: TextAlign.right,
                   style: TextStyle(
                       fontSize: 11,

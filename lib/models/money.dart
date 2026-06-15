@@ -119,3 +119,16 @@ class Money implements Comparable<Money> {
   @override
   String toString() => 'Money(${format()})';
 }
+
+/// Зручне форматування грошей у грн (`double`/`int`) для UI.
+/// Єдина заміна розкиданим `x.toStringAsFixed(2).replaceAll('.', ',')`.
+extension MoneyFormatNum on num {
+  /// "125,99" (кома-роздільник, 2 знаки).
+  String get asMoney => Money.fromHryvnia(this).format();
+
+  /// "125,99 ₴".
+  String get asMoneySymbol => Money.fromHryvnia(this).format(symbol: true);
+
+  /// "1 234,56" (групування тисяч, nbsp).
+  String get asMoneyGrouped => Money.fromHryvnia(this).format(grouped: true);
+}

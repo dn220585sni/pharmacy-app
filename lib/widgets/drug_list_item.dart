@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import 'package:flutter/services.dart';
 import '../models/drug.dart';
 import '../services/pakunok_service.dart';
@@ -286,7 +287,7 @@ class _DrugListItemState extends State<DrugListItem> {
                 size: 11, color: Color(0xFF16A34A)),
           ),
           Text(
-            promo.toStringAsFixed(2).replaceAll('.', ','),
+            promo.asMoney,
             textAlign: TextAlign.right,
             style: TextStyle(
               color: isDimmed ? textSecondary : const Color(0xFF15803D),
@@ -317,7 +318,7 @@ class _DrugListItemState extends State<DrugListItem> {
               ),
             Text(
               drug.price > 0
-                  ? drug.price.toStringAsFixed(2).replaceAll('.', ',')
+                  ? drug.price.asMoney
                   : '—',
               textAlign: TextAlign.right,
               style: TextStyle(

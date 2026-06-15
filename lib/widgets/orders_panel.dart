@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import '../mixins/checkout_mixin.dart';
 import '../mixins/edk_state_mixin.dart';
 import '../models/internet_order.dart';
@@ -1815,7 +1816,7 @@ class OrdersPanelState extends State<OrdersPanel>
                                         ),
                                         const Spacer(),
                                         Text(
-                                          '${order.total.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                                          '${order.total.asMoney} ₴',
                                           style: const TextStyle(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w700,
@@ -2192,7 +2193,7 @@ class OrdersPanelState extends State<OrdersPanel>
 
   Widget _buildDetailFooter(InternetOrder order) {
     final formattedTotal =
-        order.total.toStringAsFixed(2).replaceAll('.', ',');
+        order.total.asMoney;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
@@ -2403,7 +2404,7 @@ class OrdersPanelState extends State<OrdersPanel>
 
   Widget _buildCheckoutBody(InternetOrder order) {
     final formattedTotal =
-        finalTotal.toStringAsFixed(2).replaceAll('.', ',');
+        finalTotal.asMoney;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
@@ -2885,7 +2886,7 @@ class _OrderListTileState extends State<_OrderListTile> {
               ),
               // Price
               Text(
-                '${order.total.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                '${order.total.asMoney} ₴',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -3293,7 +3294,7 @@ class _OrderItemRow extends StatelessWidget {
                     ],
                     const SizedBox(height: 2),
                     Text(
-                      '${item.price.toStringAsFixed(2).replaceAll('.', ',')} ₴ × $qtyStr',
+                      '${item.price.asMoney} ₴ × $qtyStr',
                       style: TextStyle(
                         color: isScanned
                             ? const Color(0xFF86EFAC)
@@ -3329,7 +3330,7 @@ class _OrderItemRow extends StatelessWidget {
                       )
                     : null,
                 child: Text(
-                  '${item.total.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                  '${item.total.asMoney} ₴',
                   textAlign: TextAlign.right,
                   style: TextStyle(
                     color: isDiscount

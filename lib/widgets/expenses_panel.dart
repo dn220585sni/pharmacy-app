@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import '../models/cash_expense.dart';
 import '../data/mock_expenses.dart';
 import 'hover_icon_button.dart';
@@ -805,7 +806,7 @@ class ExpensesPanelState extends State<ExpensesPanel> {
 
   Widget _buildDetailFooter(CashExpense expense) {
     final formattedAmount =
-        expense.amount.toStringAsFixed(2).replaceAll('.', ',');
+        expense.amount.asMoney;
     final minutesSinceSale =
         DateTime.now().difference(expense.dateTime).inMinutes;
     final canReturn =
@@ -1085,7 +1086,7 @@ class _ExpenseListTileState extends State<_ExpenseListTile> {
         '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}';
     final timeStr =
         '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-    final amountStr = e.amount.toStringAsFixed(2).replaceAll('.', ',');
+    final amountStr = e.amount.asMoney;
 
     Color statusColor;
     switch (e.status) {
@@ -1218,8 +1219,8 @@ class _ExpenseItemRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final totalStr = item.total.toStringAsFixed(2).replaceAll('.', ',');
-    final priceStr = item.price.toStringAsFixed(2).replaceAll('.', ',');
+    final totalStr = item.total.asMoney;
+    final priceStr = item.price.asMoney;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),

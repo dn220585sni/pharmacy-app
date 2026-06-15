@@ -843,7 +843,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     // Показуємо серверну фінальну суму (з усіма знижками) — `finalTotal`
     // повертає її коли є server pricing, інакше fallback на baseTotal.
     final formattedTotal =
-        finalTotal.toStringAsFixed(2).replaceAll('.', ',');
+        finalTotal.asMoney;
     final hasItems = widget.cart.isNotEmpty;
     final canCheckout = hasItems && _allCartScanned && !widget.isLoadingPricing;
 
@@ -1488,7 +1488,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   Widget _buildCheckoutBody() {
     final formattedTotal =
-        finalTotal.toStringAsFixed(2).replaceAll('.', ',');
+        finalTotal.asMoney;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),

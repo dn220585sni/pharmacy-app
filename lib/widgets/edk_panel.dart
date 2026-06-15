@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import '../models/drug.dart';
 import '../models/edk_offer.dart';
 
@@ -185,7 +186,7 @@ class EdkPanel extends StatelessWidget {
                   // Price
                   if (drug.price > 0)
                     Text(
-                      '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                      '${drug.price.asMoney} ₴',
                       style: const TextStyle(
                         color: Color(0xFF1C1C2E),
                         fontSize: 22,

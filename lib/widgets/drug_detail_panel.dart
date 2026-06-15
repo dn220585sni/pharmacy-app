@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import '../models/drug.dart';
 import '../models/stop_price_action.dart';
 import '../services/farmasell_service.dart';
@@ -402,7 +403,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
     final hasPromo = promo != null && promo > 0 && promo < drug.price;
     if (!hasPromo) {
       return Text(
-        '${drug.price.toStringAsFixed(2)} ₴',
+        '${drug.price.asMoney} ₴',
         style: const TextStyle(
           color: Color(0xFF1E7DC8),
           fontSize: 22,
@@ -415,7 +416,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          '${drug.price.toStringAsFixed(2)} ₴',
+          '${drug.price.asMoney} ₴',
           style: const TextStyle(
             color: Color(0xFF9CA3AF),
             fontSize: 13,
@@ -434,7 +435,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
                   size: 16, color: Color(0xFF16A34A)),
             ),
             Text(
-              '${promo.toStringAsFixed(2)} ₴',
+              '${promo.asMoney} ₴',
               style: const TextStyle(
                 color: Color(0xFF15803D),
                 fontSize: 22,
@@ -1541,7 +1542,7 @@ class CacheAnalogueRow extends StatelessWidget {
               SizedBox(
                 width: 72,
                 child: Text(
-                  '${item.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                  '${item.price.asMoney} ₴',
                   textAlign: TextAlign.right,
                   style: const TextStyle(
                     color: Color(0xFF1C1C2E),
@@ -1633,7 +1634,7 @@ class _ExternalAnalogueRow extends StatelessWidget {
           SizedBox(
             width: 72,
             child: Text(
-              '${product.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+              '${product.price.asMoney} ₴',
               textAlign: TextAlign.right,
               style: const TextStyle(
                 color: Color(0xFF6B7280),
@@ -1755,7 +1756,7 @@ class _HelpingHandButton extends StatelessWidget {
                 child: Row(
                   children: [
                     Text(
-                      '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                      '${drug.price.asMoney} ₴',
                       style: const TextStyle(
                         color: Color(0xFF9CA3AF),
                         fontSize: 12,
@@ -1768,7 +1769,7 @@ class _HelpingHandButton extends StatelessWidget {
                         size: 13, color: Color(0xFFD4637A)),
                     const SizedBox(width: 8),
                     Text(
-                      '${discountPrice!.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                      '${discountPrice!.asMoney} ₴',
                       style: const TextStyle(
                         color: Color(0xFFD4637A),
                         fontSize: 15,
@@ -1784,7 +1785,7 @@ class _HelpingHandButton extends StatelessWidget {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        '-${(drug.price - discountPrice!).toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                        '-${(drug.price - discountPrice!).asMoney} ₴',
                         style: const TextStyle(
                           color: Color(0xFF10B981),
                           fontSize: 10.5,
@@ -2079,7 +2080,7 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  '${widget.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                                  '${widget.drug.price.asMoney} ₴',
                                   style: const TextStyle(
                                     color: Color(0xFF9CA3AF),
                                     fontSize: 14,
@@ -2107,7 +2108,7 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  '${_discountPrice!.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                                  '${_discountPrice!.asMoney} ₴',
                                   style: const TextStyle(
                                     color: Color(0xFF1C1C2E),
                                     fontSize: 18,
@@ -2126,7 +2127,7 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
-                                '-${(widget.drug.price - _discountPrice!).toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                                '-${(widget.drug.price - _discountPrice!).asMoney} ₴',
                                 style: const TextStyle(
                                   color: Color(0xFF10B981),
                                   fontSize: 12,

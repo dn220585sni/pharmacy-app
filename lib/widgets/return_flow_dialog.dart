@@ -2,6 +2,7 @@
 // Full return flow with item checkboxes, category, SMS verification.
 
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import '../models/cash_expense.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -322,7 +323,7 @@ class _ReturnFlowDialogState extends State<ReturnFlowDialog> {
     final items = _realItems;
     return List.generate(items.length, (i) {
       final item = items[i];
-      final totalStr = item.total.toStringAsFixed(2).replaceAll('.', ',');
+      final totalStr = item.total.asMoney;
       return Container(
         margin: const EdgeInsets.only(bottom: 4),
         decoration: BoxDecoration(

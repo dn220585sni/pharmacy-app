@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../models/money.dart';
 import 'package:flutter/services.dart';
 
 /// Cash amount input + computed change row + bonus transfer option.
@@ -157,7 +158,7 @@ class CashChangeSection extends StatelessWidget {
                   const Spacer(),
                   Text(
                     hasChange
-                        ? '${change.toStringAsFixed(2).replaceAll('.', ',')} ₴'
+                        ? '${change.asMoney} ₴'
                         : '— ₴',
                     style: TextStyle(
                       color: hasChange
@@ -207,7 +208,7 @@ class CashChangeSection extends StatelessWidget {
               // Pre-fill with full change amount when turning on
               if (newValue && bonusTransferController != null) {
                 bonusTransferController!.text =
-                    change.toStringAsFixed(2).replaceAll('.', ',');
+                    change.asMoney;
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   bonusTransferFocusNode?.requestFocus();
                 });
@@ -238,7 +239,7 @@ class CashChangeSection extends StatelessWidget {
                       onTransferChangeToBonusChanged?.call(newValue);
                       if (newValue && bonusTransferController != null) {
                         bonusTransferController!.text =
-                            change.toStringAsFixed(2).replaceAll('.', ',');
+                            change.asMoney;
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           bonusTransferFocusNode?.requestFocus();
                         });

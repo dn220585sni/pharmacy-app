@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import '../models/cart_offer.dart';
 import '../models/drug.dart';
 
@@ -183,7 +184,7 @@ class CartOfferCard extends StatelessWidget {
                       const SizedBox(width: 8),
                       // Price (right)
                       Text(
-                        '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                        '${drug.price.asMoney} ₴',
                         style: const TextStyle(
                           color: Color(0xFF1C1C2E),
                           fontSize: 15,

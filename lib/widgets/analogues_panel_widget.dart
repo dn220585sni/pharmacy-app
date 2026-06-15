@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import '../models/drug.dart';
 import 'drug_list_item.dart' show kColBadge;
 
@@ -221,7 +222,7 @@ class _AnalogueRow extends StatelessWidget {
             SizedBox(
               width: _kColPrice,
               child: Text(
-                '${drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                '${drug.price.asMoney} ₴',
                 textAlign: TextAlign.right,
                 style: TextStyle(
                   color: textSecondary,

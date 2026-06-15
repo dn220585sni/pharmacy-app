@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/money.dart';
 import '../models/cart_item.dart';
 import '../models/stop_price_action.dart';
 import 'stop_price_info_dialog.dart';
@@ -233,7 +234,7 @@ class CartItemWidget extends StatelessWidget {
                 const SizedBox(height: 2),
                 if (item.isPrescription) ...[
                   Text(
-                    'Доплата: ${item.prescriptionData!.copayment.toStringAsFixed(2)} ₴ × ${item.displayQty}',
+                    'Доплата: ${item.prescriptionData!.copayment.asMoney} ₴ × ${item.displayQty}',
                     style: const TextStyle(
                       color: Color(0xFF16A34A),
                       fontSize: 11,
@@ -245,7 +246,7 @@ class CartItemWidget extends StatelessWidget {
                     children: [
                       // Стара ціна — закреслена, контрастний сірий
                       Text(
-                        '${item.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                        '${item.drug.price.asMoney} ₴',
                         style: const TextStyle(
                           color: Color(0xFF9CA3AF),
                           fontSize: 10.5,
@@ -260,7 +261,7 @@ class CartItemWidget extends StatelessWidget {
                           size: 10, color: Color(0xFF16A34A)),
                       const SizedBox(width: 3),
                       Text(
-                        '${_displayUnitPrice.toStringAsFixed(2).replaceAll('.', ',')} ₴ × ${item.displayQty}',
+                        '${_displayUnitPrice.asMoney} ₴ × ${item.displayQty}',
                         style: const TextStyle(
                           color: Color(0xFF15803D),
                           fontSize: 11,
@@ -271,7 +272,7 @@ class CartItemWidget extends StatelessWidget {
                   ),
                 ] else
                   Text(
-                    '${item.drug.price.toStringAsFixed(2).replaceAll('.', ',')} ₴ × ${item.displayQty}',
+                    '${item.drug.price.asMoney} ₴ × ${item.displayQty}',
                     style: TextStyle(
                       color: isScanned
                           ? const Color(0xFF93C5FD)
@@ -343,7 +344,7 @@ class CartItemWidget extends StatelessWidget {
                       )
                     : null,
                 child: Text(
-                  '${(serverCost ?? item.total).toStringAsFixed(2).replaceAll('.', ',')} ₴',
+                  '${(serverCost ?? item.total).asMoney} ₴',
                   textAlign: TextAlign.right,
                   style: TextStyle(
                     color: isScanned

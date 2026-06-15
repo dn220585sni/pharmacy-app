@@ -697,8 +697,8 @@ class PrroService {
   // ---------------------------------------------------------------------------
 
   /// Z-звіт — закрити поточну зміну.
-  /// Endpoint `/shift/xReport` з `action_type: Z_REPORT` (підтверджено
-  /// CashDesk 2026-05-12). Через cloud test API працює.
+  /// Endpoint `POST /shift` з `action_type: Z_REPORT` (док. CashDesk).
+  /// УВАГА: `/shift/xReport` — це X-звіт (НЕ закриває зміну), не плутати.
   static Future<PrroResult> zReport({int printWidth = 40}) async {
     if (!await _ensureAuth()) {
       return const PrroResult.failure(
@@ -710,14 +710,13 @@ class PrroService {
     try {
       final body = {
         'action_type': 'Z_REPORT',
-        'num_fiscal': activeFiscalNumber.toString(),
+        'num_fiscal': activeFiscalNumber,
         'print_width': printWidth,
         'pdf_width': printWidth,
-        'developer-id': PrroConfig.developerId,
       };
 
       final response = await _client.post(
-        Uri.parse('${PrroConfig.environment.baseUrl}/shift/xReport'),
+        Uri.parse('${PrroConfig.environment.baseUrl}/shift'),
         headers: _headers,
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 30));

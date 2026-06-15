@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/prro_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock shift data (will be replaced by a service layer later)
@@ -64,6 +65,7 @@ class ShiftDashboard extends StatefulWidget {
 class _ShiftDashboardState extends State<ShiftDashboard>
     with SingleTickerProviderStateMixin {
   bool _expanded = false;
+  bool _closingShift = false;
 
   // ── Earned counter animation ─────────────────────────────────────────────
   late AnimationController _earningCtrl;
@@ -144,9 +146,82 @@ class _ShiftDashboardState extends State<ShiftDashboard>
           ),
           const SizedBox(height: 12),
           _buildExpandable(),
+          const SizedBox(height: 20),
+          _buildCloseShiftButton(),
         ],
       ),
     );
+  }
+
+  // ── Close shift (Z-report) ─────────────────────────────────────────────────
+
+  Widget _buildCloseShiftButton() {
+    return OutlinedButton.icon(
+      onPressed: _closingShift ? null : _closeShift,
+      icon: _closingShift
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.lock_clock_rounded, size: 18),
+      label: Text(_closingShift ? 'Закриття зміни…' : 'Закрити зміну (Z-звіт)'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: const Color(0xFFB91C1C),
+        side: const BorderSide(color: Color(0xFFFCA5A5)),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  Future<void> _closeShift() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        icon: const Icon(Icons.point_of_sale_rounded,
+            color: Color(0xFFEF4444), size: 36),
+        title: const Text('Закрити зміну?',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        content: const Text(
+          'Буде сформовано фіскальний Z-звіт і зміну закрито у ПРРО.\n'
+          'Дію не можна скасувати.',
+          style: TextStyle(fontSize: 13.5, height: 1.4),
+          textAlign: TextAlign.center,
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Скасувати'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Закрити зміну'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _closingShift = true);
+    final result = await PrroService.zReport();
+    if (!mounted) return;
+    setState(() => _closingShift = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(result.success
+          ? 'Зміну закрито — Z-звіт сформовано'
+          : 'Не вдалося закрити зміну: ${result.error}'),
+      backgroundColor:
+          result.success ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   // ── Earned card ──────────────────────────────────────────────────────────

@@ -26,14 +26,17 @@ class CartItem {
   /// Effective unit price (discount or original).
   double get effectivePrice => discountPrice ?? drug.price;
 
+  /// Ціна за блістер (для дробового продажу) — ціна паковки / к-сть блістерів,
+  /// округлена в копійку. Узгоджено з фіскальним чеком ПРРО.
+  Money get blisterPriceMoney =>
+      Money.fromHryvnia(effectivePrice / drug.unitsPerPackage!);
+
   /// Ціна позиції у копійках (без float-похибок). Для дробових позицій
-  /// (блістери) — частка ціни паковки, округлена в копійку.
-  Money get totalMoney {
-    final unit = Money.fromHryvnia(effectivePrice);
-    return isFractional
-        ? unit.fraction(fractionalQty!, drug.unitsPerPackage!)
-        : unit * quantity;
-  }
+  /// (блістери) — ціна за блістер × ціле число блістерів (як у чеку ПРРО),
+  /// а не частка паковки — щоб кошик і фіскальний чек збігалися до копійки.
+  Money get totalMoney => isFractional
+      ? blisterPriceMoney * fractionalQty!
+      : Money.fromHryvnia(effectivePrice) * quantity;
 
   double get total => totalMoney.toHryvnia();
 

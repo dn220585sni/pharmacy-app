@@ -6,6 +6,7 @@ import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
 import '../models/customer_loyalty.dart';
 import '../models/drug.dart';
+import '../models/money.dart';
 import '../models/payment_method.dart';
 import '../models/prescription.dart';
 import '../models/social_project.dart';
@@ -391,7 +392,10 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   /// - логічна помилка ПРРО → блок (`false`)
   Future<bool> _sendFiscalReceipt() async {
     final products = _buildPrroProducts();
-    final saleTotal = products.fold<double>(0, (s, p) => s + p.cost);
+    // Сума рядків у копійках (без float-дрейфу), потім назад у грн.
+    final saleTotal = products
+        .fold(Money.zero, (Money s, p) => s + Money.fromHryvnia(p.cost))
+        .toHryvnia();
     // Payments вирівнюються з sum(products.cost) — інакше ПРРО відхилить
     // ("payments not equal products sum"). Округлення на чек (skidka_sumcheck)
     // і cash_withdrawal — поки не передаємо у ПРРО.
@@ -456,39 +460,41 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   /// Сформувати список товарів для фіскального чеку.
   ///
-  /// Якщо є server pricing (`GetSumSkid`) — беремо `cost`/`unitPrice` звідти,
-  /// щоб сума products точно дорівнювала payments (інакше ПРРО відхилить).
-  /// Fallback — клієнтська калькуляція з пропорційним розподілом знижки.
+  /// Payload товарів дзеркалить кошик (ті самі `item.*`, що показані клієнту),
+  /// щоб сума чека ПРРО точно дорівнювала кошику. Серверне per-item ціноутворення
+  /// тут НЕ використовуємо: його `itemAt` може бути зміщене відносно порядку
+  /// кошика, що давало чужу ціну в чеку.
   List<PrroProduct> _buildPrroProducts() {
     final items = widget.cart;
     if (items.isEmpty) return const [];
 
-    final pricing = widget.serverPricing;
-
     return List.generate(items.length, (i) {
       final item = items[i];
       final isFractional = item.isFractional;
-      final amount = isFractional
-          ? item.fractionalQty! / item.drug.unitsPerPackage!
-          : item.quantity.toDouble();
 
-      final p = pricing?.itemAt(i);
-      final unitPrice = p?.unitPrice ?? item.effectivePrice;
-      final cost = p?.cost ?? item.total;
-      final lineDiscount = p?.lineDiscount;
+      // ПРРО вимагає cost == price * amount. Щоб рівність трималась точно,
+      // одиниця продажу має бути цілою: для блістерів — це БЛІСТЕР (price за
+      // блістер у копійках, amount = ціле число блістерів), а не дробова
+      // частка паковки (де price*amount = нескінченний дріб і ПРРО відхиляє).
+      final Money unitMoney =
+          isFractional ? item.blisterPriceMoney : Money.fromHryvnia(item.effectivePrice);
+      final double amount =
+          isFractional ? item.fractionalQty!.toDouble() : item.quantity.toDouble();
+
+      // price і cost — чисті 2 знаки (через Money). cost == item.totalMoney,
+      // тож чек збігається з кошиком до копійки.
+      final price = unitMoney.toHryvnia();
+      final cost = item.totalMoney.toHryvnia();
 
       return PrroProduct.classified(
         name: item.drug.displayName,
         amount: amount,
-        price: unitPrice,
+        price: price,
         cost: cost,
         isMedicine: item.drug.isMedicine,
         code: item.drug.skuCode,
         barcode: item.drug.barcode,
         unitName: isFractional ? 'блістер' : 'штука',
-        discount: (lineDiscount != null && lineDiscount > 0)
-            ? lineDiscount
-            : null,
       );
     }, growable: false);
   }

@@ -58,8 +58,14 @@ class CartPricing {
     DateTime? computedAt,
   }) : computedAt = computedAt ?? DateTime.now();
 
-  CartItemPricing? itemAt(int index) =>
-      index >= 0 && index < items.length ? items[index] : null;
+  /// Позиція кошика за її `index` (а НЕ за позицією в списку — серверні goods
+  /// можуть приходити в іншому порядку, ніж кошик).
+  CartItemPricing? itemAt(int index) {
+    for (final it in items) {
+      if (it.index == index) return it;
+    }
+    return null;
+  }
 
   /// Порожня калькуляція — для пустого кошика.
   factory CartPricing.empty({bool fromServer = false}) => CartPricing(
@@ -322,16 +328,24 @@ class CartPriceService {
     required List<CartItem> cart,
     required GetSumSkidResponse response,
   }) {
+    // Ключ матчингу — серверний `skod`, тобто `drug.id` без префікса `srv_`
+    // (той самий код, що йде в sgVRoznSetLock і повертається GetSumSkid).
+    // НЕ skuCode — це інша система кодів, через неї був свап цін у кошику.
+    // U-коди (`srv_u_`) не мають s-коду → пропускаємо.
     final byCode = <String, int>{};
     for (var i = 0; i < cart.length; i++) {
-      final code = cart[i].drug.skuCode ?? cart[i].drug.id;
-      byCode[code] = i;
+      final id = cart[i].drug.id;
+      if (id.startsWith('srv_u_')) continue;
+      final code = id.replaceFirst('srv_', '');
+      if (code.isNotEmpty) byCode[code] = i;
     }
 
     final items = <CartItemPricing>[];
     var subtotal = 0.0;
     for (final g in response.goods) {
-      final idx = byCode[g.skod] ?? items.length;
+      // НЕ вгадувати позицію за порядком сервера (давало свап цін у кошику):
+      // якщо не зматчили за кодом — лишаємо index=-1, дисплей візьме item.total.
+      final idx = byCode[g.skod] ?? -1;
       final lineDiscountUah = g.discPercent != 0
           ? _round2((g.price * g.qty) * (g.discPercent.abs() / 100))
           : null;

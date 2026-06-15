@@ -33,14 +33,27 @@ void main() {
       expect(item.totalMoney, Money.fromHryvnia(160));
     });
 
-    test('дробова позиція: частка ціни паковки, округлена', () {
-      // Паковка 84,00 грн, 10 блістерів, 3 блістери → 25,20
+    test('дробова позиція: ціна за блістер × к-сть (подільна паковка)', () {
+      // Паковка 84,00 грн, 10 блістерів → 8,40/блістер; 3 блістери → 25,20
       final item = CartItem(
         drug: _drug(price: 84.00, unitsPerPackage: 10),
         quantity: 1,
         fractionalQty: 3,
       );
+      expect(item.blisterPriceMoney, Money.fromHryvnia(8.40));
       expect(item.totalMoney, Money.fromHryvnia(25.20));
+    });
+
+    test('дробова позиція: неподільна паковка (узгоджено з ПРРО)', () {
+      // Паковка 100,00 грн, 3 блістери → 33,33/блістер (округлено);
+      // 2 блістери → 66,66 (а НЕ 66,67 як частка паковки) — щоб кошик = чек.
+      final item = CartItem(
+        drug: _drug(price: 100.00, unitsPerPackage: 3),
+        quantity: 1,
+        fractionalQty: 2,
+      );
+      expect(item.blisterPriceMoney, Money.fromHryvnia(33.33));
+      expect(item.totalMoney, Money.fromHryvnia(66.66));
     });
   });
 }

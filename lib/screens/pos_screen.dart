@@ -2759,7 +2759,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         'sku': item.drug.id.replaceFirst('srv_', ''),
         'price': item.effectivePrice,
         'qty': qty,
-        'sum': item.total,
+        // sum == price*qty з повною точністю (як очікують зовнішні API);
+        // item.total округлений у копійки — лише для відображення.
+        'sum': item.effectivePrice * qty,
       };
     }).toList();
 

@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  analyze-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # Поки в коді є передіснуючі info/warning — фейлимо лише на errors.
+      # Коли почистимо warning, прибрати --no-fatal-*.
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      # Юніт-тести. Ручний скрипт звʼязку з Caché живе в tool/ (не тут).
+      - name: Test
+        run: flutter test

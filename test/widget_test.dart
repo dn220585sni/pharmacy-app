@@ -1,17 +1,16 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pharmacy_app/models/money.dart';
 
-import 'package:pharmacy_app/main.dart';
-
+// Примітка: повноцінний smoke-тест усього PharmacyApp потребує DI/моків
+// сервісів (старт додатка йде в мережу) — окремий пункт аудиту. Поки що —
+// фокусований widget-тест відображення грошей (без мережі).
 void main() {
-  testWidgets('PharmacyApp smoke test', (WidgetTester tester) async {
-    await tester.pumpWidget(const PharmacyApp());
-    expect(find.text('ФармаПОС'), findsOneWidget);
+  testWidgets('Money рендериться у віджеті як "19,99 ₴"', (tester) async {
+    final hrn = String.fromCharCode(0x20B4);
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: Text(19.99.asMoneySymbol))),
+    );
+    expect(find.text('19,99 $hrn'), findsOneWidget);
   });
 }

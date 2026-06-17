@@ -66,6 +66,7 @@ class _ShiftDashboardState extends State<ShiftDashboard>
     with SingleTickerProviderStateMixin {
   bool _expanded = false;
   bool _closingShift = false;
+  bool _openingShift = false;
 
   // ── Earned counter animation ─────────────────────────────────────────────
   late AnimationController _earningCtrl;
@@ -147,10 +148,52 @@ class _ShiftDashboardState extends State<ShiftDashboard>
           const SizedBox(height: 12),
           _buildExpandable(),
           const SizedBox(height: 20),
+          _buildOpenShiftButton(),
+          const SizedBox(height: 10),
           _buildCloseShiftButton(),
         ],
       ),
     );
+  }
+
+  // ── Open shift ─────────────────────────────────────────────────────────────
+
+  Widget _buildOpenShiftButton() {
+    return ElevatedButton.icon(
+      onPressed: _openingShift ? null : _openShift,
+      icon: _openingShift
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Colors.white),
+            )
+          : const Icon(Icons.play_circle_outline_rounded, size: 18),
+      label: Text(_openingShift ? 'Відкриття зміни…' : 'Відкрити зміну'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF1E7DC8),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  Future<void> _openShift() async {
+    setState(() => _openingShift = true);
+    final result = await PrroService.openShift();
+    if (!mounted) return;
+    setState(() => _openingShift = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(result.success
+          ? 'Зміну відкрито'
+          : 'Не вдалося відкрити зміну: ${result.error}'),
+      backgroundColor:
+          result.success ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   // ── Close shift (Z-report) ─────────────────────────────────────────────────

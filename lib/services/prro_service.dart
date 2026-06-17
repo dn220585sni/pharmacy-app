@@ -697,6 +697,60 @@ class PrroService {
   // Z-звіт (закриття зміни)
   // ---------------------------------------------------------------------------
 
+  /// Відкрити робочу зміну. Endpoint `POST /shift` з `action_type: OPEN_SHIFT`.
+  static Future<PrroResult> openShift() async {
+    if (!await _ensureAuth()) {
+      return const PrroResult.failure(
+        error: 'Помилка авторизації ПРРО',
+        errorKind: PrroErrorKind.auth,
+      );
+    }
+    try {
+      final body = {
+        'action_type': 'OPEN_SHIFT',
+        'num_fiscal': activeFiscalNumber,
+      };
+      final response = await _client
+          .post(
+            Uri.parse('${PrroConfig.environment.baseUrl}/shift'),
+            headers: _headers,
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return PrroResult(
+          success: true,
+          checkId: json['uuid']?.toString(),
+          textPrint: json['text_print']?.toString(),
+        );
+      }
+      return PrroResult.failure(
+        error: json['message']?.toString() ?? 'Помилка відкриття зміни',
+        errorKind: PrroErrorKind.logical,
+      );
+    } on TimeoutException {
+      return const PrroResult.failure(
+        error: 'Таймаут відкриття зміни',
+        errorKind: PrroErrorKind.connection,
+      );
+    } on SocketException {
+      return const PrroResult.failure(
+        error: 'Немає з\'єднання з ПРРО',
+        errorKind: PrroErrorKind.connection,
+      );
+    } catch (e) {
+      debugPrint('PRRO openShift ERROR: $e');
+      return PrroResult.failure(
+        error: 'Помилка відкриття зміни: $e',
+        errorKind: PrroErrorKind.logical,
+      );
+    }
+  }
+
   /// Z-звіт — закрити поточну зміну.
   /// Endpoint `POST /shift` з `action_type: Z_REPORT` (док. CashDesk).
   /// УВАГА: `/shift/xReport` — це X-звіт (НЕ закриває зміну), не плутати.

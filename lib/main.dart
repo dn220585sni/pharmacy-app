@@ -6,6 +6,12 @@ import 'screens/pos_screen.dart';
 import 'services/auth_service.dart';
 import 'services/prro_queue.dart';
 import 'services/prro_service.dart';
+import 'services/shift_service.dart';
+import 'widgets/shift_end_dialog.dart';
+
+/// Глобальний navigator — щоб показувати попап завершення зміни з обсервера
+/// закриття вікна (де немає звичайного BuildContext).
+final navigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
   final binding = WidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +39,16 @@ void main() {
 class _AppCloseObserver extends WidgetsBindingObserver {
   @override
   Future<AppExitResponse> didRequestAppExit() async {
+    // Якщо зміна відкрита — спитати про завершення (Z-звіт) перед виходом.
+    final ctx = navigatorKey.currentContext;
+    if (ctx != null && ShiftService.state.isOpen) {
+      final choice = await showShiftEndDialog(ctx);
+      if (choice == ShiftEndChoice.cancel) return AppExitResponse.cancel;
+      if (choice == ShiftEndChoice.closeShift) {
+        await ShiftService.closeShift();
+      }
+      // justExit → вийти без Z-звіту (напр. перезапуск програми).
+    }
     await AuthService.logout();
     return AppExitResponse.exit;
   }
@@ -45,6 +61,7 @@ class PharmacyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'ФармаПОС',
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.light,

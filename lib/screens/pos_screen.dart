@@ -17,6 +17,8 @@ import '../services/farmasell_service.dart';
 import '../services/loyalty_service.dart';
 import '../services/product_browser_service.dart';
 import '../services/skarb_service.dart';
+import '../services/shift_service.dart';
+import '../widgets/shift_start_dialog.dart';
 import '../data/symptom_categories.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
@@ -681,6 +683,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _loadTopDrugsCache();
         // Завантажити перелік соц-програм для аптеки.
         _loadSocialProjects();
+        // Початок зміни — службове внесення (раз за вхід, якщо ще не відкрита).
+        if (!ShiftService.state.isOpen) {
+          showShiftStartDialog(context, pharmacist: selected.user);
+        }
       }
     });
   }

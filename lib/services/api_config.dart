@@ -29,4 +29,8 @@ class ApiConfig {
 
   /// Місто для ProductBrowser API (5 = Дніпро).
   static const int cityId = 5;
+
+  /// Код касового місця (`ekkKodKli`) для GetTermBank — задається адміністратором
+  /// при налаштуванні каси. Поки МОК; замінить майбутній адмін-інтерфейс.
+  static const String ekkKodKli = '1334';
 }

@@ -16,20 +16,27 @@ class TerminalService {
     bool forceRefresh = false,
   }) async {
     if (!forceRefresh && _cache != null) return _cache!;
-    try {
-      final r = await CacheApiClient().call(
-        'GetTermBank',
-        params: {'ekkKodKli': ApiConfig.ekkKodKli},
-      );
-      if (r.isOk) {
-        final list = PaymentTerminal.listFromResponse(r.data);
-        debugPrint('TerminalService: ${list.length} terminals '
-            '(main=${list.where((t) => t.isMain).length})');
-        return _cache = list;
+    // Перший виклик у сесії інколи падає "Перевірте клієнта ПРРО" (серверний
+    // контекст клієнта ще не готовий) — ретраїмо (GET безпечно повторювати).
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final r = await CacheApiClient().call(
+          'GetTermBank',
+          params: {'ekkKodKli': ApiConfig.ekkKodKli},
+        );
+        if (r.isOk) {
+          final list = PaymentTerminal.listFromResponse(r.data);
+          debugPrint('TerminalService: ${list.length} terminals '
+              '(main=${list.where((t) => t.isMain).length})');
+          return _cache = list;
+        }
+        debugPrint('TerminalService FAIL (спроба $attempt): ${r.result}');
+      } catch (e) {
+        debugPrint('TerminalService ERROR (спроба $attempt): $e');
       }
-      debugPrint('TerminalService FAIL: ${r.result}');
-    } catch (e) {
-      debugPrint('TerminalService ERROR: $e');
+      if (attempt < 3) {
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
     }
     return const [];
   }

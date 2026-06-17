@@ -9,10 +9,12 @@ import '../models/drug.dart';
 import '../models/money.dart';
 import '../models/payment_method.dart';
 import '../models/prescription.dart';
+import '../models/payment_terminal.dart';
 import '../models/social_project.dart';
 import '../models/stop_price_action.dart';
 import '../services/api_config.dart';
 import '../services/cart_price_service.dart';
+import '../services/terminal_service.dart';
 import '../services/prro_queue.dart';
 import '../services/prro_service.dart';
 import '../services/skarb_service.dart';
@@ -91,6 +93,13 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   bool _cashWithdrawal = false;
   final _cashWithdrawalController = TextEditingController();
   final _cashWithdrawalFocus = FocusNode();
+
+  // Платіжні термінали (GetTermBank). Основний привʼязаний до каси; резервний
+  // обирається вручну при поломці основного. Обраний kodterm піде в накладну
+  // (впливає на контрагента), не в ПРРО.
+  List<PaymentTerminal> _terminals = const [];
+  PaymentTerminal? _selectedTerminal;
+  bool _terminalsLoading = false;
 
   // Social projects
   String? _selectedSocialProject;
@@ -202,6 +211,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   void enterCheckout() {
     if (widget.cart.isEmpty || !_allCartScanned) return;
     setState(() => _checkoutMode = true);
+    _ensureTerminalsLoaded(); // підвантажити платіжні термінали (для картки)
 
     // Auto-fill social project from prescription program if present
     if (_hasPrescriptionItems) {
@@ -222,6 +232,98 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         cashFocus.requestFocus();
       });
     }
+  }
+
+  // ── Платіжний термінал (GetTermBank) ────────────────────────────────────────
+
+  Future<void> _ensureTerminalsLoaded() async {
+    if (_terminals.isNotEmpty || _terminalsLoading) return;
+    setState(() => _terminalsLoading = true);
+    final list = await TerminalService.getTerminals();
+    if (!mounted) return;
+    setState(() {
+      _terminals = list;
+      _selectedTerminal = TerminalService.mainOf(list);
+      _terminalsLoading = false;
+    });
+  }
+
+  /// Селектор платіжного термінала (показується при оплаті карткою).
+  /// Дефолт — основний; якщо терміналів кілька, можна обрати резервний.
+  Widget _buildTerminalSelector() {
+    if (_terminalsLoading) {
+      return Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF4F5F8),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 10),
+            Text('Завантаження терміналів…',
+                style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+          ],
+        ),
+      );
+    }
+    if (_terminals.isEmpty) return const SizedBox.shrink();
+    final sel = _selectedTerminal;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F5F8),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.point_of_sale_outlined,
+              size: 16, color: Color(0xFF6B7280)),
+          const SizedBox(width: 8),
+          const Text('Термінал',
+              style: TextStyle(fontSize: 12.5, color: Color(0xFF6B7280))),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _terminals.length == 1
+                ? Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      sel?.displayName ?? '',
+                      style: const TextStyle(
+                          fontSize: 12.5, fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  )
+                : DropdownButton<PaymentTerminal>(
+                    value: sel,
+                    isExpanded: true,
+                    isDense: true,
+                    underline: const SizedBox.shrink(),
+                    items: _terminals
+                        .map((t) => DropdownMenuItem(
+                              value: t,
+                              child: Text(
+                                t.isMain
+                                    ? '${t.displayName} • основний'
+                                    : t.displayName,
+                                style: const TextStyle(fontSize: 12.5),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ))
+                        .toList(),
+                    onChanged: (t) => setState(() => _selectedTerminal = t),
+                  ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Map prescription program name to social project.
@@ -1651,8 +1753,10 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
               }),
             ),
 
-            // ── Cash withdrawal (card only) ───────────────────────────────────
+            // ── Термінал + Cash withdrawal (card only) ───────────────────────
             if (paymentMethod == PaymentMethod.card && !showPaymentSuccess) ...[
+              const SizedBox(height: 10),
+              _buildTerminalSelector(),
               const SizedBox(height: 10),
               _buildCashWithdrawalSection(),
             ],

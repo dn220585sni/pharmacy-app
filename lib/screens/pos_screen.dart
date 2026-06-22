@@ -789,13 +789,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         showCashOperationDialog(context);
         return;
       }
-      if (action == 'logout') {
-        await AuthService.logout();
-        if (mounted) {
-          setState(() => _currentPharmacist = null);
-          _openPharmacistPicker();
-        }
-      } else if (action == 'change') {
+      if (action == 'logout' || action == 'change') {
+        // Очистити кошик і серверний сеанс перед зміною/виходом фармацевта.
+        _clearCart();
         await AuthService.logout();
         if (mounted) {
           setState(() => _currentPharmacist = null);

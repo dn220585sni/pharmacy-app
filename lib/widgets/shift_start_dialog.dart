@@ -59,9 +59,18 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
   Future<void> _start() async {
     final deposit = Money.parse(_depositCtr.text);
     setState(() => _starting = true);
-    await ShiftService.startShift(deposit);
+    final ok = await ShiftService.startShift(deposit);
     if (!mounted) return;
-    Navigator.of(context).pop();
+    if (ok) {
+      Navigator.of(context).pop();
+      return;
+    }
+    setState(() => _starting = false);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Не вдалося відкрити зміну. Спробуйте ще раз.'),
+      backgroundColor: Color(0xFFDC2626),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   @override

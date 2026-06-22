@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
+import '../models/cash_operation.dart';
 import '../models/money.dart';
 import '../models/shift_state.dart';
 import 'api_config.dart';
 import 'cache_api_client.dart';
+import 'cash_service.dart';
+import 'prro_service.dart';
 
 /// Результат перевірки потреби службового внесення (ProvSumZOtchet).
 class ServiceDepositCheck {
@@ -15,20 +18,13 @@ class ServiceDepositCheck {
   const ServiceDepositCheck({required this.needed, required this.carryover});
 }
 
-/// МОК сервісу зміни (UI-фаза).
-///
-/// Згодом методи викличуть реальні операції ПРРО:
-///   startShift → PrroService.openShift() + службове внесення (deposit);
-///   closeShift → PrroService.zReport();
-/// а дані (залишок, підсумки) прийдуть з ПРРО/Caché. Поки — синтетичні.
+/// Сервіс робочої зміни.
+///   startShift → OPEN_SHIFT (+ авто-Z за вчора) + службове внесення (SaveSumDay);
+///   closeShift → Z-звіт (zReport);
+///   checkServiceDeposit → ProvSumZOtchet (залишок + чи потрібне внесення).
+/// Підсумки завершення зміни поки 0 (TODO: підтягнути з xReport).
 class ShiftService {
-  // Стартовий мок: зміна закрита, є залишок попереднього дня, вчора не закрито
-  // (щоб показати банер про авто-Z у діалозі старту).
-  static ShiftState _state = ShiftState(
-    isOpen: false,
-    carryover: Money.fromHryvnia(1250),
-    prevZPending: true,
-  );
+  static ShiftState _state = const ShiftState(isOpen: false);
 
   static ShiftState get state => _state;
 
@@ -55,31 +51,51 @@ class ShiftService {
     return const ServiceDepositCheck(needed: true, carryover: Money.zero);
   }
 
-  /// Почати зміну зі службовим внесенням [deposit]. (МОК — фіскальну дію
-  /// SaveSumDay/OPEN_SHIFT підключимо після уточнення Q9.)
-  static Future<ShiftState> startShift(Money deposit) async {
-    await Future.delayed(const Duration(milliseconds: 300)); // імітація запиту
-    _state = ShiftState(
-      isOpen: true,
-      openedAt: DateTime.now(),
-      carryover: deposit,
-      // МОК-підсумки для демонстрації діалогу завершення:
-      cashInBox: deposit + Money.fromHryvnia(3200),
-      cashlessTotal: Money.fromHryvnia(5750),
-      checksCount: 18,
-    );
-    debugPrint('ShiftService(MOCK): зміну відкрито, внесення=${deposit.format()}');
-    return _state;
+  /// Почати зміну: OPEN_SHIFT (з авто-Z за вчора) + службове внесення [deposit]
+  /// (SaveSumDay — запис у Caché). Повертає `true` при успіху.
+  static Future<bool> startShift(Money deposit) async {
+    if (ApiConfig.useMock) {
+      _state = ShiftState(
+        isOpen: true,
+        openedAt: DateTime.now(),
+        carryover: deposit,
+        cashInBox: deposit + Money.fromHryvnia(3200),
+        cashlessTotal: Money.fromHryvnia(5750),
+        checksCount: 18,
+      );
+      return true;
+    }
+    // 1. Відкрити зміну на РРО. Якщо вчора не закрито → авто-Z, тоді open знову.
+    var open = await PrroService.openShift();
+    if (!open.success && (open.error ?? '').contains('не закрили зміну')) {
+      debugPrint('ShiftService: авто-Z за минулий день перед відкриттям');
+      await PrroService.zReport();
+      open = await PrroService.openShift();
+    }
+    if (!open.success) {
+      debugPrint('ShiftService startShift: OPEN_SHIFT FAIL: ${open.error}');
+      return false;
+    }
+    // 2. Службове внесення — запис операції в Caché (SaveSumDay), morning-причина.
+    final reasons = await CashService.getReasons(CashDirection.cashIn);
+    final reason = morningReason(reasons)?.name ?? 'Служебное внесение';
+    await CashService.saveOperation(
+        direction: CashDirection.cashIn, reason: reason, sum: deposit);
+    _state = ShiftState(isOpen: true, openedAt: DateTime.now(), carryover: deposit);
+    debugPrint('ShiftService: зміну відкрито (OPEN_SHIFT + службове внесення '
+        '${deposit.format()}, причина="$reason")');
+    return true;
   }
 
-  /// Закрити зміну (Z-звіт). (МОК)
-  static Future<void> closeShift() async {
-    await Future.delayed(const Duration(milliseconds: 300));
-    _state = ShiftState(
-      isOpen: false,
-      carryover: Money.fromHryvnia(1250),
-      prevZPending: false,
-    );
-    debugPrint('ShiftService(MOCK): зміну закрито (Z-звіт)');
+  /// Закрити зміну — Z-звіт. Повертає `true` при успіху.
+  static Future<bool> closeShift() async {
+    if (ApiConfig.useMock) {
+      _state = const ShiftState(isOpen: false);
+      return true;
+    }
+    final r = await PrroService.zReport();
+    if (r.success) _state = const ShiftState(isOpen: false);
+    debugPrint('ShiftService: closeShift ${r.success ? "OK" : "FAIL: ${r.error}"}');
+    return r.success;
   }
 }

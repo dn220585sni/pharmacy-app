@@ -17,6 +17,7 @@ import '../services/cart_price_service.dart';
 import '../services/terminal_service.dart';
 import '../services/prro_queue.dart';
 import '../services/prro_service.dart';
+import '../services/session_service.dart';
 import '../services/skarb_service.dart';
 import 'cart_item_widget.dart';
 import 'cart_offer_card.dart';
@@ -503,9 +504,17 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     // і cash_withdrawal — поки не передаємо у ПРРО.
     final payments = _buildPrroPayments(saleTotal);
 
-    // TODO(local_number): підмінити timestamp на реальний номер з sgVRoznSale
-    // (Caché реєстрація роздрібного продажу) коли її буде реалізовано.
-    final localNumber = DateTime.now().millisecondsSinceEpoch % 10000000000;
+    // Накладна перед фіскалізацією: SaveSgVNakl → NumNakl (→ local_number ПРРО).
+    // KodKli: готівка=код каси, картка=код банку (kodterm). TypeNakl: 2/5.
+    final isCard = paymentMethod == PaymentMethod.card;
+    final numNakl = await SessionService.saveNakladna(
+      kodKli: isCard ? (_selectedTerminal?.kodterm ?? '') : ApiConfig.ekkKodKli,
+      typeNakl: isCard ? '5' : '2',
+    );
+    if (!mounted) return false;
+    // local_number = NumNakl; фолбек timestamp якщо накладна не збереглась.
+    final localNumber = int.tryParse(numNakl ?? '') ??
+        DateTime.now().millisecondsSinceEpoch % 10000000000;
 
     final result = await PrroService.createSaleReceipt(
       products: products,

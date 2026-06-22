@@ -23,6 +23,34 @@ class SessionService {
     return false;
   }
 
+  /// Зберегти накладну перед фіскалізацією (SaveSgVNakl). Повертає `NumNakl`
+  /// (внутрішній номер накладної) або `null` при помилці.
+  /// [kodKli]: готівка → код каси (ekkKodKli); картка → код банку (kodterm).
+  /// [typeNakl]: готівка='2', картка='5'.
+  static Future<String?> saveNakladna({
+    required String kodKli,
+    required String typeNakl,
+  }) async {
+    if (ApiConfig.useMock) return null;
+    try {
+      final r = await CacheApiClient().call('SavesgVNakl', params: {
+        'orderId': '',
+        'NumIzmNakl': '',
+        'KodKli': kodKli,
+        'TypeNakl': typeNakl,
+      });
+      if (r.isOk) {
+        final numNakl = r.data['NumNakl']?.toString();
+        debugPrint('SessionService: SaveSgVNakl NumNakl=$numNakl');
+        return numNakl;
+      }
+      debugPrint('SessionService SaveSgVNakl FAIL: ${r.result}');
+    } catch (e) {
+      debugPrint('SessionService SaveSgVNakl ERROR: $e');
+    }
+    return null;
+  }
+
   /// Ідентифікація клієнта ЛАЙК для накладної.
   /// Онлайн: [phone] + [card] зі Sparta. Офлайн (card відсутній): SpartaCard=SpartaPhone.
   static Future<bool> identSPL({required String phone, String? card}) async {

@@ -19,6 +19,15 @@ const _all = '''
 {"name":"Инкассация-обналичивание Пумб"}]}
 ''';
 
+// In з прапорцем morning (2026-06-19).
+const _in = '''
+{"Status":"OK","Reasons":[{"name":"Служебное внесение","morning":"1"},
+{"name":"Ошибка вноса выноса","morning":"0"},
+{"name":"Возврат суммы по инкассации","morning":"0"},
+{"name":"Возврат украденных средств","morning":"0"},
+{"name":"Внесение разменных купюр","morning":"0"}]}
+''';
+
 void main() {
   test('CashDirection.param відповідає бекенду', () {
     expect(CashDirection.cashIn.param, 'In');
@@ -29,14 +38,22 @@ void main() {
     test('Out → 7 причин', () {
       final r = parseCashReasons(jsonDecode(_out));
       expect(r.length, 7);
-      expect(r.first, 'Инкассация');
+      expect(r.first.name, 'Инкассация');
     });
 
     test('усі → містить службове внесення і внесення розмінних', () {
-      final r = parseCashReasons(jsonDecode(_all));
-      expect(r.length, 11);
-      expect(r, contains('Служебное внесение'));
-      expect(r, contains('Внесение разменных купюр'));
+      final names = parseCashReasons(jsonDecode(_all)).map((e) => e.name);
+      expect(names, contains('Служебное внесение'));
+      expect(names, contains('Внесение разменных купюр'));
+    });
+
+    test('morning=1 позначає причину ранкового внесення', () {
+      final r = parseCashReasons(jsonDecode(_in));
+      final m = morningReason(r);
+      expect(m, isNotNull);
+      expect(m!.name, 'Служебное внесение');
+      // решта — не ранкові
+      expect(r.where((e) => e.morning).length, 1);
     });
 
     test('некоректна відповідь → порожньо', () {

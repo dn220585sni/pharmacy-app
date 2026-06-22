@@ -26,7 +26,7 @@ class _CashOperationDialogState extends State<_CashOperationDialog> {
   static const _border = Color(0xFFE5E7EB);
 
   CashDirection _direction = CashDirection.cashIn;
-  List<String> _reasons = const [];
+  List<CashReason> _reasons = const [];
   String? _reason;
   bool _loadingReasons = false;
   bool _saving = false;
@@ -54,7 +54,7 @@ class _CashOperationDialogState extends State<_CashOperationDialog> {
     if (!mounted) return;
     setState(() {
       _reasons = list;
-      _reason = list.isNotEmpty ? list.first : null;
+      _reason = list.isNotEmpty ? list.first.name : null;
       _loadingReasons = false;
     });
   }
@@ -271,8 +271,8 @@ class _CashOperationDialogState extends State<_CashOperationDialog> {
         underline: const SizedBox.shrink(),
         items: _reasons
             .map((r) => DropdownMenuItem(
-                  value: r,
-                  child: Text(cashReasonUa(r),
+                  value: r.name,
+                  child: Text(cashReasonUa(r.name),
                       style: const TextStyle(fontSize: 13),
                       overflow: TextOverflow.ellipsis),
                 ))

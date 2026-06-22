@@ -37,25 +37,40 @@ class PaymentTerminal {
         isMain: j['main']?.toString() == '1',
       );
 
-  /// Розпарсити відповідь `GetTermBank` → лише **налаштовані** термінали
-  /// (з непорожнім `kodterm`; порожні слоти типів банків відкидаємо).
-  /// Основний — першим у списку.
+  /// Розпарсити відповідь `GetTermBank` → налаштовані термінали, **дедупльовані
+  /// за `kodterm`** (один термінал = один контрагент). При дублі лишаємо кращий:
+  /// основний > з описом (`name`) > перший. Основний — першим у списку.
   static List<PaymentTerminal> listFromResponse(dynamic data) {
     final raw = (data is Map) ? data['Terminals'] : null;
     if (raw is! List) return const [];
-    final terminals = raw
+
+    final byKod = <String, PaymentTerminal>{};
+    for (final t in raw
         .whereType<Map<String, dynamic>>()
         .map(PaymentTerminal.fromJson)
-        .where((t) => t.kodterm.isNotEmpty)
-        .toList();
-    // Основний — першим (стабільно для решти).
-    terminals.sort((a, b) => (b.isMain ? 1 : 0).compareTo(a.isMain ? 1 : 0));
+        .where((t) => t.kodterm.isNotEmpty)) {
+      final existing = byKod[t.kodterm];
+      byKod[t.kodterm] = existing == null ? t : _preferred(existing, t);
+    }
+
+    final terminals = byKod.values.toList()
+      ..sort((a, b) => (b.isMain ? 1 : 0).compareTo(a.isMain ? 1 : 0));
     return List.unmodifiable(terminals);
   }
 
-  /// Назва для UI: опис, інакше банк, інакше код.
-  String get displayName =>
-      name.isNotEmpty ? name : (bank.isNotEmpty ? bank : bankCode);
+  /// Кращий із двох записів одного `kodterm`: основний > з описом > перший.
+  static PaymentTerminal _preferred(PaymentTerminal a, PaymentTerminal b) {
+    if (a.isMain != b.isMain) return a.isMain ? a : b;
+    if (a.name.isNotEmpty != b.name.isNotEmpty) return a.name.isNotEmpty ? a : b;
+    return a;
+  }
+
+  /// Назва для UI: опис; для «голих» записів — «тип · №код» (напр. «MONOPART · №1665»).
+  String get displayName {
+    if (name.isNotEmpty) return name;
+    if (bank.isNotEmpty) return bank;
+    return '$bankCode · №$kodterm';
+  }
 
   @override
   bool operator ==(Object other) =>

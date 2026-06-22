@@ -10,7 +10,7 @@ import 'cache_api_client.dart';
 /// Службове внесення на старті зміни = cashIn + «Служебное внесение».
 class CashService {
   /// Перелік причин для напряму [direction] (для випадайки).
-  static Future<List<String>> getReasons(CashDirection direction) async {
+  static Future<List<CashReason>> getReasons(CashDirection direction) async {
     try {
       final r = await CacheApiClient().call(
         'GetOperKassa',

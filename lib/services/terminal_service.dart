@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import '../models/payment_terminal.dart';
-import 'api_config.dart';
 import 'cache_api_client.dart';
 
 /// Платіжні термінали аптеки (`GetTermBank`).
@@ -20,10 +19,8 @@ class TerminalService {
     // контекст клієнта ще не готовий) — ретраїмо (GET безпечно повторювати).
     for (var attempt = 1; attempt <= 3; attempt++) {
       try {
-        final r = await CacheApiClient().call(
-          'GetTermBank',
-          params: {'ekkKodKli': ApiConfig.ekkKodKli},
-        );
+        // ekkKodKli більше не передаємо — сервер бере код каси з LoginRlz.
+        final r = await CacheApiClient().call('GetTermBank');
         if (r.isOk) {
           final list = PaymentTerminal.listFromResponse(r.data);
           debugPrint('TerminalService: ${list.length} terminals '

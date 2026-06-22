@@ -9,17 +9,29 @@ import '../services/shift_service.dart';
 Future<void> showShiftStartDialog(
   BuildContext context, {
   required String pharmacist,
+  required Money carryover,
+  bool prevZPending = false,
 }) {
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => _ShiftStartDialog(pharmacist: pharmacist),
+    builder: (_) => _ShiftStartDialog(
+      pharmacist: pharmacist,
+      carryover: carryover,
+      prevZPending: prevZPending,
+    ),
   );
 }
 
 class _ShiftStartDialog extends StatefulWidget {
   final String pharmacist;
-  const _ShiftStartDialog({required this.pharmacist});
+  final Money carryover;
+  final bool prevZPending;
+  const _ShiftStartDialog({
+    required this.pharmacist,
+    required this.carryover,
+    required this.prevZPending,
+  });
 
   @override
   State<_ShiftStartDialog> createState() => _ShiftStartDialogState();
@@ -35,8 +47,7 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
   @override
   void initState() {
     super.initState();
-    _depositCtr =
-        TextEditingController(text: ShiftService.state.carryover.format());
+    _depositCtr = TextEditingController(text: widget.carryover.format());
   }
 
   @override
@@ -55,7 +66,6 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final st = ShiftService.state;
     final now = DateTime.now();
     final date =
         '${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year}';
@@ -88,7 +98,7 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
               _infoRow(Icons.calendar_today_outlined, date),
               const SizedBox(height: 14),
 
-              if (st.prevZPending) ...[
+              if (widget.prevZPending) ...[
                 Container(
                   padding: const EdgeInsets.all(11),
                   decoration: BoxDecoration(

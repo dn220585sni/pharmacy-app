@@ -685,9 +685,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _loadTopDrugsCache();
         // Завантажити перелік соц-програм для аптеки.
         _loadSocialProjects();
-        // Початок зміни — службове внесення (раз за вхід, якщо ще не відкрита).
+        // Початок зміни: ProvSumZOtchet — чи потрібне службове внесення +
+        // залишок з останнього Z-звіту. Діалог показуємо лише коли потрібне.
         if (!ShiftService.state.isOpen) {
-          showShiftStartDialog(context, pharmacist: selected.user);
+          ShiftService.checkServiceDeposit().then((check) {
+            if (!mounted || !check.needed) return;
+            showShiftStartDialog(
+              context,
+              pharmacist: selected.user,
+              carryover: check.carryover,
+            );
+          });
         }
       }
     });

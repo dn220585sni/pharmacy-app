@@ -17,6 +17,7 @@ import '../services/farmasell_service.dart';
 import '../services/loyalty_service.dart';
 import '../services/product_browser_service.dart';
 import '../services/skarb_service.dart';
+import '../services/session_service.dart';
 import '../services/shift_service.dart';
 import '../widgets/shift_start_dialog.dart';
 import '../widgets/cash_operation_dialog.dart';
@@ -2423,6 +2424,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void _clearCart() {
     // Зняти блокування для всіх товарів перед очищенням
     _unlockAllCart();
+    // NewClient — серверний reset сеансу (відмова / очищення кошика).
+    unawaited(SessionService.newClient());
 
     // Reset search without triggering _filterDrugs (which would auto-select)
     _searchController.removeListener(_filterDrugs);
@@ -2507,6 +2510,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         );
         _isLoadingLoyalty = false;
       });
+      // IdentSPL — зберегти клієнта у серверному сеансі (для накладної).
+      unawaited(SessionService.identSPL(
+        phone: '+380$digits',
+        card: result.cardNo,
+      ));
     } catch (_) {
       if (!mounted) return;
       setState(() => _isLoadingLoyalty = false);
@@ -2748,6 +2756,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // інакше товари залишаться в server-side кошику і GetSumSkid буде
     // повертати їх у наступних викликах разом з новими.
     _unlockAllCart();
+    // NewClient — серверний reset сеансу для наступного клієнта (після продажу).
+    unawaited(SessionService.newClient());
 
     // Bypass the listener so _filterDrugs doesn't auto-select a drug,
     // then reset everything including _selectedDrug → ShiftDashboard appears.

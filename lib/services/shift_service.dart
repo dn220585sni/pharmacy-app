@@ -65,10 +65,13 @@ class ShiftService {
       );
       return true;
     }
-    // 1. Відкрити зміну на РРО. Якщо вчора не закрито → авто-Z, тоді open знову.
+    // 1. Відкрити зміну на РРО. Якщо стара зміна висить (не закрита за вчора /
+    // вже відкрита) → авто-Z і відкрити знову (старт нового дня = нова зміна).
     var open = await PrroService.openShift();
-    if (!open.success && (open.error ?? '').contains('не закрили зміну')) {
-      debugPrint('ShiftService: авто-Z за минулий день перед відкриттям');
+    final err = open.error ?? '';
+    if (!open.success &&
+        (err.contains('не закрили зміну') || err.contains('вже відкрита'))) {
+      debugPrint('ShiftService: авто-Z старої зміни перед відкриттям');
       await PrroService.zReport();
       open = await PrroService.openShift();
     }

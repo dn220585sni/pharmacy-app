@@ -6,6 +6,7 @@ import 'screens/pos_screen.dart';
 import 'services/auth_service.dart';
 import 'services/prro_queue.dart';
 import 'services/prro_service.dart';
+import 'services/registry_config.dart';
 import 'services/shift_service.dart';
 import 'widgets/shift_end_dialog.dart';
 
@@ -15,6 +16,10 @@ final navigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
   final binding = WidgetsFlutterBinding.ensureInitialized();
+
+  // Per-аптека конфіг із реєстру ZSMU\Farm (baseUrl з MAddr, код каси) — до API.
+  RegistryConfig.load();
+
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,

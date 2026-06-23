@@ -9,8 +9,10 @@ class ApiConfig {
   static const bool useMock = false;
 
   /// Адреса Caché CSP сервера.
-  /// Формат: http://IP:PORT/csp/user/Kab.Service.cls
-  static const String baseUrl =
+  /// Формат: http://IP:PORT/csp/{nspace}/Kab.Service.cls
+  /// За замовчуванням — тестовий сервер; на старті перевизначається з реєстру
+  /// ZSMU\Farm (MAddr/MPort/MNSpace) через [RegistryConfig.load].
+  static String baseUrl =
       'http://10.90.77.66:57772/csp/user/Kab.Service.cls';
 
   /// Таймаут запиту в секундах.
@@ -30,7 +32,7 @@ class ApiConfig {
   /// Місто для ProductBrowser API (5 = Дніпро).
   static const int cityId = 5;
 
-  /// Код касового місця (`ekkKodKli`) для GetTermBank — задається адміністратором
-  /// при налаштуванні каси. Поки МОК; замінить майбутній адмін-інтерфейс.
-  static const String ekkKodKli = '1334';
+  /// Код касового місця (`ekkKodKli`). За замовчуванням мок; на старті
+  /// перевизначається з реєстру ZSMU\Farm через [RegistryConfig.load].
+  static String ekkKodKli = '1334';
 }

@@ -21,6 +21,7 @@ import '../services/session_service.dart';
 import '../services/shift_service.dart';
 import '../widgets/shift_start_dialog.dart';
 import '../widgets/cash_operation_dialog.dart';
+import '../widgets/cash_settings_dialog.dart';
 import '../data/symptom_categories.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
@@ -762,6 +763,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                   style: TextStyle(fontSize: 13)),
               onTap: () => Navigator.of(ctx).pop('cash'),
             ),
+            // Налаштування каси (адмінка)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.settings_outlined,
+                  size: 20, color: Color(0xFF1E7DC8)),
+              title: const Text('Налаштування каси',
+                  style: TextStyle(fontSize: 13)),
+              onTap: () => Navigator.of(ctx).pop('cash_settings'),
+            ),
             // Change pharmacist
             ListTile(
               dense: true,
@@ -787,6 +797,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       if (action == null || !mounted) return;
       if (action == 'cash') {
         showCashOperationDialog(context);
+        return;
+      }
+      if (action == 'cash_settings') {
+        showCashSettingsDialog(context);
         return;
       }
       if (action == 'logout' || action == 'change') {

@@ -237,10 +237,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   // ── Платіжний термінал (GetTermBank) ────────────────────────────────────────
 
-  Future<void> _ensureTerminalsLoaded() async {
-    if (_terminals.isNotEmpty || _terminalsLoading) return;
+  Future<void> _ensureTerminalsLoaded({bool force = false}) async {
+    if (_terminalsLoading) return;
+    if (!force && _terminals.isNotEmpty) return;
     setState(() => _terminalsLoading = true);
-    final list = await TerminalService.getTerminals();
+    final list = await TerminalService.getTerminals(forceRefresh: force);
     if (!mounted) return;
     setState(() {
       _terminals = list;
@@ -273,7 +274,40 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         ),
       );
     }
-    if (_terminals.isEmpty) return const SizedBox.shrink();
+    // Порожньо (сервер не віддав термінали — напр. перший виклик у сесії
+    // «Перевірте клієнта ПРРО»). Не ховаємо мовчки — даємо повторити вручну.
+    if (_terminals.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF3F2),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFFECDCA)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.point_of_sale_outlined,
+                size: 16, color: Color(0xFFB42318)),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('Термінали не завантажено',
+                  style: TextStyle(fontSize: 12.5, color: Color(0xFFB42318))),
+            ),
+            TextButton.icon(
+              onPressed: () => _ensureTerminalsLoaded(force: true),
+              icon: const Icon(Icons.refresh_rounded, size: 16),
+              label: const Text('Повторити', style: TextStyle(fontSize: 12.5)),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFB42318),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final sel = _selectedTerminal;
 
     return Container(
@@ -1746,20 +1780,25 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
             // ── Payment method toggle ────────────────────────────────────────
             PaymentMethodToggle(
               selectedMethod: paymentMethod,
-              onMethodChanged: (method) => setState(() {
-                paymentMethod = method;
-                if (method == PaymentMethod.cash) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    cashFocus.requestFocus();
-                  });
-                } else {
-                  cashCtr.clear();
-                }
-                if (method != PaymentMethod.card) {
-                  _cashWithdrawal = false;
-                  _cashWithdrawalController.clear();
-                }
-              }),
+              onMethodChanged: (method) {
+                setState(() {
+                  paymentMethod = method;
+                  if (method == PaymentMethod.cash) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      cashFocus.requestFocus();
+                    });
+                  } else {
+                    cashCtr.clear();
+                  }
+                  if (method != PaymentMethod.card) {
+                    _cashWithdrawal = false;
+                    _cashWithdrawalController.clear();
+                  }
+                });
+                // Картка → переконатись, що термінали підвантажені (вхід у
+                // чекаут міг не встигнути / впасти на першому виклику в сесії).
+                if (method == PaymentMethod.card) _ensureTerminalsLoaded();
+              },
             ),
 
             // ── Термінал + Cash withdrawal (card only) ───────────────────────

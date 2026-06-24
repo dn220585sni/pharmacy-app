@@ -750,16 +750,29 @@ class DrugService {
   ///
   /// Caché: `GET ?ServiceName=sgVRoznSetLock&SKod={skod}&qty={qty}`
   /// Response: `{"Status":"OK","SKod":"...","qty":N,"cause":"...","causeTitle":"...","causeHelsi":"...","kolPos":N,"sumTov":N}`
+  /// Формат `qty` для sgVRoznSetLock: ціле → без дробу; дробове → до 6 знаків
+  /// без хвостових нулів (щоб дріб точно відповідав дільнику упаковки).
+  static String _formatLockQty(double qty) {
+    if (qty == qty.roundToDouble()) return qty.toInt().toString();
+    var s = qty.toStringAsFixed(6);
+    if (s.contains('.')) {
+      s = s.replaceAll(RegExp(r'0+$'), '').replaceAll(RegExp(r'\.$'), '');
+    }
+    return s;
+  }
+
   static Future<StockLockResult> setStockLock(String skod, double qty) async {
     if (ApiConfig.useMock || skod.isEmpty) {
       return StockLockResult(ok: true, grantedQty: qty);
     }
 
     try {
-      // Передаємо десятковий дріб з крапкою (URL-параметр)
-      final qtyStr = qty == qty.roundToDouble()
-          ? qty.toInt().toString()
-          : qty.toStringAsFixed(2);
+      // Передаємо десятковий дріб з крапкою (URL-параметр).
+      // Дробова частка = k/дільник_упаковки. Сервер звіряє дріб із дільником,
+      // тож 2 знаків мало: 1 блістер 30-упаковки = 1/30 = 0.0333…, а "0.03"
+      // дільнику не відповідає (granted=0 → «зарезервовано»). Даємо більше
+      // точності й прибираємо хвостові нулі (0.250000 → 0.25; 0.033333 лишається).
+      final qtyStr = _formatLockQty(qty);
       final response = await _api.call('sgVRoznSetLock', params: {
         'SKod': skod,
         'qty': qtyStr,

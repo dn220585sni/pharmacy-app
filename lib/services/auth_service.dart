@@ -113,14 +113,19 @@ class AuthService {
 
   /// Авторизація фармацевта — створює сесію.
   ///
-  /// Caché: `GET ?ServiceName=LoginRlz&user={user}&pswd={pswd}`
+  /// Caché: `GET ?ServiceName=LoginRlz&user={user}&pswd={pswd}&ekkKodKli={kod}`
   /// Response: `{"Status":"OK","Result":"Встановлена сесія","sessionId":"..."}`
+  ///
+  /// `ekkKodKli` (код каси з реєстру) — ОБОВ'ЯЗКОВИЙ: сервер за ним піднімає
+  /// контекст «клієнт РРО» для сесії. Без нього всі РРО-залежні сервіси
+  /// (ProvSumZOtchet, SaveSumDay, GetTermBank, ZRep) падають «Перевірте клієнта РРО».
   static Future<bool> login(String user, String password) async {
     if (ApiConfig.useMock) return _mockLogin(user, password);
 
     final response = await _api.call('LoginRlz', params: {
       'user': user,
       'pswd': password,
+      'ekkKodKli': ApiConfig.ekkKodKli,
     });
 
     if (response.isOk) {
@@ -189,7 +194,7 @@ class AuthService {
     final usersJson = response.data['users'];
     debugPrint('GetUsersRlz users type=${usersJson.runtimeType}, '
         'isList=${usersJson is List}, '
-        'length=${usersJson is List ? (usersJson as List).length : "n/a"}');
+        'length=${usersJson is List ? usersJson.length : "n/a"}');
     if (usersJson is! List) return [];
 
     return usersJson

@@ -20,7 +20,7 @@ class ServiceDepositCheck {
 
 /// Сервіс робочої зміни.
 ///   startShift → OPEN_SHIFT (+ авто-Z за вчора) + службове внесення (SaveSumDay);
-///   closeShift → Z-звіт (zReport);
+///   closeShift → Z-звіт у ПРРО (zReport) + фіксація в БД Caché (ZRep);
 ///   checkServiceDeposit → ProvSumZOtchet (залишок + чи потрібне внесення).
 /// Підсумки завершення зміни поки 0 (TODO: підтягнути з xReport).
 class ShiftService {
@@ -72,7 +72,8 @@ class ShiftService {
     if (!open.success &&
         (err.contains('не закрили зміну') || err.contains('вже відкрита'))) {
       debugPrint('ShiftService: авто-Z старої зміни перед відкриттям');
-      await PrroService.zReport();
+      final autoZ = await PrroService.zReport();
+      if (autoZ.success) await _fixZReportInDb();
       open = await PrroService.openShift();
     }
     if (!open.success) {
@@ -90,15 +91,32 @@ class ShiftService {
     return true;
   }
 
-  /// Закрити зміну — Z-звіт. Повертає `true` при успіху.
-  static Future<bool> closeShift() async {
+  /// Закрити зміну — Z-звіт у ПРРО, потім фіксація операції в БД Caché (ZRep).
+  /// Повертає результат ПРРО (фіскально значущий крок).
+  static Future<PrroResult> closeShift() async {
     if (ApiConfig.useMock) {
       _state = const ShiftState(isOpen: false);
-      return true;
+      return const PrroResult(success: true);
     }
     final r = await PrroService.zReport();
-    if (r.success) _state = const ShiftState(isOpen: false);
+    if (r.success) {
+      _state = const ShiftState(isOpen: false);
+      await _fixZReportInDb();
+    }
     debugPrint('ShiftService: closeShift ${r.success ? "OK" : "FAIL: ${r.error}"}');
-    return r.success;
+    return r;
+  }
+
+  /// Зафіксувати Z-звіт у БД Caché (`ZRep`) — викликати ПІСЛЯ успішного Z у ПРРО.
+  /// Best-effort: збій фіксації не скасовує вже зроблений у ПРРО Z-звіт,
+  /// лише логуємо (за потреби — ретрай окремо).
+  static Future<void> _fixZReportInDb() async {
+    try {
+      final r = await CacheApiClient().call('ZRep');
+      debugPrint('ShiftService: ZRep '
+          '${r.isOk ? "OK (${r.result})" : "FAIL: ${r.result}"}');
+    } catch (e) {
+      debugPrint('ShiftService: ZRep ERROR: $e');
+    }
   }
 }

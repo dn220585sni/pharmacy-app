@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/prro_service.dart';
+import '../services/shift_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock shift data (will be replaced by a service layer later)
@@ -217,7 +218,8 @@ class _ShiftDashboardState extends State<ShiftDashboard>
 
   Future<void> _closeShift() async {
     setState(() => _closingShift = true);
-    final result = await PrroService.zReport();
+    // Z-звіт у ПРРО + фіксація в БД Caché (ZRep) — централізовано в ShiftService.
+    final result = await ShiftService.closeShift();
     if (!mounted) return;
     setState(() => _closingShift = false);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(

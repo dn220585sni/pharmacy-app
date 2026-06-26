@@ -178,6 +178,12 @@ class CacheApiClient {
         // Кома між полями вже присутня в оригіналі — не дублюємо.
         fixedBody = fixedBody.replaceAll('"rules":[]"', '"rules":[]');
 
+        // Fix Caché JSON: GetSPLParam — частина ключів без закривної лапки перед
+        // двокрапкою: "EdUrlSPL:"val" замість "EdUrlSPL":"val". Лагодимо лише в
+        // позиції ключа (після { або ,), щоб не зачепити значення.
+        fixedBody = fixedBody.replaceAllMapped(
+            RegExp(r'([,{])"(\w+):"'), (m) => '${m[1]}"${m[2]}":"');
+
         // Fix Caché JSON: відсутній ]} в кінці (масив + об'єкт не закриті)
         final trimmed = fixedBody.trimRight();
         if (trimmed.isNotEmpty && !trimmed.endsWith(']}') && !trimmed.endsWith('}}')) {

@@ -80,10 +80,8 @@ class _FractionalInputDialogState extends State<_FractionalInputDialog> {
       setState(() => _error = 'Вкажіть к-сть блістерів для продажу');
       return;
     }
-    if (blisters > total) {
-      setState(() => _error = 'Не більше ніж $total (уся упаковка)');
-      return;
-    }
+    // Дозволяємо більше за упаковку (напр. 40 при 30 у пакованні + окремі саше).
+    // Доступність за залишком перевіряється далі при резервуванні.
     Navigator.of(context).pop(FractionalInput(blisters, total));
   }
 

@@ -75,6 +75,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   List<Drug> _searchResults = [];
   final List<CartItem> _cart = [];
   Drug? _selectedDrug;
+
+  /// Накопичувач цифр для Ctrl+цифра (багатоцифрове дробове введення, напр. 35).
+  /// Скидається при відпусканні Ctrl.
+  int _ctrlQtyBuffer = 0;
   double _totalEarned = 0.0;
   String _selectedSymptom = 'Всі';
 
@@ -118,6 +122,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   // ── SKU Detail (Caché GetSKUdetail) ────────────────────────────────────
   /// Drug IDs we've already tried fetching from GetSKUdetail.
   final _skuDetailFetched = <String>{};
+
+  /// Drug IDs для яких відповідь GetSKUdetail уже прийшла (з дільником).
+  /// Дає відрізнити «дані ще вантажаться» від «справді неподільний».
+  final _skuDetailLoaded = <String>{};
 
   /// A digit character waiting to be injected into the qty field on the
   /// next frame after focus transfers from the search field.
@@ -849,6 +857,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// Global key handler: redirect printable characters to the search field
   /// unless the search field or a digit-input (qty) field already has focus.
   bool _handleGlobalKey(KeyEvent event) {
+    // Відпускання Ctrl → скинути накопичувач багатоцифрового дробу.
+    if (event is KeyUpEvent &&
+        (event.logicalKey == LogicalKeyboardKey.controlLeft ||
+            event.logicalKey == LogicalKeyboardKey.controlRight)) {
+      _ctrlQtyBuffer = 0;
+      return false;
+    }
     if (event is! KeyDownEvent) return false;
 
     // ══════════════════════════════════════════════════════════════════════
@@ -915,7 +930,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       final digit = _ctrlDigitFromKey(event.logicalKey);
       if (digit != null && _selectedDrug != null && _selectedDrug!.stock > 0) {
         if (_selectedDrug!.canSplitByBlister) {
-          _setFractionalQuantity(_selectedDrug!, digit);
+          // Накопичуємо цифри: Ctrl+3, Ctrl+5 → 35 (можна більше за упаковку).
+          _ctrlQtyBuffer = (_ctrlQtyBuffer * 10 + digit).clamp(0, 9999);
+          _setFractionalQuantity(
+              _selectedDrug!, _ctrlQtyBuffer == 0 ? 1 : _ctrlQtyBuffer);
+        } else if (_isSkuDetailPending(_selectedDrug!)) {
+          _showSkuDetailLoading();
         } else {
           _showFractionalUnavailable();
         }
@@ -1441,6 +1461,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         // Clear SKUDetail cache for new server drugs so they get re-enriched
         for (final d in serverDrugs) {
           _skuDetailFetched.remove(d.id);
+          _skuDetailLoaded.remove(d.id);
         }
         _searchResults = [...serverDrugs, ...mockResults];
         _rebuildEdkOffers(); // оновити ЄДК з новими ukod
@@ -1595,6 +1616,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           comingPrice: detail.comingPrice,
           comingCode: detail.comingCode,
         );
+        _skuDetailLoaded.add(drug.id); // деталі (з дільником) прийшли
 
         _searchResults = _searchResults.map((d) {
           return d.id == drug.id ? updatedDrug : d;
@@ -2033,8 +2055,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return;
     }
 
-    final clamped = blisters.clamp(1, drug.unitsPerPackage!);
-    final lockQty = clamped / drug.unitsPerPackage!;
+    // Верхня межа — не розмір упаковки, а РЕАЛЬНИЙ залишок у саше/блістерах
+    // (stockRaw × дільник). Напр. 1 упак.(30) + 10 окремих = 40 → можна вбити 40.
+    final upp = drug.unitsPerPackage!;
+    final availUnits = ((drug.stockRaw ?? drug.stock.toDouble()) * upp).round();
+    final clamped = blisters.clamp(1, availUnits > 0 ? availUnits : blisters);
+    final lockQty = clamped / upp;
     final result = await _lockStock(drug, lockQty);
     if (!mounted) return;
     if (!result.ok || result.grantedQty <= 0) {
@@ -2046,6 +2072,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         ),
       );
       return;
+    }
+    if (clamped < blisters) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${drug.name} — доступно лише $clamped'),
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
     _applyKolStock(drug.id, result.kolStock);
     setState(() {
@@ -2080,6 +2115,23 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     );
   }
 
+  /// Дільник ще не відомий, але деталі (GetSKUdetail) ще НЕ прийшли —
+  /// товар може виявитись подільним за мить (гонка завантаження).
+  bool _isSkuDetailPending(Drug drug) =>
+      !drug.canSplitByBlister &&
+      !drug.variableDivisor &&
+      !_skuDetailLoaded.contains(drug.id);
+
+  void _showSkuDetailLoading() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Дані упаковки ще вантажаться — спробуйте за мить'),
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   /// F6 — попап ручного введення дробу (блістерів / усього в упаковці).
   /// Працює для вибраного товару; дільник можна задати вручну (навіть якщо
   /// сервер не позначив товар подільним).
@@ -2095,7 +2147,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
     // Дроблення лише для подільних або з варіативним дільником (varDel==1).
     if (!drug.canSplitByBlister && !drug.variableDivisor) {
-      _showFractionalUnavailable();
+      if (_isSkuDetailPending(drug)) {
+        _showSkuDetailLoading();
+      } else {
+        _showFractionalUnavailable();
+      }
       return;
     }
     final res = await showFractionalInputDialog(context,

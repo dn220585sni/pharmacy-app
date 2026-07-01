@@ -77,8 +77,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   Drug? _selectedDrug;
 
   /// Накопичувач цифр для Ctrl+цифра (багатоцифрове дробове введення, напр. 35).
-  /// Скидається при відпусканні Ctrl.
+  /// Скидається за таймером бездіяльності [_ctrlQtyResetTimer].
   int _ctrlQtyBuffer = 0;
+  Timer? _ctrlQtyResetTimer;
   double _totalEarned = 0.0;
   String _selectedSymptom = 'Всі';
 
@@ -840,6 +841,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _unlockAllCart();
     // LogoutRlz — fire-and-forget при закритті додатка
     _logoutPharmacist();
+    _ctrlQtyResetTimer?.cancel();
     _barcodeLookupTimer?.cancel();
     _nameSearchTimer?.cancel();
     _localFilterTimer?.cancel();
@@ -857,13 +859,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// Global key handler: redirect printable characters to the search field
   /// unless the search field or a digit-input (qty) field already has focus.
   bool _handleGlobalKey(KeyEvent event) {
-    // Відпускання Ctrl → скинути накопичувач багатоцифрового дробу.
-    if (event is KeyUpEvent &&
-        (event.logicalKey == LogicalKeyboardKey.controlLeft ||
-            event.logicalKey == LogicalKeyboardKey.controlRight)) {
-      _ctrlQtyBuffer = 0;
-      return false;
-    }
     if (event is! KeyDownEvent) return false;
 
     // ══════════════════════════════════════════════════════════════════════
@@ -931,7 +926,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       if (digit != null && _selectedDrug != null && _selectedDrug!.stock > 0) {
         if (_selectedDrug!.canSplitByBlister) {
           // Накопичуємо цифри: Ctrl+3, Ctrl+5 → 35 (можна більше за упаковку).
+          // Скидаємо буфер за таймером бездіяльності (а не на відпускання Ctrl),
+          // щоб окремі акорди «Ctrl+3», «Ctrl+5» підряд теж давали 35.
           _ctrlQtyBuffer = (_ctrlQtyBuffer * 10 + digit).clamp(0, 9999);
+          _ctrlQtyResetTimer?.cancel();
+          _ctrlQtyResetTimer =
+              Timer(const Duration(milliseconds: 1200), () => _ctrlQtyBuffer = 0);
           _setFractionalQuantity(
               _selectedDrug!, _ctrlQtyBuffer == 0 ? 1 : _ctrlQtyBuffer);
         } else if (_isSkuDetailPending(_selectedDrug!)) {

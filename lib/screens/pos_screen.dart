@@ -1944,7 +1944,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
         if (idx >= 0) _cart.removeAt(idx);
       });
-      _lockStock(drug, 0.0);
+      final r = await _lockStock(drug, 0.0);
+      if (mounted) _applyKolStock(drug.id, r.kolStock); // відновити «Наявність»
       return;
     }
 
@@ -2027,7 +2028,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
         if (idx >= 0) _cart.removeAt(idx);
       });
-      _lockStock(drug, 0.0);
+      final r = await _lockStock(drug, 0.0);
+      if (mounted) _applyKolStock(drug.id, r.kolStock); // відновити «Наявність»
       return;
     }
 
@@ -2244,10 +2246,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (ri >= 0) _scrollToIndex(ri);
   }
 
-  void _removeFromCart(int index) {
+  void _removeFromCart(int index) async {
     final drug = _cart[index].drug;
     setState(() => _cart.removeAt(index));
-    _lockStock(drug, 0.0);
+    final r = await _lockStock(drug, 0.0);
+    if (mounted) _applyKolStock(drug.id, r.kolStock); // відновити «Наявність»
   }
 
   void _increaseQty(int index) async {
@@ -2288,7 +2291,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     });
   }
 
-  void _decreaseQty(int index) {
+  void _decreaseQty(int index) async {
     final item = _cart[index];
     Drug? removedDrug;
     setState(() {
@@ -2309,9 +2312,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       }
     });
     if (removedDrug != null) {
-      _lockStock(removedDrug!, 0.0);
+      final r = await _lockStock(removedDrug!, 0.0);
+      if (mounted) _applyKolStock(removedDrug!.id, r.kolStock);
     } else if (index < _cart.length) {
-      _lockStock(_cart[index].drug, _cartItemLockQty(_cart[index]));
+      final drug = _cart[index].drug;
+      final r = await _lockStock(drug, _cartItemLockQty(_cart[index]));
+      if (mounted) _applyKolStock(drug.id, r.kolStock);
     }
   }
 

@@ -146,43 +146,79 @@ class _FractionalInputDialogState extends State<_FractionalInputDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    style: TextButton.styleFrom(foregroundColor: _grey),
-                    child: const Text('Скасувати'),
+                  _actionButton(
+                    label: 'Скасувати',
+                    icon: Icons.close_rounded,
+                    primary: false,
+                    onTap: () => Navigator.of(context).pop(),
+                    hotkey: 'Esc',
                   ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: _confirm,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _blue,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text('Додати'),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: Colors.white24,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text('Enter',
-                              style: TextStyle(
-                                  fontSize: 11, fontWeight: FontWeight.w600)),
-                        ),
-                      ],
-                    ),
+                  const SizedBox(width: 6),
+                  _actionButton(
+                    label: 'Додати',
+                    icon: Icons.check_rounded,
+                    primary: true,
+                    onTap: _confirm,
+                    hotkey: 'Enter',
                   ),
                 ],
               ),
             ],
           ),
         ),
+        ),
+      ),
+    );
+  }
+
+  /// Кнопка у стилі головного екрана (як «Ок / Enter» біля поля телефону).
+  Widget _actionButton({
+    required String label,
+    required IconData icon,
+    required bool primary,
+    required VoidCallback onTap,
+    String? hotkey,
+  }) {
+    final Color bg = primary ? _blue : const Color(0xFFF4F5F8);
+    final Color fg = primary ? Colors.white : _grey;
+    final Color borderColor = primary ? _blue : _border;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 26,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: fg),
+            const SizedBox(width: 4),
+            Text(label,
+                style: TextStyle(
+                    color: fg, fontSize: 10.5, fontWeight: FontWeight.w600)),
+            if (hotkey != null) ...[
+              const SizedBox(width: 5),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: primary
+                      ? const Color(0x33FFFFFF)
+                      : const Color(0x0F000000),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(hotkey,
+                    style: TextStyle(
+                        color: fg,
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3)),
+              ),
+            ],
+          ],
         ),
       ),
     );

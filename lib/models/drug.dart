@@ -79,6 +79,7 @@ class Drug {
   final DrugUsageInfo? usageInfo;
   final String? imageUrl;          // product photo; future: provided by API
   final int? unitsPerPackage;      // blisters/units per package (null = not splittable)
+  final bool variableDivisor;      // varDel==1: дільник упаковки задається вручну
   final String? intakeWarning;     // e.g. "Вживайте тільки після їжі!" (from external service)
 
   // ── Product Browser fields (fetched from anc.ua API) ─────────────────────
@@ -135,6 +136,7 @@ class Drug {
     this.usageInfo,
     this.imageUrl,
     this.unitsPerPackage,
+    this.variableDivisor = false,
     this.intakeWarning,
     this.productBrowserSlug,
     this.indications,
@@ -262,6 +264,7 @@ class Drug {
       usageInfo: usageInfo,
       imageUrl: imageUrl,
       unitsPerPackage: unitsPerPackage,
+      variableDivisor: variableDivisor,
       intakeWarning: intakeWarning,
       productBrowserSlug: productBrowserSlug,
       indications: indications,
@@ -316,6 +319,7 @@ class Drug {
       usageInfo: usageInfo ?? this.usageInfo,
       imageUrl: imageUrl ?? this.imageUrl,
       unitsPerPackage: unitsPerPackage,
+      variableDivisor: variableDivisor,
       intakeWarning: intakeWarning,
       productBrowserSlug: productBrowserSlug,
       indications: indications ?? this.indications,
@@ -345,6 +349,7 @@ class Drug {
     String? category,
     String? expiryDate,
     int? unitsPerPackage,
+    bool? variableDivisor,
     int? pharmacistBonus,
     String? barcode,
     String? series,
@@ -393,6 +398,7 @@ class Drug {
       usageInfo: usageInfo ?? this.usageInfo,
       imageUrl: imageUrl ?? this.imageUrl,
       unitsPerPackage: unitsPerPackage ?? this.unitsPerPackage,
+      variableDivisor: variableDivisor ?? this.variableDivisor,
       intakeWarning: intakeWarning ?? this.intakeWarning,
       productBrowserSlug: productBrowserSlug,
       indications: indications,

@@ -274,6 +274,7 @@ class SKUDetailResult {
   final bool requiresPrescription;
   final String? expiryDate;
   final int? unitsPerPackage;
+  final bool variableDivisor;
   final int? pharmacistBonus;
   final String? barcode;
   final String? series;
@@ -298,6 +299,7 @@ class SKUDetailResult {
     this.requiresPrescription = false,
     this.expiryDate,
     this.unitsPerPackage,
+    this.variableDivisor = false,
     this.pharmacistBonus,
     this.barcode,
     this.series,
@@ -328,6 +330,7 @@ class SKUDetailResult {
       requiresPrescription: json['requiresPrescription']?.toString() == '1',
       expiryDate: _nonEmpty(json['expiryDate']),
       unitsPerPackage: (units != null && units > 0) ? units : null,
+      variableDivisor: json['varDel']?.toString() == '1',
       pharmacistBonus: (bonus != null && bonus > 0) ? bonus : null,
       barcode: _nonEmpty(json['barcode']),
       series: _nonEmpty(json['series']),

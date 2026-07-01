@@ -22,6 +22,7 @@ import '../services/shift_service.dart';
 import '../widgets/shift_start_dialog.dart';
 import '../widgets/cash_operation_dialog.dart';
 import '../widgets/cash_settings_dialog.dart';
+import '../widgets/fractional_input_dialog.dart';
 import '../data/symptom_categories.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
@@ -986,6 +987,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return true;
     }
 
+    // ── F6: ручне введення дробової кількості (блістерів) ─────────────────────
+    if (event.logicalKey == LogicalKeyboardKey.f6) {
+      _openFractionalInput();
+      return true;
+    }
+
     // ── F10: switch payment method to card ───────────────────────────────────
     if (event.logicalKey == LogicalKeyboardKey.f10) {
       if (_cart.isNotEmpty && _cartOpen) {
@@ -1571,6 +1578,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           category: detail.category,
           expiryDate: detail.expiryDate,
           unitsPerPackage: detail.unitsPerPackage,
+          variableDivisor: detail.variableDivisor,
           pharmacistBonus: detail.pharmacistBonus,
           barcode: detail.barcode,
           series: detail.series,
@@ -1853,6 +1861,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// Отримати оригінальний с-код товару з drug.id (srv_{ids} формат).
   /// drug.skuCode перезаписується GetSKUdetail — не використовувати.
   String _stockSkod(Drug drug) {
+    // ЄДК-заміна ідентифікується лише u-кодом (GetEdkOffers.replacementId —
+    // композит `6077.999*...`), s-коду (коду приходу) для неї немає.
+    // sgVRoznSetLock приймає тільки s-код → резервування пропускаємо,
+    // інакше сервер відповідає «Перевірте SKod». Аналогічно до u-кодів нижче.
+    if (drug.id.startsWith('edk_')) {
+      debugPrint('sgVRoznSetLock: skip ЄДК ${drug.id} (немає s-коду)');
+      return '';
+    }
     if (drug.id.startsWith('srv_u_')) return ''; // u-code, немає с-коду
     return drug.id.replaceFirst('srv_', '');
   }
@@ -2036,6 +2052,40 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         behavior: SnackBarBehavior.floating,
       ),
     );
+  }
+
+  /// F6 — попап ручного введення дробу (блістерів / усього в упаковці).
+  /// Працює для вибраного товару; дільник можна задати вручну (навіть якщо
+  /// сервер не позначив товар подільним).
+  Future<void> _openFractionalInput() async {
+    final drug = _selectedDrug;
+    if (drug == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Спочатку виберіть товар у списку'),
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+    // Дроблення лише для подільних або з варіативним дільником (varDel==1).
+    if (!drug.canSplitByBlister && !drug.variableDivisor) {
+      _showFractionalUnavailable();
+      return;
+    }
+    final res = await showFractionalInputDialog(context,
+        drugName: drug.name,
+        totalPerPackage: drug.unitsPerPackage,
+        // Знаменник редагується лише для варіативного дільника.
+        totalEditable: drug.variableDivisor);
+    if (res == null || !mounted) return;
+    // Drug із заданим дільником (Y) — щоб ціна блістера й дисплей X/Y були вірні.
+    final d = drug.unitsPerPackage == res.total
+        ? drug
+        : drug.copyWithSKUDetail(unitsPerPackage: res.total);
+    // Прибрати наявний рядок цього товару, щоб оновити drug з новим Y.
+    final idx = _cart.indexWhere((it) => it.drug.id == d.id);
+    if (idx >= 0) setState(() => _cart.removeAt(idx));
+    _setFractionalQuantity(d, res.blisters);
   }
 
   // ── ЄДК logic ────────────────────────────────────────────────────────────

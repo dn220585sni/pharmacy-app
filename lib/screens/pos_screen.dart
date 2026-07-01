@@ -764,15 +764,16 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                   style: TextStyle(fontSize: 13)),
               onTap: () => Navigator.of(ctx).pop('cash'),
             ),
-            // Налаштування каси (адмінка)
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.settings_outlined,
-                  size: 20, color: Color(0xFF1E7DC8)),
-              title: const Text('Налаштування каси',
-                  style: TextStyle(fontSize: 13)),
-              onTap: () => Navigator.of(ctx).pop('cash_settings'),
-            ),
+            // Налаштування каси (адмінка) — лише спецкористувач (typezuser==1)
+            if (_currentPharmacist!.isSpecial)
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.settings_outlined,
+                    size: 20, color: Color(0xFF1E7DC8)),
+                title: const Text('Налаштування каси',
+                    style: TextStyle(fontSize: 13)),
+                onTap: () => Navigator.of(ctx).pop('cash_settings'),
+              ),
             // Change pharmacist
             ListTile(
               dense: true,
@@ -801,7 +802,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         return;
       }
       if (action == 'cash_settings') {
-        showCashSettingsDialog(context);
+        // Доступ лише спецкористувачу (typezuser==1).
+        if (_currentPharmacist?.isSpecial == true) showCashSettingsDialog(context);
         return;
       }
       if (action == 'logout' || action == 'change') {

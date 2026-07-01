@@ -15,10 +15,14 @@ class PharmacistInfo {
   final String password;
   final String ipn;
 
+  /// Спецкористувач (`typezuser==1`) — має доступ до адмінки «Налаштування каси».
+  final bool isSpecial;
+
   PharmacistInfo({
     required this.user,
     required this.password,
     required this.ipn,
+    this.isSpecial = false,
   });
 }
 
@@ -203,6 +207,7 @@ class AuthService {
               user: u['user']?.toString() ?? '',
               password: u['pswd']?.toString() ?? '',
               ipn: u['ipn']?.toString() ?? '',
+              isSpecial: u['typezuser']?.toString() == '1',
             ))
         .toList();
   }

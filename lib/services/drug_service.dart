@@ -10,12 +10,14 @@ class StockLockResult {
   final double grantedQty;    // фактично зарезервована кількість
   final String? cause;        // причина обмеження (рецептурний, заблокований тощо)
   final String? causeTitle;   // текст обмеження для відображення
+  final double? kolStock;     // доступний залишок для колонки «Наявність» (після резерву)
 
   const StockLockResult({
     required this.ok,
     required this.grantedQty,
     this.cause,
     this.causeTitle,
+    this.kolStock,
   });
 
   /// Чи резервування повне (запитана кількість = отримана).
@@ -791,8 +793,12 @@ class DrugService {
           ) ?? 0.0;
       final cause = response.data['cause']?.toString() ?? '';
       final causeTitle = response.data['causeTitle']?.toString() ?? '';
+      final kolStock = double.tryParse(
+        response.data['kolStock']?.toString().replaceAll(',', '.') ?? '',
+      );
 
       debugPrint('sgVRoznSetLock OK SKod=$skod requested=$qty granted=$grantedQty'
+          '${kolStock != null ? ' kolStock=$kolStock' : ''}'
           '${cause.isNotEmpty ? ' cause=$cause' : ''}');
 
       return StockLockResult(
@@ -800,6 +806,7 @@ class DrugService {
         grantedQty: grantedQty,
         cause: cause.isNotEmpty ? cause : null,
         causeTitle: causeTitle.isNotEmpty ? causeTitle : null,
+        kolStock: kolStock,
       );
     } catch (e) {
       debugPrint('sgVRoznSetLock ERROR SKod=$skod qty=$qty: $e');

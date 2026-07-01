@@ -233,6 +233,54 @@ class Drug {
     return expiry.isBefore(DateTime.now());
   }
 
+  /// Копія з оновленим залишком (після резервування — `kolStock` з sgVRoznSetLock).
+  /// [stockRaw] — точний залишок (для колонки «Наявність»); [stock] — цілі упаковки.
+  Drug copyWithStock({required int stock, double? stockRaw}) {
+    return Drug(
+      id: id,
+      name: name,
+      nameUkr: nameUkr,
+      manufacturer: manufacturer,
+      category: category,
+      price: price,
+      stock: stock,
+      stockRaw: stockRaw,
+      unit: unit,
+      requiresPrescription: requiresPrescription,
+      expiryDate: expiryDate,
+      pharmacistBonus: pharmacistBonus,
+      isInTransit: isInTransit,
+      isOwnBrand: isOwnBrand,
+      analogueGroup: analogueGroup,
+      dosageForm: dosageForm,
+      inn: inn,
+      dosage: dosage,
+      storageConditions: storageConditions,
+      locationType: locationType,
+      locationCode: locationCode,
+      storageLocations: storageLocations,
+      usageInfo: usageInfo,
+      imageUrl: imageUrl,
+      unitsPerPackage: unitsPerPackage,
+      variableDivisor: variableDivisor,
+      intakeWarning: intakeWarning,
+      productBrowserSlug: productBrowserSlug,
+      indications: indications,
+      instructionsUrl: instructionsUrl,
+      applicationMethod: applicationMethod,
+      countryOfOrigin: countryOfOrigin,
+      series: series,
+      barcode: barcode,
+      availabilityStatus: availabilityStatus,
+      hasHelpingHand: hasHelpingHand,
+      isMedicine: isMedicine,
+      ukod: ukod,
+      skuCode: skuCode,
+      comingPrice: comingPrice,
+      comingCode: comingCode,
+    );
+  }
+
   Drug copyWithStorage({
     StorageLocationType? locationType,
     String? locationCode,

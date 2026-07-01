@@ -1885,6 +1885,24 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     return DrugService.setStockLock(skod, qty);
   }
 
+  /// Оновити залишок товару в таблиці (колонка «Наявність») після резервування —
+  /// `kolStock` з sgVRoznSetLock (напр. було 5, відпустили 1 → стало 4).
+  void _applyKolStock(String drugId, double? kolStock) {
+    if (kolStock == null || !mounted) return;
+    final whole = kolStock <= 0 ? 0 : kolStock.floor();
+    setState(() {
+      _searchResults = _searchResults
+          .map((d) => d.id == drugId
+              ? d.copyWithStock(stock: whole, stockRaw: kolStock)
+              : d)
+          .toList();
+      if (_selectedDrug?.id == drugId) {
+        _selectedDrug =
+            _selectedDrug!.copyWithStock(stock: whole, stockRaw: kolStock);
+      }
+    });
+  }
+
   /// Обчислити кількість для резервування з CartItem.
   /// Цілі упаковки = quantity, блістери = fractionalQty / unitsPerPackage.
   double _cartItemLockQty(CartItem item) {
@@ -1946,6 +1964,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       );
       return;
     }
+
+    // Оновити «Наявність» у таблиці актуальним залишком із сервера.
+    _applyKolStock(drug.id, result.kolStock);
 
     // Сервер міг видати менше ніж запитали (інша каса вже зарезервувала)
     final granted = result.grantedQty.round();
@@ -2024,6 +2045,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       );
       return;
     }
+    _applyKolStock(drug.id, result.kolStock);
     setState(() {
       final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
       if (idx >= 0) {
@@ -2256,6 +2278,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       );
       return;
     }
+    _applyKolStock(item.drug.id, result.kolStock);
     setState(() {
       if (item.isFractional) {
         item.fractionalQty = item.fractionalQty! + 1;

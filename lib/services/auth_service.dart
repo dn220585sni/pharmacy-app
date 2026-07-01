@@ -83,9 +83,12 @@ class AuthService {
     }
   }
 
-  /// Відновити sessionId і викликати LogoutRlz (при старті додатка).
-  static Future<void> cleanupPreviousSession() async {
-    if (ApiConfig.useMock) return;
+  /// Відновити sessionId і викликати LogoutRlz (при старті додатка / примусово).
+  /// Повертає `true`, якщо була **локальна** збережена сесія й ми її закрили;
+  /// `false`, якщо чистити не було чого (напр. блокує сесія в іншому місці —
+  /// її id у нас немає, тож LogoutRlz неможливий).
+  static Future<bool> cleanupPreviousSession() async {
+    if (ApiConfig.useMock) return false;
     try {
       String? content;
       if (kIsWeb) {
@@ -96,9 +99,9 @@ class AuthService {
           content = await file.readAsString();
         }
       }
-      if (content == null || content.isEmpty) return;
+      if (content == null || content.isEmpty) return false;
       final lines = content.split('\n');
-      if (lines.isEmpty || lines[0].trim().isEmpty) return;
+      if (lines.isEmpty || lines[0].trim().isEmpty) return false;
       final oldSessionId = lines[0].trim();
       debugPrint('Found previous session: $oldSessionId → LogoutRlz');
       await _api.call('LogoutRlz', params: {'sessionId': oldSessionId});
@@ -108,8 +111,10 @@ class AuthService {
         final file = await _sessionFile;
         await file!.delete();
       }
+      return true;
     } catch (e) {
       debugPrint('Session cleanup error: $e');
+      return false;
     }
   }
 

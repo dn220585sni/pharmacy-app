@@ -122,8 +122,8 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
       _showForceLogout = false;
     });
 
-    // Try to cleanup any persisted session from previous app run
-    await AuthService.cleanupPreviousSession();
+    // Спробувати закрити ЛОКАЛЬНУ збережену сесію попереднього запуску.
+    final hadLocal = await AuthService.cleanupPreviousSession();
     if (!mounted) return;
 
     // Retry login
@@ -135,7 +135,18 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
     } else {
       setState(() {
         _isLoggingIn = false;
-        _pinError = AuthService.lastLoginError ?? 'Не вдалося увійти';
+        // Якщо локальної сесії не було, а сервер усе одно каже «вже працює» —
+        // блокує сесія в іншому місці, її id у нас немає (LogoutRlz неможливий).
+        // Не вдаємо, що кнопка «зламана» — пояснюємо чесно.
+        if (!hadLocal && AuthService.isUserBusy) {
+          _pinError = 'Сесія цього користувача активна в іншому місці.\n'
+              'Завершіть її там або зачекайте автозавершення; за потреби — '
+              'зверніться до адміністратора.';
+          _showForceLogout = false;
+        } else {
+          _pinError = AuthService.lastLoginError ?? 'Не вдалося увійти';
+          _showForceLogout = AuthService.isUserBusy;
+        }
       });
     }
   }

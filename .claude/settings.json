@@ -10,6 +10,7 @@
       "Bash(flutter build:*)",
       "Bash(flutter test:*)",
       "Bash(flutter analyze:*)",
+      "Bash(flutter run:*)",
       "PowerShell(git add:*)",
       "PowerShell(git commit:*)",
       "PowerShell(git push:*)",
@@ -18,7 +19,8 @@
       "PowerShell(git log:*)",
       "PowerShell(flutter build:*)",
       "PowerShell(flutter test:*)",
-      "PowerShell(flutter analyze:*)"
+      "PowerShell(flutter analyze:*)",
+      "PowerShell(flutter run:*)"
     ]
   }
 }

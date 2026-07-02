@@ -551,9 +551,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // Global key handler: redirect printable chars to search field
     HardwareKeyboard.instance.addHandler(_handleGlobalKey);
 
-    // Cleanup any previous session that wasn't properly closed
-    AuthService.cleanupPreviousSession();
-
     // Load pharmacists from server and auto-show picker
     _loadPharmacists(autoShow: true);
 

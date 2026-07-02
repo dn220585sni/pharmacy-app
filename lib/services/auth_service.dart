@@ -1,10 +1,4 @@
-import 'dart:io' if (dart.library.html) 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
-
-// Web localStorage access via conditional import
-import 'session_storage_stub.dart'
-    if (dart.library.html) 'session_storage_web.dart' as session_storage;
 
 import 'api_config.dart';
 import 'cache_api_client.dart';
@@ -28,8 +22,11 @@ class PharmacistInfo {
 
 /// Сервіс авторизації фармацевта.
 ///
-/// Caché сервіси: GetUsersRlz, LoginRlz, LogoutRlz
-/// SessionId зберігається у файл для відновлення після перезапуску.
+/// Caché сервіси: GetUsersRlz, LoginRlz, LogoutRlz.
+/// Один користувач = одна активна сесія (роздріб так спроєктований). Сесію
+/// НЕ зберігаємо локально: при повторному вході під зайнятим користувачем
+/// сервер повертає «вже працює», а примусове завершення робиться сервером
+/// через `LoginRlz&force=1` (по кнопці «Завершити сесію»).
 class AuthService {
   static final _api = CacheApiClient();
 
@@ -44,97 +41,29 @@ class AuthService {
   /// Останній результат помилки login (для UI).
   static String? lastLoginError;
 
-  // ── Session file ───────────────────────────────────────────────────────
-
-  static const _sessionFileName = '.pharmacy_session';
-
-  /// Шлях до файлу сесії (non-web only).
-  static Future<File?> get _sessionFile async {
-    if (kIsWeb) return null;
-    final dir = await getApplicationSupportDirectory();
-    return File('${dir.path}/$_sessionFileName');
-  }
-
-  /// Зберегти sessionId + user.
-  static Future<void> _persistSession(String sessionId, String user) async {
-    try {
-      if (kIsWeb) {
-        session_storage.saveSession(sessionId, user);
-        return;
-      }
-      final file = await _sessionFile;
-      await file!.writeAsString('$sessionId\n$user');
-    } catch (e) {
-      debugPrint('Failed to persist session: $e');
-    }
-  }
-
-  /// Видалити збережену сесію.
-  static Future<void> _clearPersistedSession() async {
-    try {
-      if (kIsWeb) {
-        session_storage.clearSession();
-        return;
-      }
-      final file = await _sessionFile;
-      if (file != null && await file.exists()) await file.delete();
-    } catch (e) {
-      debugPrint('Failed to clear session file: $e');
-    }
-  }
-
-  /// Відновити sessionId і викликати LogoutRlz (при старті додатка / примусово).
-  /// Повертає `true`, якщо була **локальна** збережена сесія й ми її закрили;
-  /// `false`, якщо чистити не було чого (напр. блокує сесія в іншому місці —
-  /// її id у нас немає, тож LogoutRlz неможливий).
-  static Future<bool> cleanupPreviousSession() async {
-    if (ApiConfig.useMock) return false;
-    try {
-      String? content;
-      if (kIsWeb) {
-        content = session_storage.getSession();
-      } else {
-        final file = await _sessionFile;
-        if (file != null && await file.exists()) {
-          content = await file.readAsString();
-        }
-      }
-      if (content == null || content.isEmpty) return false;
-      final lines = content.split('\n');
-      if (lines.isEmpty || lines[0].trim().isEmpty) return false;
-      final oldSessionId = lines[0].trim();
-      debugPrint('Found previous session: $oldSessionId → LogoutRlz');
-      await _api.call('LogoutRlz', params: {'sessionId': oldSessionId});
-      if (kIsWeb) {
-        session_storage.clearSession();
-      } else {
-        final file = await _sessionFile;
-        await file!.delete();
-      }
-      return true;
-    } catch (e) {
-      debugPrint('Session cleanup error: $e');
-      return false;
-    }
-  }
-
   // ── Auth API ─────────────────────────────────────────────────────────────
 
   /// Авторизація фармацевта — створює сесію.
   ///
-  /// Caché: `GET ?ServiceName=LoginRlz&user={user}&pswd={pswd}&ekkKodKli={kod}`
+  /// Caché: `GET ?ServiceName=LoginRlz&user={user}&pswd={pswd}&ekkKodKli={kod}[&force=1]`
   /// Response: `{"Status":"OK","Result":"Встановлена сесія","sessionId":"..."}`
   ///
   /// `ekkKodKli` (код каси з реєстру) — ОБОВ'ЯЗКОВИЙ: сервер за ним піднімає
   /// контекст «клієнт РРО» для сесії. Без нього всі РРО-залежні сервіси
   /// (ProvSumZOtchet, SaveSumDay, GetTermBank, ZRep) падають «Перевірте клієнта РРО».
-  static Future<bool> login(String user, String password) async {
+  ///
+  /// [force] = true (`force=1`) — сервер зачистить УСІ сесії цього користувача
+  /// й залогінить наново. Шлемо лише свідомо (кнопка «Завершити сесію» після
+  /// «вже працює»), НЕ автоматично.
+  static Future<bool> login(String user, String password,
+      {bool force = false}) async {
     if (ApiConfig.useMock) return _mockLogin(user, password);
 
     final response = await _api.call('LoginRlz', params: {
       'user': user,
       'pswd': password,
       'ekkKodKli': ApiConfig.ekkKodKli,
+      if (force) 'force': '1',
     });
 
     if (response.isOk) {
@@ -144,9 +73,7 @@ class AuthService {
         _currentUser = user;
         _api.sessionId = id;
         lastLoginError = null;
-        debugPrint('LoginRlz OK: sessionId=$id');
-        // Persist to file for crash recovery
-        _persistSession(id, user);
+        debugPrint('LoginRlz OK: sessionId=$id${force ? ' (force)' : ''}');
         return true;
       }
     }
@@ -181,7 +108,6 @@ class AuthService {
       'sessionId': id,
     });
 
-    _clearPersistedSession();
     debugPrint('LogoutRlz: ${response.result}');
     return response.isOk;
   }
@@ -189,7 +115,7 @@ class AuthService {
   /// Отримати список фармацевтів з паролями та ІПН.
   ///
   /// Caché: `GET ?ServiceName=GetUsersRlz`
-  /// Повертає масив {user, pswd, ipn}
+  /// Повертає масив {user, pswd, ipn, typezuser}
   static Future<List<PharmacistInfo>> getUsers() async {
     if (ApiConfig.useMock) return _mockGetUsers();
 

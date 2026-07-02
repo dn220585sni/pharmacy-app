@@ -111,7 +111,8 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
     }
   }
 
-  /// Cleanup previous session and retry login.
+  /// Примусовий вхід: сервер зачищає УСІ сесії користувача (`LoginRlz&force=1`)
+  /// і логінить наново. Спрацьовує лише по кнопці «Завершити сесію».
   Future<void> _cleanupAndRetry() async {
     final p = _selectedForPin;
     if (p == null) return;
@@ -122,12 +123,7 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
       _showForceLogout = false;
     });
 
-    // Спробувати закрити ЛОКАЛЬНУ збережену сесію попереднього запуску.
-    final hadLocal = await AuthService.cleanupPreviousSession();
-    if (!mounted) return;
-
-    // Retry login
-    final ok = await AuthService.login(p.user, p.password);
+    final ok = await AuthService.login(p.user, p.password, force: true);
     if (!mounted) return;
 
     if (ok) {
@@ -135,18 +131,8 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
     } else {
       setState(() {
         _isLoggingIn = false;
-        // Якщо локальної сесії не було, а сервер усе одно каже «вже працює» —
-        // блокує сесія в іншому місці, її id у нас немає (LogoutRlz неможливий).
-        // Не вдаємо, що кнопка «зламана» — пояснюємо чесно.
-        if (!hadLocal && AuthService.isUserBusy) {
-          _pinError = 'Сесія цього користувача активна в іншому місці.\n'
-              'Завершіть її там або зачекайте автозавершення; за потреби — '
-              'зверніться до адміністратора.';
-          _showForceLogout = false;
-        } else {
-          _pinError = AuthService.lastLoginError ?? 'Не вдалося увійти';
-          _showForceLogout = AuthService.isUserBusy;
-        }
+        _pinError = AuthService.lastLoginError ?? 'Не вдалося увійти';
+        _showForceLogout = AuthService.isUserBusy;
       });
     }
   }

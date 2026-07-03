@@ -1,17 +1,17 @@
-# pharmacy_app
+# ФармаПОС (pharmacy_app)
 
-A new Flutter project.
+POS-застосунок робочого місця провізора аптеки: продаж, фіскалізація (ПРРО),
+лояльність (Sparta/ЛАЙК), каса та зміна. Flutter, десктоп Windows.
 
-## Getting Started
+**Нові в проекті — почніть звідси: [docs/ONBOARDING.md](docs/ONBOARDING.md)**
+(архітектура, головні флоу з діаграмами, глосарій, карта коду, запуск).
 
-This project is a starting point for a Flutter application.
+## Запуск
 
-A few resources to get you started if this is your first Flutter project:
+```powershell
+flutter run -d windows --no-pub --dart-define-from-file=dart_define.json
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+`dart_define.json` — креденшели зовнішніх API (gitignored; шаблон
+`dart_define.example.json`). Без цього прапорця ПРРО/лояльність/рецепти
+не працюватимуть. Деталі та release-збірка — в [ONBOARDING.md](docs/ONBOARDING.md#2-швидкий-старт-запуск-за-10-хвилин).

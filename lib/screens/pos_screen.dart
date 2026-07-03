@@ -1395,7 +1395,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           name: item.nameUkr ?? item.name,
           nameUkr: item.nameUkr,
           manufacturer: item.manufacturer,
-          category: '',
+          category: item.category ?? '',
           price: item.price,
           stock: item.qty,
           stockRaw: item.qtyRaw != item.qty.toDouble() ? item.qtyRaw : null,
@@ -1408,6 +1408,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           ukod: item.ukod.isNotEmpty ? item.ukod : null,
           skuCode: item.ids,
           unitsPerPackage: item.unitsPerPackage,
+          // Поля з SearchByNameSKU, які раніше backfill-ив SKUdetail на КОЖНОМУ
+          // рядку. Після C1 (ленивий SKUdetail) несемо їх прямо з пошуку, інакше
+          // бонус/СТМ/форма зникають з невибраних рядків і зі списку аналогів.
+          pharmacistBonus: item.bonus,
+          isOwnBrand: item.isOwnBrand,
+          dosageForm: item.dosageForm,
           hasHelpingHand: hasHH,
         ));
       }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/money.dart';
 import '../models/drug.dart';
 import '../models/stop_price_action.dart';
+import '../services/api_config.dart';
 import '../services/farmasell_service.dart';
 import '../services/drug_service.dart';
 import '../services/product_browser_service.dart';
@@ -1882,13 +1883,24 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
         });
         return;
       }
-    } else {
+    } else if (ApiConfig.useMock) {
       // Small delay for mock to feel natural
       await Future.delayed(const Duration(milliseconds: 400));
       if (!mounted) return;
     }
 
-    // Fallback: mock discount
+    // На live не вигадуємо знижку (потрапила б у чек) — тільки реальний API вище.
+    if (!ApiConfig.useMock) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Знижка «Рука допомоги» недоступна'),
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+
+    // Fallback: mock discount (лише для розробки).
     final price = drug.price;
     final pct = price > 100 ? 0.20 : price > 50 ? 0.18 : 0.15;
     setState(() {

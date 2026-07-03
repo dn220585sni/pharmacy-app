@@ -881,6 +881,9 @@ class OrdersPanelState extends State<OrdersPanel>
 
   Future<void> _fetchAvailableOrderDiscount() async {
     if (widget.loyalty == null) return;
+    // Реального API персональної знижки ще немає — на live не вигадуємо її з
+    // останньої цифри телефону (див. cart_panel).
+    if (!ApiConfig.useMock) return;
     final lastDigit = widget.loyalty!.phone.characters.last;
     final d = int.tryParse(lastDigit) ?? 0;
     final discount = d >= 5 ? d.toDouble() : null;
@@ -893,6 +896,14 @@ class OrdersPanelState extends State<OrdersPanel>
     if (widget.loyalty == null || isLoadingDiscount) return;
     if (availableDiscount != null) {
       setState(() => personalDiscount = availableDiscount);
+      return;
+    }
+    if (!ApiConfig.useMock) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Персональна знижка недоступна'),
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ));
       return;
     }
     setState(() => isLoadingDiscount = true);

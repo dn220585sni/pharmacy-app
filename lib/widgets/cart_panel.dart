@@ -421,6 +421,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   /// Pre-fetch discount % as soon as loyalty is linked (without activating it).
   Future<void> _fetchAvailableDiscount() async {
     if (widget.loyalty == null) return;
+    // Реального API персональної знижки ще немає. На live НЕ вигадуємо її з
+    // останньої цифри телефону — сума й так авторитетна з GetSumSkid.
+    if (!ApiConfig.useMock) return;
     final lastDigit = widget.loyalty!.phone.characters.last;
     final d = int.tryParse(lastDigit) ?? 0;
     final discount = d >= 5 ? d.toDouble() : null;
@@ -435,6 +438,15 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     if (availableDiscount != null) {
       // Already fetched — just activate
       setState(() => personalDiscount = availableDiscount);
+      return;
+    }
+    if (!ApiConfig.useMock) {
+      // Персональна знижка з реального джерела поки не підключена.
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Персональна знижка недоступна'),
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ));
       return;
     }
     setState(() => isLoadingDiscount = true);

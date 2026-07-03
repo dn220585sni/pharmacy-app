@@ -1478,12 +1478,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       });
       // Ліниво підтягнути стоп-ціни для видимих результатів (гібрид).
       _prefetchStopPriceUkods(_searchResults.map((d) => d.ukod));
-      // Fetch SKU detail for ALL server drugs
-      for (final drug in serverDrugs) {
-        _fetchSKUDetail(drug);
-      }
-      // Fetch safety tags + external analogues for the selected drug
+      // SKUdetail — тільки для вибраного товару, а не для всіх ~30 результатів:
+      // таблиця повністю обслуговується SearchByNameSKU (unitsPerPackage/ціна/
+      // залишок/термін уже приходять у пошуку). Решта рядків дотягнуть деталі
+      // при виборі (onTap/стрілки) або при додаванні в кошик (_setQuantity).
       if (_selectedDrug != null) {
+        _fetchSKUDetail(_selectedDrug!);
         _fetchProductBrowserInfo(_selectedDrug!);
         _fetchExternalAnalogues(_selectedDrug!);
         _fetchCacheAnalogues(_selectedDrug!);
@@ -1955,6 +1955,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   void _setQuantity(Drug drug, int qty) async {
     _suppressHelpingHand();
+    // Дані упаковки (barcode для ПРРО, intakeWarning, дільник) тягнемо ліниво —
+    // якщо товар додають, не вибираючи рядок, дотягуємо тут (метод дедуплікує).
+    if (qty > 0) _fetchSKUDetail(drug);
     final wasInCart = _cart.any((item) => item.drug.id == drug.id);
 
     // ПМ-режим: блокуємо додавання товарів не зі списку Пакунок Малюка.
@@ -2042,6 +2045,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   void _setFractionalQuantity(Drug drug, int blisters) async {
     _suppressHelpingHand();
+    if (blisters > 0) _fetchSKUDetail(drug); // дотягнути деталі (barcode/дільник)
     if (!drug.canSplitByBlister) return;
     final wasInCart = _cart.any((item) => item.drug.id == drug.id);
 
@@ -2728,15 +2732,26 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // If we have FarmaSell data, call real API
     if (drug.comingPrice != null && drug.comingCode != null && phone != null) {
       _fetchHelpingHandPrice(drug, phone);
-    } else {
-      // Fallback: mock discount
+    } else if (ApiConfig.useMock) {
+      // Fallback: mock discount (лише для розробки).
       final discountPct = drug.price > 100 ? 0.20 : drug.price > 50 ? 0.18 : 0.15;
       final discounted = (drug.price * (1 - discountPct)).roundToDouble();
       setState(() {
         _helpingHandPrices[drug.id] = discounted;
         _helpingHandRemaining--;
       });
+    } else {
+      // На live без даних FarmaSell знижку НЕ вигадуємо (потрапила б у чек).
+      _showHelpingHandUnavailable();
     }
+  }
+
+  void _showHelpingHandUnavailable() {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Знижка «Рука допомоги» недоступна для цього товару'),
+      duration: Duration(seconds: 2),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   /// Call FarmaSell API to get real Helping Hand discount.
@@ -2760,14 +2775,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _helpingHandPrices[drug.id] = result.discountPrice!;
         _helpingHandRemaining--;
       });
-    } else {
-      // Fallback to mock on API error
+    } else if (ApiConfig.useMock) {
+      // Fallback to mock on API error (лише для розробки).
       final discountPct = drug.price > 100 ? 0.20 : drug.price > 50 ? 0.18 : 0.15;
       final discounted = (drug.price * (1 - discountPct)).roundToDouble();
       setState(() {
         _helpingHandPrices[drug.id] = discounted;
         _helpingHandRemaining--;
       });
+    } else {
+      // На live помилка API = відмова у знижці, а НЕ фіктивний відсоток.
+      _showHelpingHandUnavailable();
     }
   }
 

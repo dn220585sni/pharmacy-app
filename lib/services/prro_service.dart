@@ -290,13 +290,26 @@ class PrroXReport {
     this.textPrint,
   });
 
+  /// Терпиме до формату: bool `true`, `1`, `"1"`, `"true"` → true.
+  static bool _truthy(dynamic v) =>
+      v == true ||
+      v == 1 ||
+      (v is String && (v == '1' || v.toLowerCase() == 'true'));
+
+  /// num або рядок → int (напр. `shift_duration` може прийти рядком).
+  static int? _flexInt(dynamic v) {
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v.trim());
+    return null;
+  }
+
   factory PrroXReport.fromJson(Map<String, dynamic> json) {
     final real = json['real'] as Map<String, dynamic>? ?? const {};
     final list = (json['checks_list'] as List?) ?? const [];
     return PrroXReport(
-      shiftOpen: json['shift_state'] == true,
+      shiftOpen: _truthy(json['shift_state']),
       cashInBox: (json['cash_in_box'] as num?)?.toDouble() ?? 0,
-      shiftDurationMinutes: (json['shift_duration'] as num?)?.toInt(),
+      shiftDurationMinutes: _flexInt(json['shift_duration']),
       ordersCount: (real['orders_count'] as num?)?.toInt() ?? 0,
       ordersSum: (real['sum'] as num?)?.toDouble() ?? 0,
       checks: list
@@ -686,6 +699,11 @@ class PrroService {
 
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
       if (decoded is! Map<String, dynamic>) return null;
+      // TEMP-діагностика (прибрати після A4): які поля реально віддає CashDesk.
+      debugPrint('PRRO xReport RAW: shift_state=${decoded['shift_state']} '
+          '(${decoded['shift_state'].runtimeType}), '
+          'shift_duration=${decoded['shift_duration']}, '
+          'keys=${decoded.keys.toList()}');
       return PrroXReport.fromJson(decoded);
     } catch (e) {
       debugPrint('PRRO xReport ERROR: $e');

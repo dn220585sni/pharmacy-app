@@ -9,10 +9,18 @@ class TopBar extends StatelessWidget {
   /// Called when the pharmacist badge is tapped.
   final VoidCallback? onPharmacistTap;
 
+  /// Кількість відкладених (offline) чеків ПРРО. 0 = індикатор прихований.
+  final int pendingPrroCount;
+
+  /// Натиск на індикатор черги — спроба надіслати відкладені чеки зараз.
+  final VoidCallback? onPendingPrroTap;
+
   const TopBar({
     super.key,
     this.pharmacistName,
     this.onPharmacistTap,
+    this.pendingPrroCount = 0,
+    this.onPendingPrroTap,
   });
 
   /// Extract short name: "Шайхутдинова Елена Васильевна" → "Шайхутдинова О.В."
@@ -60,6 +68,43 @@ class TopBar extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          // Індикатор черги відкладених чеків ПРРО (offline). Клік — flush зараз.
+          if (pendingPrroCount > 0) ...[
+            Tooltip(
+              message: 'Відкладені чеки ПРРО чекають надсилання.\n'
+                  'Натисніть, щоб спробувати надіслати зараз.',
+              child: GestureDetector(
+                onTap: onPendingPrroTap,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF7ED),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: const Color(0xFFF59E0B).withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.cloud_upload_outlined,
+                          size: 15, color: Color(0xFFB45309)),
+                      const SizedBox(width: 5),
+                      Text(
+                        'ПРРО: $pendingPrroCount у черзі',
+                        style: const TextStyle(
+                          color: Color(0xFFB45309),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
           GestureDetector(
             onTap: onPharmacistTap,
             child: Container(

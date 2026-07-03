@@ -50,6 +50,7 @@ import '../widgets/messages_panel.dart';
 import '../widgets/barcode_input_dialog.dart';
 import '../widgets/robot_panel.dart';
 import '../services/api_config.dart';
+import '../services/prro_queue.dart';
 import '../data/mock_messages.dart';
 import '../models/prescription.dart';
 import '../models/nearby_pharmacy.dart';
@@ -97,6 +98,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   Timer? _nameSearchTimer;
   Timer? _localFilterTimer;
   bool _isServerLookup = false;
+
+  // ── Черга відкладених чеків ПРРО (offline) ─────────────────────────────
+  /// Періодичний flush + індикатор кількості в TopBar.
+  Timer? _prroFlushTimer;
+  int _prroPendingCount = 0;
+  static const _prroFlushInterval = Duration(seconds: 60);
 
   // ── Top drugs cache (pre-loaded at shift start) ────────────────────────
   /// Cached top drugs for instant local search.
@@ -557,6 +564,44 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
     // Load EDK offers
     _initEdkOffers();
+
+    // Черга відкладених чеків ПРРО: показати лічильник і періодично флашити.
+    _initPrroQueueWatch();
+  }
+
+  /// Підняти чергу відкладених чеків ПРРО, показати лічильник і запустити
+  /// періодичний flush (щоб чеки пушились навіть без нових продажів).
+  Future<void> _initPrroQueueWatch() async {
+    await PrroQueue.load();
+    if (!mounted) return;
+    setState(() => _prroPendingCount = PrroQueue.count);
+    _prroFlushTimer = Timer.periodic(_prroFlushInterval, (_) => _tickPrroFlush());
+  }
+
+  /// Тік періодичного flush: якщо є відкладені чеки — спробувати надіслати,
+  /// потім оновити лічильник в UI.
+  Future<void> _tickPrroFlush() async {
+    if (PrroQueue.count > 0) {
+      await PrroQueue.flush();
+    }
+    if (mounted && _prroPendingCount != PrroQueue.count) {
+      setState(() => _prroPendingCount = PrroQueue.count);
+    }
+  }
+
+  /// Ручний flush по кліку на індикатор у TopBar.
+  Future<void> _flushPrroNow() async {
+    if (PrroQueue.count == 0) return;
+    final sent = await PrroQueue.flush();
+    if (!mounted) return;
+    setState(() => _prroPendingCount = PrroQueue.count);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(sent > 0
+          ? 'Надіслано відкладених чеків: $sent (лишилось ${PrroQueue.count})'
+          : 'ПРРО ще недоступний — чеки лишаються в черзі'),
+      duration: const Duration(seconds: 3),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   /// Initialize EDK offers: mock only (live uses per-drug GetEdkOffers).
@@ -844,6 +889,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _nameSearchTimer?.cancel();
     _localFilterTimer?.cancel();
     _helpingHandTimer?.cancel();
+    _prroFlushTimer?.cancel();
     HardwareKeyboard.instance.removeHandler(_handleGlobalKey);
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -2949,6 +2995,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _selectedDrug = null;   // show ShiftDashboard after payment
       _searchResults = [];
       _resetLoyalty();
+      // Продаж міг покласти offline-чек у чергу (connection error у cart_panel)
+      // або, навпаки, флашнути — оновити індикатор одразу.
+      _prroPendingCount = PrroQueue.count;
     });
   }
 
@@ -3133,6 +3182,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           TopBar(
             pharmacistName: _currentPharmacist?.user,
             onPharmacistTap: _showPharmacistPicker,
+            pendingPrroCount: _prroPendingCount,
+            onPendingPrroTap: _flushPrroNow,
           ),
 
           // ── Main content area ──────────────────────────────────────────────

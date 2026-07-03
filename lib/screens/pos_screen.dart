@@ -51,6 +51,7 @@ import '../widgets/barcode_input_dialog.dart';
 import '../widgets/robot_panel.dart';
 import '../services/api_config.dart';
 import '../services/prro_queue.dart';
+import '../services/prro_service.dart';
 import '../data/mock_messages.dart';
 import '../models/prescription.dart';
 import '../models/nearby_pharmacy.dart';
@@ -743,6 +744,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         // дня не показати повторний старт/службове внесення для вже відкритої.
         await ShiftService.ensureRestored();
         if (!mounted) return;
+        // TEMP-діагностика A4: показати на екрані, що повернув xReport і стан зміни.
+        if (!ApiConfig.useMock) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('A4 · зміна відкрита=${ShiftService.state.isOpen} · '
+                'xReport: ${PrroService.lastXReportDebug ?? "НЕ ВИКЛИКАНО"}'),
+            duration: const Duration(seconds: 15),
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
         // Початок зміни: ProvSumZOtchet — чи потрібне службове внесення +
         // залишок з останнього Z-звіту. Діалог показуємо лише коли потрібне.
         if (!ShiftService.state.isOpen) {

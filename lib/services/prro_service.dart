@@ -332,6 +332,9 @@ class PrroService {
   static DateTime? _tokenExpiresAt;
   static int? _activeFiscalNumber;
 
+  /// TEMP-діагностика A4: що останнього разу повернув xReport (для показу в UI).
+  static String? lastXReportDebug;
+
   /// Активний фіскальний номер. Береться з `opened_shift` після авторизації;
   /// fallback — `PrroConfig.numFiscal`.
   static int get activeFiscalNumber =>
@@ -675,7 +678,11 @@ class PrroService {
     bool includeChecks = true,
     int printWidth = 40,
   }) async {
-    if (!await _ensureAuth()) return null;
+    lastXReportDebug = 'старт (fiscal=$activeFiscalNumber)';
+    if (!await _ensureAuth()) {
+      lastXReportDebug = 'помилка авторизації ПРРО';
+      return null;
+    }
 
     try {
       final body = {
@@ -693,19 +700,25 @@ class PrroService {
       ).timeout(const Duration(seconds: 20));
 
       if (response.statusCode != 200 && response.statusCode != 201) {
+        lastXReportDebug = 'HTTP ${response.statusCode}';
         debugPrint('PRRO xReport FAIL: HTTP ${response.statusCode}');
         return null;
       }
 
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-      if (decoded is! Map<String, dynamic>) return null;
+      if (decoded is! Map<String, dynamic>) {
+        lastXReportDebug = 'відповідь не обʼєкт: ${decoded.runtimeType}';
+        return null;
+      }
       // TEMP-діагностика (прибрати після A4): які поля реально віддає CashDesk.
-      debugPrint('PRRO xReport RAW: shift_state=${decoded['shift_state']} '
+      lastXReportDebug = 'shift_state=${decoded['shift_state']} '
           '(${decoded['shift_state'].runtimeType}), '
           'shift_duration=${decoded['shift_duration']}, '
-          'keys=${decoded.keys.toList()}');
+          'keys=${decoded.keys.toList()}';
+      debugPrint('PRRO xReport RAW: $lastXReportDebug');
       return PrroXReport.fromJson(decoded);
     } catch (e) {
+      lastXReportDebug = 'ERROR: $e';
       debugPrint('PRRO xReport ERROR: $e');
       return null;
     }

@@ -123,6 +123,17 @@ class CacheApiClient {
     }
   }
 
+  /// Екранує СТРУКТУРНІ символи в значенні query-параметра, щоб вони не ламали
+  /// запит і не підміняли інші параметри. `%` — першим (щоб не подвоїти інші
+  /// escape-и). Решту (пробіли, кирилиця, `*`, `,`, `+`) не чіпаємо — це зберігає
+  /// поточну робочу поведінку (Uri.parse кодує пробіл/кирилицю сам), а `*`/`,`
+  /// Caché потребує літеральними в u-кодах.
+  static String _encodeParamValue(String v) => v
+      .replaceAll('%', '%25')
+      .replaceAll('&', '%26')
+      .replaceAll('#', '%23')
+      .replaceAll('=', '%3D');
+
   Future<CacheResponse> _callInternal(
     String serviceName, {
     Map<String, String>? params,
@@ -136,8 +147,12 @@ class CacheApiClient {
     // Build query string manually — Caché CSP doesn't handle
     // percent-encoded * and , in u-codes (e.g. "479*1*47*10**0,2*3*").
     // Uri.replace(queryParameters:) encodes them as %2A/%2C which breaks lookups.
+    // Значення екрануємо лише від СТРУКТУРНИХ символів (% & = #), щоб пошуковий
+    // запит чи причина каси з '&'/'='/'#' не ламали й не підміняли інші
+    // параметри. Пробіли/кирилицю/'*'/',' НЕ чіпаємо — їх коректно обробляє
+    // Uri.parse нижче (як і зараз), а '*'/',' Caché вимагає літеральними.
     final queryString = queryParams.entries
-        .map((e) => '${e.key}=${e.value}')
+        .map((e) => '${e.key}=${_encodeParamValue(e.value)}')
         .join('&');
     final uri = Uri.parse('${ApiConfig.baseUrl}?$queryString');
     final _logRaw = false; // set true to debug raw API responses

@@ -174,19 +174,22 @@ UI оновлюється одразу, лок — у фоні з відкато
 дебаунсити (1 rebuild / 250 мс), те саме для навали SKUdetail-відповідей.
 - Файли: `lib/services/stop_price_service.dart:79-94`, `lib/screens/pos_screen.dart:2430-2444`
 
-### ☐ C5. cacheWidth для Image.network (9 місць)
-Повнорозмірні картинки з anc.ua декодяться для превʼю 32–120 px. Додати `cacheWidth:` ≈ 2×
-розміру віджета: out_of_stock_panel (×2), edk_panel, order_edk_card, orders_panel (×2),
-drug_detail_panel, cart_panel, cart_offer_card.
+### ✅ C5. cacheWidth для Image.network (9 місць)  *(2026-07-03, не закомічено)*
+Додано `cacheWidth` ≈ 2× дисплейного розміру: cart_panel 64, cart_offer_card 128,
+order_edk_card 96, orders_panel 96/512, edk_panel 256, out_of_stock_panel 256/256,
+drug_detail_panel 256. Повнорозмірні картинки з anc.ua більше не декодуються в повну
+роздільність заради превʼю — менше CPU й памʼяті в image cache.
+- `flutter analyze` чисто; `flutter test` 73 passed.
 
 ### ☐ C6. Великі відповіді — поза UI-ізолятом
 JSON-фікси + парсинг GetTopDrugs/GetOrders через `compute()`. Втрачає сенс після D6
 (фікс JSON на сервері) — оцінити черговість.
 - Файли: `lib/services/cache_api_client.dart:160-206`
 
-### ☐ C7. Дрібне
-- `SpartaService`: один статичний `http.Client` замість створення на кожен виклик
-  (`lib/services/sparta_service.dart:62`).
+### ✅ C7. Дрібне  *(2026-07-03, не закомічено)*
+- `SpartaService`: один статичний keep-alive `http.Client` замість створення+закриття
+  на кожен виклик (зайвий TCP+TLS handshake). Прибрано `client.close()` у `_post`.
+- `flutter analyze` чисто; `flutter test` 73 passed.
 
 ---
 

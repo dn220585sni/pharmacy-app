@@ -59,7 +59,9 @@ class SpartaService {
   static const _apiUser = 'anc_pos';
   static const _regUserName = 'PRRO';
 
-  http.Client get _client => http.Client();
+  /// Спільний keep-alive клієнт (не створюємо новий на кожен запит — зайвий
+  /// TCP+TLS handshake). НЕ закриваємо після запиту.
+  static final http.Client _client = http.Client();
 
   /// `tx/order` — реєстрація в статусі pending (hold).
   /// Підпис: `partnerCode+placeCode+posCode+date+no+cardNo`.
@@ -211,9 +213,8 @@ class SpartaService {
 
   Future<SpartaResult> _post(String endpoint, Map<String, dynamic> body) async {
     final url = '${config.baseUrl}$endpoint';
-    final client = _client;
     try {
-      final resp = await client
+      final resp = await _client
           .post(Uri.parse(url),
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode(body))
@@ -231,8 +232,6 @@ class SpartaService {
     } catch (e) {
       debugPrint('Sparta $endpoint ERROR: $e');
       return SpartaResult.failure('Помилка Спарти: $e');
-    } finally {
-      client.close();
     }
   }
 

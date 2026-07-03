@@ -118,6 +118,7 @@ class CartOfferCard extends StatelessWidget {
                                 child: Image.network(
                                   drug.imageUrl!,
                                   fit: BoxFit.contain,
+                                  cacheWidth: 128,
                                   errorBuilder: (context, error, stack) =>
                                       _placeholderIcon(),
                                 ),

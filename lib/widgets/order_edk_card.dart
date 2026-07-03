@@ -120,6 +120,7 @@ class OrderEdkCard extends StatelessWidget {
                           child: Image.network(
                             drug.imageUrl!,
                             fit: BoxFit.contain,
+                            cacheWidth: 96,
                             errorBuilder: (context, error, stack) => const Icon(
                               Icons.medication_rounded,
                               size: 24,

@@ -3156,6 +3156,7 @@ class _OrderItemRow extends StatelessWidget {
                       ? Image.network(
                           item.enrichedImageUrl!,
                           fit: BoxFit.cover,
+                          cacheWidth: 96,
                           errorBuilder: (_, __, ___) => _fallbackIcon(isDiscount, isScanned),
                         )
                       : _fallbackIcon(isDiscount, isScanned),
@@ -3437,6 +3438,7 @@ class _OrderItemRow extends StatelessWidget {
                                 ? Image.network(
                                     item.enrichedImageUrl!,
                                     fit: BoxFit.contain,
+                                    cacheWidth: 512,
                                     errorBuilder: (_, __, ___) =>
                                         _noImagePlaceholder(),
                                   )

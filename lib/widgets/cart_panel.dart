@@ -2008,6 +2008,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                                 child: Image.network(
                                   item.drug.imageUrl!,
                                   fit: BoxFit.cover,
+                                  cacheWidth: 64,
                                   errorBuilder: (context, error, stack) =>
                                       const Icon(Icons.medication_rounded,
                                           size: 16,

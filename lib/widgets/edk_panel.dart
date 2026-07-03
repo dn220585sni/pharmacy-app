@@ -151,6 +151,7 @@ class EdkPanel extends StatelessWidget {
                             child: Image.network(
                               drug.imageUrl!,
                               fit: BoxFit.contain,
+                              cacheWidth: 256,
                               errorBuilder: (context, error, stack) =>
                                   _placeholderIcon(),
                             ),

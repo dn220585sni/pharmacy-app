@@ -1271,6 +1271,7 @@ class _DrugPhoto extends StatelessWidget {
               : Image.network(
                   imageUrl!,
                   fit: BoxFit.contain,
+                  cacheWidth: 256,
                   loadingBuilder: (_, child, progress) => progress == null
                       ? child
                       : const Center(

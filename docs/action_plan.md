@@ -30,11 +30,21 @@ Products для ПРРО будувати з `GetSumSkid.goods` (мапінг з
 - Файли: `lib/widgets/cart_panel.dart:541-558`, новий `lib/services/sale_journal.dart`
 - Критерій: kill процесу між фіскалізацією і onPay → після рестарту продаж добивається/видно в журналі.
 
-### ☐ A4. Стан зміни: відновлення з ПРРО, безпечний авто-Z
-На старті — `xReport().shiftOpen` → відновити `ShiftState`. Авто-Z лише якщо зміна відкрита
-з попередньої доби (за датою відкриття), а не за `err.contains('вже відкрита')`.
-- Файли: `lib/services/shift_service.dart:27, 70-78`, `lib/main.dart:46-59`
-- Критерій: рестарт додатка посеред дня НЕ викликає Z і не пропонує повторне внесення.
+### ✅ A4. Стан зміни: відновлення з ПРРО, безпечний авто-Z  *(2026-07-03, не закомічено)*
+`ShiftService.ensureRestored()` (дедуп) на старті (main.dart) + await перед показом старту
+зміни (pos_screen `_openPharmacistPicker`). `_restoreFromServer`: якщо xReport.shiftOpen і
+зміна відкрита СЬОГОДНІ (за `shift_duration`) → `_state` відкрита (діалог старту не
+показується, авто-Z не робиться, вихід пропонує Z); попередня доба → стан закритий (старт
+зробить авто-Z). Той самий today/prev-day чек додано в auto-Z branch `startShift` (замість
+довіри рядку помилки). Невідома тривалість → трактуємо як СЬОГОДНІ (безпечніше за авто-Z).
+- Файли: `shift_service.dart` (_restoreFromServer/_estimateOpenedAt/_isSameDay + startShift),
+  `main.dart` (ensureRestored у старт-блоці), `pos_screen.dart` (await ensureRestored).
+- `flutter analyze` чисто; `flutter test` 73 passed.
+- ⚠️ ТЕСТ на живому ПРРО: (1) відкрий зміну → перезапусти додаток → діалог старту НЕ
+  показується, вихід пропонує Z; (2) переконайся в консолі, що xReport віддає `shift_duration`
+  (лог «opened≈…»); (3) вчорашня незакрита зміна → старт робить авто-Z + відкриває нову.
+- ⚠️ ВІДКРИТЕ ПИТАННЯ: чи xReport реально повертає `shift_duration`? Якщо ні — треба інше
+  джерело дати відкриття (напр. datetime першого чека). Поки невідома тривалість = «сьогодні».
 
 ### ☐ A5. Конфіг ПРРО з реєстру, прибрати тестовий ФН
 `environment` + фіскальний номер з `ZSMU\Farm` (edVerMini/edPassMini/ekkIP...); fallback на

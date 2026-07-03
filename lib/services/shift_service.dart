@@ -28,6 +28,55 @@ class ShiftService {
 
   static ShiftState get state => _state;
 
+  /// Разове відновлення стану зміни з РРО (дедуплікується між викликами).
+  static Future<void>? _restoreFuture;
+  static Future<void> ensureRestored() => _restoreFuture ??= _restoreFromServer();
+
+  /// Відновити стан зміни з РРО (xReport) на старті. Якщо на РРО відкрита
+  /// СЬОГОДНІШНЯ зміна (рестарт/краш посеред дня) — вважаємо її відкритою:
+  /// (а) не показуємо повторний старт зі службовим внесенням, (б) не робимо
+  /// помилковий авто-Z, (в) при виході пропонуємо Z. Зміна з ПОПЕРЕДНЬОЇ доби
+  /// лишає стан закритим — тоді звичайний старт зробить авто-Z за вчора.
+  static Future<void> _restoreFromServer() async {
+    if (ApiConfig.useMock) return;
+    try {
+      final x = await PrroService.xReport(includeChecks: false);
+      if (x == null || !x.shiftOpen) {
+        _state = const ShiftState(isOpen: false);
+        return;
+      }
+      final openedAt = _estimateOpenedAt(x.shiftDurationMinutes);
+      // Невідома тривалість → трактуємо як СЬОГОДНІ (безпечніше, ніж ризикнути
+      // авто-Z сьогоднішньої зміни). ⚠️ Перевірити на касі, чи xReport віддає
+      // shift_duration; якщо ні — потрібне інше джерело дати відкриття.
+      final today = openedAt == null || _isSameDay(openedAt, DateTime.now());
+      if (today) {
+        _state = ShiftState(
+          isOpen: true,
+          openedAt: openedAt ?? DateTime.now(),
+          cashInBox: Money.fromHryvnia(x.cashInBox),
+          checksCount: x.ordersCount,
+        );
+        debugPrint('ShiftService: відновлено відкриту зміну з xReport '
+            '(opened≈$openedAt, чеків=${x.ordersCount})');
+      } else {
+        _state = const ShiftState(isOpen: false);
+        debugPrint('ShiftService: РРО має відкриту зміну з попередньої доби '
+            '(opened≈$openedAt) — старт зробить авто-Z');
+      }
+    } catch (e) {
+      debugPrint('ShiftService restore ERROR: $e');
+    }
+  }
+
+  static DateTime? _estimateOpenedAt(int? durationMinutes) =>
+      durationMinutes == null
+          ? null
+          : DateTime.now().subtract(Duration(minutes: durationMinutes));
+
+  static bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
   /// Перевірити, чи потрібне службове внесення на старті зміни, і отримати
   /// залишок з останнього Z-звіту (ProvSumZOtchet). Реальний бекенд.
   static Future<ServiceDepositCheck> checkServiceDeposit() async {
@@ -71,10 +120,25 @@ class ShiftService {
     final err = open.error ?? '';
     if (!open.success &&
         (err.contains('не закрили зміну') || err.contains('вже відкрита'))) {
-      debugPrint('ShiftService: авто-Z старої зміни перед відкриттям');
-      final autoZ = await PrroService.zReport();
-      if (autoZ.success) await _fixZReportInDb();
-      open = await PrroService.openShift();
+      // Зміна вже відкрита на РРО. Авто-Z ЛИШЕ якщо вона з ПОПЕРЕДНЬОЇ доби
+      // (вчорашня незакрита). Якщо сьогоднішня (рестарт посеред дня) — НЕ Z-имо,
+      // а приймаємо як відкриту: службове внесення вже зроблено раніше сьогодні.
+      final x = await PrroService.xReport(includeChecks: false);
+      final openedAt = _estimateOpenedAt(x?.shiftDurationMinutes);
+      final fromPrevDay =
+          openedAt != null && !_isSameDay(openedAt, DateTime.now());
+      if (fromPrevDay) {
+        debugPrint('ShiftService: авто-Z вчорашньої зміни перед відкриттям');
+        final autoZ = await PrroService.zReport();
+        if (autoZ.success) await _fixZReportInDb();
+        open = await PrroService.openShift();
+      } else {
+        debugPrint('ShiftService: зміна вже відкрита сьогодні — без Z, '
+            'відновлюємо стан');
+        _state =
+            ShiftState(isOpen: true, openedAt: openedAt ?? DateTime.now());
+        return true;
+      }
     }
     if (!open.success) {
       debugPrint('ShiftService startShift: OPEN_SHIFT FAIL: ${open.error}');

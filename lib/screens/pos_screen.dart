@@ -726,7 +726,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   void _openPharmacistPicker() {
-    showPharmacistPicker(context, _pharmacists).then((selected) {
+    showPharmacistPicker(context, _pharmacists).then((selected) async {
       if (selected != null && mounted) {
         setState(() => _currentPharmacist = selected);
         // Fire-and-forget Skarb login for e-prescription support
@@ -739,6 +739,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _loadTopDrugsCache();
         // Завантажити перелік соц-програм для аптеки.
         _loadSocialProjects();
+        // Дочекатись відновлення стану зміни з РРО, щоб після рестарту посеред
+        // дня не показати повторний старт/службове внесення для вже відкритої.
+        await ShiftService.ensureRestored();
+        if (!mounted) return;
         // Початок зміни: ProvSumZOtchet — чи потрібне службове внесення +
         // залишок з останнього Z-звіту. Діалог показуємо лише коли потрібне.
         if (!ShiftService.state.isOpen) {

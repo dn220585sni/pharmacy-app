@@ -100,6 +100,17 @@ class CacheApiClient {
   static const _maxRetries = 2;
   static const _retryDelay = Duration(seconds: 2);
 
+  /// Стан-змінні сервіси, які НЕБЕЗПЕЧНО повторювати наосліп при неоднозначній
+  /// помилці (timeout/розрив звʼязку): сервер міг устигнути виконати запис, і
+  /// повтор дав би подвійне службове внесення грошей / другу накладну / повторну
+  /// фіксацію Z. Повтор таких операцій — лише свідомо, вище по стеку.
+  /// 503 (шлюз відхилив ДО обробки) лишається безпечним і ретраїться завжди.
+  static const _nonIdempotentServices = {
+    'SaveSumDay',   // службове внесення/винесення грошей у касу
+    'SavesgVNakl',  // створення накладної
+    'ZRep',         // фіксація Z-звіту в БД
+  };
+
   Future<CacheResponse> call(
     String serviceName, {
     Map<String, String>? params,
@@ -130,6 +141,10 @@ class CacheApiClient {
         .join('&');
     final uri = Uri.parse('${ApiConfig.baseUrl}?$queryString');
     final _logRaw = false; // set true to debug raw API responses
+
+    // Неоднозначні збої (timeout/розрив) повторюємо лише для ідемпотентних
+    // (читаючих) сервісів. Для грошей/накладних/Z — одна спроба.
+    final retryAmbiguous = !_nonIdempotentServices.contains(serviceName);
 
     for (var attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
@@ -207,13 +222,13 @@ class CacheApiClient {
       } on FormatException catch (e) {
         return CacheResponse.error('Помилка формату відповіді: $e');
       } on http.ClientException catch (e) {
-        if (attempt < _maxRetries) {
+        if (retryAmbiguous && attempt < _maxRetries) {
           await Future.delayed(_retryDelay);
           continue;
         }
         return CacheResponse.error('Помилка з\'єднання: $e');
       } catch (e) {
-        if (attempt < _maxRetries) {
+        if (retryAmbiguous && attempt < _maxRetries) {
           await Future.delayed(_retryDelay);
           continue;
         }

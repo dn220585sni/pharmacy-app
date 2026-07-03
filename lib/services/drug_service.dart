@@ -69,6 +69,7 @@ class DrugSearchItem {
   final bool isOwnBrand;     // СТМ
   final String? category;    // категорія
   final String? dosageForm;  // лікарська форма
+  final int? unitsPerPackage; // розмір упаковки (блістерів/саше) — для дробу
 
   DrugSearchItem({
     required this.ids,
@@ -87,6 +88,7 @@ class DrugSearchItem {
     this.isOwnBrand = false,
     this.category,
     this.dosageForm,
+    this.unitsPerPackage,
   });
 
   static String? _nonEmpty(dynamic v) {
@@ -120,6 +122,10 @@ class DrugSearchItem {
       isOwnBrand: json['isOwnBrand']?.toString() == '1',
       category: _nonEmpty(json['category']),
       dosageForm: _nonEmpty(json['dosageForm']),
+      unitsPerPackage: () {
+        final u = int.tryParse(json['unitsPerPackage']?.toString().trim() ?? '');
+        return (u != null && u > 0) ? u : null;
+      }(),
     );
   }
 }

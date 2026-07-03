@@ -432,6 +432,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                 unit: 'шт',
                 ukod: item.ukod.isNotEmpty ? item.ukod : null,
                 skuCode: item.ids,
+                unitsPerPackage: item.unitsPerPackage,
               ))
           .toList();
     } catch (_) {
@@ -1236,6 +1237,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                     comingCode: item.comingCode,
                     ukod: item.ukod.isNotEmpty ? item.ukod : null,
                     skuCode: item.ids,
+                    unitsPerPackage: item.unitsPerPackage,
                     pharmacistBonus: item.bonus,
                     isOwnBrand: item.isOwnBrand,
                     dosageForm: item.dosageForm,
@@ -1405,6 +1407,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           comingCode: item.comingCode,
           ukod: item.ukod.isNotEmpty ? item.ukod : null,
           skuCode: item.ids,
+          unitsPerPackage: item.unitsPerPackage,
           hasHelpingHand: hasHH,
         ));
       }

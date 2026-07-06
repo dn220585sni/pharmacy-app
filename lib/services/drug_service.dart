@@ -456,8 +456,104 @@ class _IntakeEntry {
 /// Працює в двох режимах:
 /// - **Mock** (ApiConfig.useMock = true): локальні дані з mock_drugs.dart
 /// - **Live** (ApiConfig.useMock = false): HTTP-запити до Caché CSP
+/// Форма-контекст для AnalizBarCode (Задача 27): яке значення NameForm слати.
+enum BarCodeForm {
+  /// Основна форма вибиття товару — NameForm не передаємо.
+  main,
+
+  /// Корзина вже набрана (розрахунок/здача).
+  sumSdach,
+
+  /// Форма ідентифікації Спарти.
+  splIdent;
+
+  String? get param => switch (this) {
+        BarCodeForm.main => null,
+        BarCodeForm.sumSdach => 'SumSdach',
+        BarCodeForm.splIdent => 'SPLIdent',
+      };
+}
+
+/// Результат AnalizBarCode (Задача 27) — розпізнавання скана: товар (SKod/UKod),
+/// картка (ЛАЙК/дисконт ЕФ/подарункова/містянина) чи нерозпізнане (noscan=1).
+class BarCodeAnalysis {
+  final String wasScanned;   // що просканували ("sticker" тощо)
+  final String skod;         // s-код товару
+  final String ukod;         // u-код товару
+  final bool needsRescan;    // noscan == "1"
+  final String readBC;       // очищений код (сервер зрізав префікс символіки)
+  final String spartaCard;   // картка ЛАЙК
+  final String specCard;     // внутрішній дисконт ЕФ
+  final String presentCard;  // подарункова картка
+  final String cityCard;     // картка містянина
+
+  const BarCodeAnalysis({
+    this.wasScanned = '',
+    this.skod = '',
+    this.ukod = '',
+    this.needsRescan = false,
+    this.readBC = '',
+    this.spartaCard = '',
+    this.specCard = '',
+    this.presentCard = '',
+    this.cityCard = '',
+  });
+
+  bool get isProduct => skod.isNotEmpty || ukod.isNotEmpty;
+  bool get isSpartaCard => spartaCard.isNotEmpty;
+  bool get hasAnyCard =>
+      spartaCard.isNotEmpty ||
+      specCard.isNotEmpty ||
+      presentCard.isNotEmpty ||
+      cityCard.isNotEmpty;
+
+  static String _s(dynamic v) => v?.toString() ?? '';
+
+  factory BarCodeAnalysis.fromJson(Map<String, dynamic> j) => BarCodeAnalysis(
+        wasScanned: _s(j['wasscanned']),
+        skod: _s(j['SKod']),
+        ukod: _s(j['UKod']),
+        needsRescan: _s(j['noscan']) == '1',
+        readBC: _s(j['readBC']),
+        spartaCard: _s(j['SpartaCard']),
+        specCard: _s(j['SpecCard']),
+        presentCard: _s(j['PresentCard']),
+        cityCard: _s(j['CityCard']),
+      );
+}
+
 class DrugService {
   static final _api = CacheApiClient();
+
+  /// AnalizBarCode (Задача 27): серверний диспетчер сканування. Розпізнає, що
+  /// саме просканували — товарний стікер (SKod/UKod), картку чи нерозпізнане
+  /// (noscan=1). [form] задає контекст (NameForm): основна форма вибиття /
+  /// набрана корзина (SumSdach) / ідентифікація Спарти (SPLIdent).
+  static Future<BarCodeAnalysis?> analizBarCode(
+    String barcode, {
+    BarCodeForm form = BarCodeForm.main,
+  }) async {
+    if (ApiConfig.useMock || barcode.isEmpty) return null;
+    try {
+      final params = <String, String>{
+        'BarCode': barcode,
+        if (form.param != null) 'NameForm': form.param!,
+      };
+      final r = await _api.call('AnalizBarCode', params: params);
+      if (!r.isOk) {
+        debugPrint('AnalizBarCode FAIL bc=$barcode: ${r.result}');
+        return null;
+      }
+      final res = BarCodeAnalysis.fromJson(r.data);
+      debugPrint('AnalizBarCode bc=$barcode → wasscanned=${res.wasScanned} '
+          'SKod=${res.skod} UKod=${res.ukod} noscan=${res.needsRescan} '
+          'sparta=${res.isSpartaCard} readBC=${res.readBC}');
+      return res;
+    } catch (e) {
+      debugPrint('AnalizBarCode ERROR bc=$barcode: $e');
+      return null;
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Пошук по штрихкоду

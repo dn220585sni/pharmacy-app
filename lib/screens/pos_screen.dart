@@ -106,6 +106,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   int _prroPendingCount = 0;
   static const _prroFlushInterval = Duration(seconds: 60);
 
+  // ── Сканер (Задача 27: AnalizBarCode) ──────────────────────────────────
+  /// Скан емулює клавіатуру: починається з Tab, без Enter — флаш по таймауту
+  /// бездіяльності. Накопичений код диспатчиться через AnalizBarCode.
+  Timer? _scanIdleTimer;
+  final StringBuffer _scanBuffer = StringBuffer();
+  bool _scanning = false;
+  static const _scanIdle = Duration(milliseconds: 120);
+
   // ── Top drugs cache (pre-loaded at shift start) ────────────────────────
   /// Cached top drugs for instant local search.
   List<DrugSearchItem> _topDrugsCache = [];
@@ -904,6 +912,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _localFilterTimer?.cancel();
     _helpingHandTimer?.cancel();
     _prroFlushTimer?.cancel();
+    _scanIdleTimer?.cancel();
     HardwareKeyboard.instance.removeHandler(_handleGlobalKey);
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -918,6 +927,20 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// unless the search field or a digit-input (qty) field already has focus.
   bool _handleGlobalKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
+
+    // ── Сканер (Задача 27): скан = Tab + символи, без Enter, флаш по таймауту ──
+    if (event.logicalKey == LogicalKeyboardKey.tab) {
+      _beginScanCapture();
+      return true; // не віддаємо Tab у focus traversal
+    }
+    if (_scanning) {
+      final ch = event.character;
+      if (ch != null && ch.isNotEmpty && ch.codeUnitAt(0) >= 32) {
+        _scanBuffer.write(ch);
+      }
+      _resetScanIdle();
+      return true; // під час скана глушимо ввід (символи не йдуть у пошук)
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     // PRESCRIPTION PANEL — absolute minimal handler.
@@ -1889,6 +1912,150 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       if (!mounted) return;
       setState(() => _isServerLookup = false);
     }
+  }
+
+  // ── Сканер: захоплення й диспатч (Задача 27) ────────────────────────────
+
+  void _beginScanCapture() {
+    _scanning = true;
+    _scanBuffer.clear();
+    _resetScanIdle();
+  }
+
+  void _resetScanIdle() {
+    _scanIdleTimer?.cancel();
+    _scanIdleTimer = Timer(_scanIdle, _flushScan);
+  }
+
+  void _flushScan() {
+    _scanning = false;
+    final code = _scanBuffer.toString().trim();
+    _scanBuffer.clear();
+    if (code.isNotEmpty) unawaited(_onScan(code));
+  }
+
+  /// Диспатч розпізнаного скана: товар → кошик; картка ЛАЙК → ідентифікація;
+  /// інші картки — поки повідомлення; нерозпізнане — просимо пересканувати.
+  Future<void> _onScan(String code) async {
+    // SumSdach — коли кошик непорожній і відкритий; інакше основна форма вибиття.
+    final form = (_cartOpen && _cart.isNotEmpty)
+        ? BarCodeForm.sumSdach
+        : BarCodeForm.main;
+    final res = await DrugService.analizBarCode(code, form: form);
+    if (!mounted) return;
+    if (res == null) {
+      _showScanMessage('Помилка сканування — спробуйте ще раз');
+      return;
+    }
+    if (res.needsRescan) {
+      _showScanMessage('Скан не розпізнано — пересканійте, будь ласка');
+      return;
+    }
+    if (res.isSpartaCard) {
+      await _identifyByLoyaltyCard(res.spartaCard);
+      return;
+    }
+    if (res.specCard.isNotEmpty ||
+        res.presentCard.isNotEmpty ||
+        res.cityCard.isNotEmpty) {
+      // TODO(Задача 27): флоу дисконт ЕФ / подарункова / картка містянина.
+      _showScanMessage('Розпізнано картку — цей тип поки не підтримується');
+      return;
+    }
+    if (res.isProduct) {
+      await _addScannedProduct(res);
+      return;
+    }
+    _showScanMessage(
+        'Скан: ${res.wasScanned.isNotEmpty ? res.wasScanned : "невідомо"}');
+  }
+
+  /// Знайти товар за SKod (GetSKUprice), показати й додати 1 у кошик (вибиття).
+  Future<void> _addScannedProduct(BarCodeAnalysis res) async {
+    if (res.skod.isEmpty) {
+      _showScanMessage('Товар розпізнано, але без коду приходу');
+      return;
+    }
+    final r = await DrugService.getStockAndPrices(res.skod);
+    if (!mounted) return;
+    if (!r.found) {
+      _showScanMessage('Товар не знайдено (${res.readBC})');
+      return;
+    }
+    final drug = Drug(
+      id: 'srv_${res.skod}',
+      name: r.nameUkr ?? r.name ?? 'Невідомо',
+      nameUkr: r.nameUkr,
+      manufacturer: r.manufacturer ?? '',
+      category: '',
+      price: r.retailPrice,
+      stock: r.totalStock,
+      unit: 'шт',
+      barcode: res.readBC,
+      ukod: res.ukod.isNotEmpty ? res.ukod : null,
+      skuCode: res.skod,
+      locationCode: r.stelazh,
+    );
+    setState(() {
+      _searchResults = [drug, ..._searchResults.where((d) => d.id != drug.id)];
+      _selectedDrug = drug;
+    });
+    _scrollToIndex(0);
+    _fetchSKUDetail(drug);
+    _fetchProductBrowserInfo(drug);
+    // Вибиття: +1 до наявної кількості (або 1, якщо ще не в кошику).
+    final current = _getCartItem(drug.id)?.quantity ?? 0;
+    _setQuantity(drug, current + 1);
+  }
+
+  /// Ідентифікація клієнта ЛАЙК за номером картки (скан) — аналог телефонної:
+  /// заповнює телефон, показує бонуси; нарахування — при розрахунку.
+  Future<void> _identifyByLoyaltyCard(String cardNo) async {
+    setState(() => _isLoadingLoyalty = true);
+    try {
+      final result = await LoyaltyService.checkCard(cardNo);
+      if (!mounted) return;
+      if (!result.success) {
+        setState(() => _isLoadingLoyalty = false);
+        _showScanMessage(result.errorMsg ?? 'Картку не знайдено');
+        return;
+      }
+      final digits = (result.mobile ?? '').replaceAll(RegExp(r'\D'), '');
+      final tail9 =
+          digits.length >= 9 ? digits.substring(digits.length - 9) : '';
+      final phone = tail9.isNotEmpty ? '+380$tail9' : (result.mobile ?? '');
+      if (tail9.isNotEmpty) {
+        _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
+        _loyaltyPhoneController.removeListener(_guardPhoneCursor);
+        _loyaltyPhoneController.text = _maskPhone(tail9);
+        _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
+        _loyaltyPhoneController.addListener(_guardPhoneCursor);
+      }
+      setState(() {
+        _customerLoyalty = CustomerLoyalty(
+          phone: phone,
+          bonusBalance: result.balanceAfter,
+          cardNo: result.cardNo ?? cardNo,
+          firstName: result.firstName,
+          lastName: result.lastName,
+        );
+        _isLoadingLoyalty = false;
+      });
+      unawaited(SessionService.identSPL(
+          phone: phone, card: result.cardNo ?? cardNo));
+      _showScanMessage('Картка ЛАЙК: бонусів ${result.balanceAfter.asMoney} ₴');
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingLoyalty = false);
+    }
+  }
+
+  void _showScanMessage(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      duration: const Duration(seconds: 3),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   /// Move keyboard selection by [delta] rows (+1 down, -1 up).

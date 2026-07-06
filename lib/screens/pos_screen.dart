@@ -752,14 +752,34 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         // дня не показати повторний старт/службове внесення для вже відкритої.
         await ShiftService.ensureRestored();
         if (!mounted) return;
-        // TEMP-діагностика A4: показати на екрані, що повернув xReport і стан зміни.
+        // TEMP-діагностика A4: діалог із виділюваним текстом + кнопка «Копіювати».
         if (!ApiConfig.useMock) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('A4 · зміна відкрита=${ShiftService.state.isOpen} · '
-                'xReport: ${PrroService.lastXReportDebug ?? "НЕ ВИКЛИКАНО"}'),
-            duration: const Duration(seconds: 15),
-            behavior: SnackBarBehavior.floating,
-          ));
+          final dbg = 'A4 · зміна відкрита=${ShiftService.state.isOpen} · '
+              'xReport: ${PrroService.lastXReportDebug ?? "НЕ ВИКЛИКАНО"}';
+          showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('A4 діагностика'),
+              content: SelectableText(dbg,
+                  style: const TextStyle(fontSize: 13, height: 1.4)),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: dbg));
+                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                      content: Text('Скопійовано'),
+                      duration: Duration(seconds: 1),
+                    ));
+                  },
+                  child: const Text('Копіювати'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Закрити'),
+                ),
+              ],
+            ),
+          );
         }
         // Початок зміни: ProvSumZOtchet — чи потрібне службове внесення +
         // залишок з останнього Z-звіту. Діалог показуємо лише коли потрібне.

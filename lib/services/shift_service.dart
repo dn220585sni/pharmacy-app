@@ -45,10 +45,12 @@ class ShiftService {
         _state = const ShiftState(isOpen: false);
         return;
       }
-      final openedAt = _estimateOpenedAt(x.shiftDurationMinutes);
-      // Невідома тривалість → трактуємо як СЬОГОДНІ (безпечніше, ніж ризикнути
-      // авто-Z сьогоднішньої зміни). ⚠️ Перевірити на касі, чи xReport віддає
-      // shift_duration; якщо ні — потрібне інше джерело дати відкриття.
+      // Дата відкриття — з `from_date` (shift_duration каса віддає 0). Фолбек на
+      // shift_duration лишаємо про всяк, але зазвичай працює from_date.
+      final openedAt =
+          x.openedAt ?? _estimateOpenedAt(x.shiftDurationMinutes);
+      // Невідома дата → трактуємо як СЬОГОДНІ (безпечніше, ніж ризикнути авто-Z
+      // сьогоднішньої зміни).
       final today = openedAt == null || _isSameDay(openedAt, DateTime.now());
       if (today) {
         _state = ShiftState(
@@ -124,7 +126,7 @@ class ShiftService {
       // (вчорашня незакрита). Якщо сьогоднішня (рестарт посеред дня) — НЕ Z-имо,
       // а приймаємо як відкриту: службове внесення вже зроблено раніше сьогодні.
       final x = await PrroService.xReport(includeChecks: false);
-      final openedAt = _estimateOpenedAt(x?.shiftDurationMinutes);
+      final openedAt = x?.openedAt ?? _estimateOpenedAt(x?.shiftDurationMinutes);
       final fromPrevDay =
           openedAt != null && !_isSameDay(openedAt, DateTime.now());
       if (fromPrevDay) {

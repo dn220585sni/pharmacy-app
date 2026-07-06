@@ -272,6 +272,10 @@ class PrroShiftCheck {
 class PrroXReport {
   final bool shiftOpen;
   final int? shiftDurationMinutes;
+
+  /// Час відкриття зміни — з `from_date` (shift_duration каса віддає 0, тож
+  /// саме це поле використовуємо для розрізнення сьогодні/вчора).
+  final DateTime? openedAt;
   final double cashInBox;
   final int ordersCount;
   final double ordersSum;
@@ -286,6 +290,7 @@ class PrroXReport {
     required this.ordersSum,
     required this.checks,
     this.shiftDurationMinutes,
+    this.openedAt,
     this.pdfBase64,
     this.textPrint,
   });
@@ -303,6 +308,23 @@ class PrroXReport {
     return null;
   }
 
+  /// Терпимий парсер дати: ISO або `DD.MM.YYYY[ HH:MM[:SS]]`. null якщо не вийшло.
+  static DateTime? parseDate(dynamic v) {
+    final s = v?.toString().trim() ?? '';
+    if (s.isEmpty) return null;
+    final iso = DateTime.tryParse(s.replaceFirst(' ', 'T'));
+    if (iso != null) return iso;
+    final m = RegExp(r'^(\d{2})\.(\d{2})\.(\d{4})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?')
+        .firstMatch(s);
+    if (m != null) {
+      return DateTime(
+        int.parse(m[3]!), int.parse(m[2]!), int.parse(m[1]!),
+        int.parse(m[4] ?? '0'), int.parse(m[5] ?? '0'), int.parse(m[6] ?? '0'),
+      );
+    }
+    return null;
+  }
+
   factory PrroXReport.fromJson(Map<String, dynamic> json) {
     final real = json['real'] as Map<String, dynamic>? ?? const {};
     final list = (json['checks_list'] as List?) ?? const [];
@@ -310,6 +332,7 @@ class PrroXReport {
       shiftOpen: _truthy(json['shift_state']),
       cashInBox: (json['cash_in_box'] as num?)?.toDouble() ?? 0,
       shiftDurationMinutes: _flexInt(json['shift_duration']),
+      openedAt: parseDate(json['from_date']),
       ordersCount: (real['orders_count'] as num?)?.toInt() ?? 0,
       ordersSum: (real['sum'] as num?)?.toDouble() ?? 0,
       checks: list
@@ -710,13 +733,13 @@ class PrroService {
         lastXReportDebug = 'відповідь не обʼєкт: ${decoded.runtimeType}';
         return null;
       }
-      // TEMP-діагностика (прибрати після A4): які поля реально віддає CashDesk.
-      lastXReportDebug = 'shift_state=${decoded['shift_state']} '
-          '(${decoded['shift_state'].runtimeType}), '
-          'shift_duration=${decoded['shift_duration']}, '
-          'keys=${decoded.keys.toList()}';
+      final report = PrroXReport.fromJson(decoded);
+      // TEMP-діагностика (прибрати після A4): сирі поля + розпарсений openedAt.
+      lastXReportDebug = 'shift_state=${decoded['shift_state']}, '
+          'from_date=${decoded['from_date']}, openedAt=${report.openedAt}, '
+          'shift_duration=${decoded['shift_duration']}';
       debugPrint('PRRO xReport RAW: $lastXReportDebug');
-      return PrroXReport.fromJson(decoded);
+      return report;
     } catch (e) {
       lastXReportDebug = 'ERROR: $e';
       debugPrint('PRRO xReport ERROR: $e');

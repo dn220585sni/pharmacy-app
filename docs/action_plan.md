@@ -97,13 +97,20 @@ Products для ПРРО будувати з `GetSumSkid.goods` (мапінг з
 
 ## Етап 1 — Серйозні ризики
 
-### ☐ B1. Sparta/ЛАЙК: чесний флоу або вимкнути
-Рішення А (правильне): `SplParams` з `GetSPLParam` замість hardcoded demo URL; синхронний
-`tx/order` (pending) ДО прийому грошей → ПРРО → `orderModify` (+лінк чека) →
-`orderStatusChange('D')`; відмова Спарти блокує тільки бонусну частину.
-Рішення Б (тимчасове): фіче-флаг off + сховати бонуси в UI.
-- Файли: `lib/services/loyalty_service.dart:7`, `lib/services/sparta_service.dart` (не підключений!),
-  `lib/screens/pos_screen.dart:2905-2973`
+### ◐ B1. Sparta/ЛАЙК: чесний флоу або вимкнути
+**Зроблено (креди):** `LoyaltyService` більше не на hardcoded demo — `SplConfig` тепер
+перекривається живими per-аптека кредами з `GetSPLParam` (`SplConfig.applyFrom(SplParams)`,
+`LoyaltyService._ensureConfig()` перед checkCard/sale). `SplParams.fromJson` парсить реальну
+відповідь 1:1 (звірено). Це також покриває B6 для ЛАЙК (креди з сервера, не dart_define).
+- Файли: `loyalty_service.dart` (SplConfig мутабельний + applyFrom + _ensureConfig).
+- `flutter analyze` чисто; `flutter test` 73 passed.
+- ⚠️ ТЕСТ: тепер checkCard/sale б'ють у ПРОД ЛАЙК (`loyalty.aptekanizkihcen.ua:4018`) з
+  реальними posKey/apiToken. Перевірити на тестовій картці; бонуси реальні.
+- **Лишається (order-флоу):** синхронний `tx/order` (pending) ДО грошей → ПРРО →
+  `orderModify`(+лінк чека) → `orderStatusChange('D')`; відмова Спарти блокує лише бонусну
+  частину. Зараз усе ще fire-and-forget `sale` (audit #5). `sparta_service.dart` (готовий
+  order/modify/statusChange) ще не підключений. Файли: `pos_screen.dart` (_registerLoyaltySale).
+- ⚠️ [БЕКЕНД]: дубль ключа `EdFarmasellL` у GetSPLParam (друге має бути `EdFarmasellP`?) — до B8.
 
 ### ✅ B2. CacheApiClient: retry тільки для читаючих сервісів  *(2026-07-03, не закомічено)*
 Додано `_nonIdempotentServices = {SaveSumDay, SavesgVNakl, ZRep}`; на timeout/ClientException

@@ -1,18 +1,51 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../models/spl_params.dart';
+import 'spl_params_service.dart';
 
 /// Конфігурація Sparta Loyalty Platform (ЛАЙК).
+///
+/// Значення нижче — дефолти (dart_define / demo). На старті зміни
+/// перевизначаються реальними per-аптека кредами з `GetSPLParam` (Задача 26)
+/// через [applyFrom]. Тому поля креди — мутабельні `static`, а не `const`.
 class SplConfig {
-  static const baseUrl = 'https://demo.spartaloyalty.com/TestAnc2/api';
+  static String baseUrl = 'https://demo.spartaloyalty.com/TestAnc2/api';
   static const apiUser = 'anc_pos';
-  // Секрети — через --dart-define-from-file=dart_define.json (gitignored).
-  static const apiToken = String.fromEnvironment('SPL_API_TOKEN');
-  static const posKey = String.fromEnvironment('SPL_POS_KEY');
+  // Дефолт-секрети — через --dart-define-from-file (gitignored); на проді їх
+  // перекриває GetSPLParam.
+  static String apiToken = const String.fromEnvironment('SPL_API_TOKEN');
+  static String posKey = const String.fromEnvironment('SPL_POS_KEY');
   static const partnerCode = 'ANC';
-  static const placeCode = 'MR_TEST_PLACE';
+  static String placeCode = 'MR_TEST_PLACE';
   static const ver = 4;
-  static const timeout = Duration(seconds: 5);
+  static Duration timeout = const Duration(seconds: 5);
+
+  /// Чи вже застосовано живі креди з GetSPLParam (щоб не тягнути повторно).
+  static bool loadedFromServer = false;
+
+  /// Перекрити креди реальними з GetSPLParam. baseUrl нормалізуємо (прибираємо
+  /// завершальний '/'), бо ендпоінти LoyaltyService йдуть з ведучим '/tx/...'.
+  static void applyFrom(SplParams p) {
+    if (!p.isUsable) return;
+    baseUrl = _stripTrailingSlash(p.baseUrl.trim());
+    posKey = p.posKey;
+    apiToken = p.apiToken;
+    placeCode = p.placeCode;
+    if (p.timeoutSeconds > 0) timeout = Duration(seconds: p.timeoutSeconds);
+    loadedFromServer = true;
+    debugPrint('SplConfig: живі креди з GetSPLParam застосовано '
+        '(placeCode=$placeCode, baseUrl=$baseUrl)');
+  }
+
+  static String _stripTrailingSlash(String u) {
+    var s = u;
+    while (s.endsWith('/')) {
+      s = s.substring(0, s.length - 1);
+    }
+    return s;
+  }
 }
 
 /// Результат перевірки картки лояльності.
@@ -62,6 +95,15 @@ class LoyaltySaleResult {
 /// HTTPS POST JSON API з подвійним SHA256 підписом.
 class LoyaltyService {
   static final _client = http.Client();
+
+  /// Гарантувати, що застосовано живі креди з GetSPLParam (раз на сесію).
+  /// Викликається перед сигнатурними викликами (checkCard/sale). Якщо
+  /// GetSPLParam недоступний — лишаються дефолтні (dart_define/demo) креди.
+  static Future<void> _ensureConfig() async {
+    if (SplConfig.loadedFromServer) return;
+    final p = await SplParamsService.fetch();
+    if (p != null) SplConfig.applyFrom(p);
+  }
 
   // ───────────────────────────────────────────────────────────────────────────
   // Signature (Double SHA256)
@@ -212,6 +254,7 @@ class LoyaltyService {
   ///
   /// [cardNo] — card number or phone with country prefix (e.g. "+380501234567")
   static Future<LoyaltyCheckResult> checkCard(String cardNo) async {
+    await _ensureConfig();
     final now = DateTime.now();
     final dateMs = _dateToMs(now);
 
@@ -275,6 +318,7 @@ class LoyaltyService {
     double paidByPoints = 0,
     String? cashierName,
   }) async {
+    await _ensureConfig();
     final now = DateTime.now();
     final dateMs = _dateToMs(now);
 

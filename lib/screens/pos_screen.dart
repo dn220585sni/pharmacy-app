@@ -1962,27 +1962,35 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return;
     }
     if (res.isProduct) {
-      await _addScannedProduct(res);
+      await _addScannedProduct(res, _stripScanPrefix(code));
       return;
     }
     _showScanMessage(
         'Скан: ${res.wasScanned.isNotEmpty ? res.wasScanned : "невідомо"}');
   }
 
-  /// Знайти товар за SKod (GetSKUprice), показати й додати 1 у кошик (вибиття).
-  Future<void> _addScannedProduct(BarCodeAnalysis res) async {
-    if (res.skod.isEmpty) {
-      _showScanMessage('Товар розпізнано, але без коду приходу');
+  /// Прибрати AIM-префікс символіки (`]` + 2 символи, напр. `]E0`/`]F0`/`]C1`) —
+  /// щоб отримати «чистий» штрихкод для лукапу ціни/залишку.
+  static String _stripScanPrefix(String code) =>
+      (code.startsWith(']') && code.length >= 3) ? code.substring(3) : code;
+
+  /// Показати товар і додати 1 у кошик (вибиття). Ціну/залишок беремо через
+  /// `GetSKUprice` по ШТРИХКОДУ (перевірений шлях; SKod у GetSKUprice не
+  /// приймається), а коди SKod/UKod — з AnalizBarCode.
+  Future<void> _addScannedProduct(BarCodeAnalysis res, String barcode) async {
+    if (barcode.isEmpty) {
+      _showScanMessage('Товар розпізнано, але без штрихкоду');
       return;
     }
-    final r = await DrugService.getStockAndPrices(res.skod);
+    final r = await DrugService.getStockAndPrices('', barcode: barcode);
     if (!mounted) return;
     if (!r.found) {
       _showScanMessage('Товар не знайдено (${res.readBC})');
       return;
     }
+    final skod = res.skod.isNotEmpty ? res.skod : barcode;
     final drug = Drug(
-      id: 'srv_${res.skod}',
+      id: 'srv_$skod',
       name: r.nameUkr ?? r.name ?? 'Невідомо',
       nameUkr: r.nameUkr,
       manufacturer: r.manufacturer ?? '',
@@ -1990,9 +1998,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       price: r.retailPrice,
       stock: r.totalStock,
       unit: 'шт',
-      barcode: res.readBC,
+      barcode: barcode,
       ukod: res.ukod.isNotEmpty ? res.ukod : null,
-      skuCode: res.skod,
+      skuCode: skod,
       locationCode: r.stelazh,
     );
     setState(() {

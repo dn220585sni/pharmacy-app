@@ -525,7 +525,9 @@ class BarCodeAnalysis {
         presentCard: _s(j['PresentCard']),
         cityCard: _s(j['CityCard']),
         couponSpl: _s(j['CouponSPL']),
-        couponCrm: _s(j['CouponCRM']),
+        // Сервер (2026-07-07) віддає ключ із друкарською помилкою `SouponCRM`
+        // (S замість C) — читаємо обидва варіанти, поки Катя не виправить.
+        couponCrm: _s(j['CouponCRM'] ?? j['SouponCRM']),
       );
 }
 

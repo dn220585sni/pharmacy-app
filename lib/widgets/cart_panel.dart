@@ -208,6 +208,17 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     setState(() => _scannedDrugIds.add(item.drug.id));
   }
 
+  /// Позначити позицію кошика (за `drug.id`) як відскановану — викликається зі
+  /// скана штрихкоду в режимі перевірки збору (PosScreen через ключ панелі).
+  /// Повертає `true`, якщо така позиція є в кошику.
+  bool markScanned(String drugId) {
+    final exists = widget.cart.any((i) => i.drug.id == drugId);
+    if (exists && !_scannedDrugIds.contains(drugId)) {
+      setState(() => _scannedDrugIds.add(drugId));
+    }
+    return exists;
+  }
+
   /// Public method — allows PosScreen to enter checkout mode via F5
   void enterCheckout() {
     if (widget.cart.isEmpty || !_allCartScanned) return;

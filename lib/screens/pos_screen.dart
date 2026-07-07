@@ -1960,11 +1960,43 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return;
     }
     if (res.isProduct) {
-      await _addScannedProduct(res, _stripScanPrefix(code));
+      // Кошик відкритий і непорожній (SumSdach) — режим ПЕРЕВІРКИ збору: не
+      // додаємо товар, а помічаємо відповідну позицію як відскановану.
+      if (_cartOpen && _cart.isNotEmpty) {
+        _markCartItemScanned(res, _stripScanPrefix(code));
+      } else {
+        await _addScannedProduct(res, _stripScanPrefix(code));
+      }
       return;
     }
     _showScanMessage(
         'Скан: ${res.wasScanned.isNotEmpty ? res.wasScanned : "невідомо"}');
+  }
+
+  /// Режим перевірки збору (SumSdach): знайти позицію кошика, що відповідає
+  /// відсканованому товару, і позначити її відсканованою. Матчимо за ukod
+  /// (рівень товару), потім штрихкодом, потім s-кодом.
+  void _markCartItemScanned(BarCodeAnalysis res, String barcode) {
+    CartItem? match;
+    for (final item in _cart) {
+      final d = item.drug;
+      final byUkod = res.ukod.isNotEmpty && d.ukod == res.ukod;
+      final byBarcode = barcode.isNotEmpty && d.barcode == barcode;
+      final bySkod = res.skod.isNotEmpty &&
+          (d.skuCode == res.skod || d.id == 'srv_${res.skod}');
+      if (byUkod || byBarcode || bySkod) {
+        match = item;
+        break;
+      }
+    }
+    if (match == null) {
+      _showScanMessage('Відсканованого товару немає в кошику');
+      return;
+    }
+    final found = _cartPanelKey.currentState?.markScanned(match.drug.id) ?? false;
+    if (found) {
+      _showScanMessage('${match.drug.displayName} — відскановано ✓');
+    }
   }
 
   /// Прибрати AIM-префікс символіки (`]` + 2 символи, напр. `]E0`/`]F0`/`]C1`) —

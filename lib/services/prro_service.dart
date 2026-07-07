@@ -355,9 +355,6 @@ class PrroService {
   static DateTime? _tokenExpiresAt;
   static int? _activeFiscalNumber;
 
-  /// TEMP-діагностика A4: що останнього разу повернув xReport (для показу в UI).
-  static String? lastXReportDebug;
-
   /// Активний фіскальний номер. Береться з `opened_shift` після авторизації;
   /// fallback — `PrroConfig.numFiscal`.
   static int get activeFiscalNumber =>
@@ -701,11 +698,7 @@ class PrroService {
     bool includeChecks = true,
     int printWidth = 40,
   }) async {
-    lastXReportDebug = 'старт (fiscal=$activeFiscalNumber)';
-    if (!await _ensureAuth()) {
-      lastXReportDebug = 'помилка авторизації ПРРО';
-      return null;
-    }
+    if (!await _ensureAuth()) return null;
 
     try {
       final body = {
@@ -723,25 +716,17 @@ class PrroService {
       ).timeout(const Duration(seconds: 20));
 
       if (response.statusCode != 200 && response.statusCode != 201) {
-        lastXReportDebug = 'HTTP ${response.statusCode}';
         debugPrint('PRRO xReport FAIL: HTTP ${response.statusCode}');
         return null;
       }
 
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-      if (decoded is! Map<String, dynamic>) {
-        lastXReportDebug = 'відповідь не обʼєкт: ${decoded.runtimeType}';
-        return null;
-      }
+      if (decoded is! Map<String, dynamic>) return null;
       final report = PrroXReport.fromJson(decoded);
-      // TEMP-діагностика (прибрати після A4): сирі поля + розпарсений openedAt.
-      lastXReportDebug = 'shift_state=${decoded['shift_state']}, '
-          'from_date=${decoded['from_date']}, openedAt=${report.openedAt}, '
-          'shift_duration=${decoded['shift_duration']}';
-      debugPrint('PRRO xReport RAW: $lastXReportDebug');
+      debugPrint('PRRO xReport: shiftOpen=${report.shiftOpen} '
+          'openedAt=${report.openedAt} dur=${report.shiftDurationMinutes}');
       return report;
     } catch (e) {
-      lastXReportDebug = 'ERROR: $e';
       debugPrint('PRRO xReport ERROR: $e');
       return null;
     }

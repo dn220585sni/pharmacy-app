@@ -51,7 +51,6 @@ import '../widgets/barcode_input_dialog.dart';
 import '../widgets/robot_panel.dart';
 import '../services/api_config.dart';
 import '../services/prro_queue.dart';
-import '../services/prro_service.dart';
 import '../data/mock_messages.dart';
 import '../models/prescription.dart';
 import '../models/nearby_pharmacy.dart';
@@ -752,35 +751,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         // дня не показати повторний старт/службове внесення для вже відкритої.
         await ShiftService.ensureRestored();
         if (!mounted) return;
-        // TEMP-діагностика A4: діалог із виділюваним текстом + кнопка «Копіювати».
-        if (!ApiConfig.useMock) {
-          final dbg = 'A4 · зміна відкрита=${ShiftService.state.isOpen} · '
-              'xReport: ${PrroService.lastXReportDebug ?? "НЕ ВИКЛИКАНО"}';
-          showDialog<void>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              title: const Text('A4 діагностика'),
-              content: SelectableText(dbg,
-                  style: const TextStyle(fontSize: 13, height: 1.4)),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: dbg));
-                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                      content: Text('Скопійовано'),
-                      duration: Duration(seconds: 1),
-                    ));
-                  },
-                  child: const Text('Копіювати'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Закрити'),
-                ),
-              ],
-            ),
-          );
-        }
         // Початок зміни: ProvSumZOtchet — чи потрібне службове внесення +
         // залишок з останнього Z-звіту. Діалог показуємо лише коли потрібне.
         if (!ShiftService.state.isOpen) {

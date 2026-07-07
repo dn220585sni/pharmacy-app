@@ -48,14 +48,18 @@ class _AppCloseObserver extends WidgetsBindingObserver {
   @override
   Future<AppExitResponse> didRequestAppExit() async {
     // Якщо зміна відкрита — спитати про завершення (Z-звіт) перед виходом.
-    final ctx = navigatorKey.currentContext;
-    if (ctx != null && ShiftService.state.isOpen) {
-      final choice = await showShiftEndDialog(ctx);
-      if (choice == ShiftEndChoice.cancel) return AppExitResponse.cancel;
-      if (choice == ShiftEndChoice.closeShift) {
-        await ShiftService.closeShift();
+    if (ShiftService.state.isOpen) {
+      // Підтягнути реальні суми (готівка/чеки) з xReport перед діалогом.
+      await ShiftService.refreshTotals();
+      final ctx = navigatorKey.currentContext; // свіжий контекст після await
+      if (ctx != null && ctx.mounted) {
+        final choice = await showShiftEndDialog(ctx);
+        if (choice == ShiftEndChoice.cancel) return AppExitResponse.cancel;
+        if (choice == ShiftEndChoice.closeShift) {
+          await ShiftService.closeShift();
+        }
+        // justExit → вийти без Z-звіту (напр. перезапуск програми).
       }
-      // justExit → вийти без Z-звіту (напр. перезапуск програми).
     }
     await AuthService.logout();
     return AppExitResponse.exit;

@@ -109,6 +109,30 @@ class ShiftService {
     return const ServiceDepositCheck(needed: true, carryover: Money.zero);
   }
 
+  /// Підтягнути реальні підсумки відкритої зміни з ПРРО xReport (готівка в касі,
+  /// к-сть чеків) у `_state`. Викликати перед показом діалогу завершення зміни —
+  /// інакше поле «Готівка в касі» показує 0 (продажі не оновлюють `_state`).
+  static Future<void> refreshTotals() async {
+    if (ApiConfig.useMock || !_state.isOpen) return;
+    try {
+      final x = await PrroService.xReport(includeChecks: false);
+      if (x == null) return;
+      _state = ShiftState(
+        isOpen: _state.isOpen,
+        openedAt: _state.openedAt,
+        carryover: _state.carryover,
+        prevZPending: _state.prevZPending,
+        cashInBox: Money.fromHryvnia(x.cashInBox),
+        cashlessTotal: _state.cashlessTotal, // xReport не дає прямого розбиття
+        checksCount: x.ordersCount,
+      );
+      debugPrint('ShiftService: refreshTotals cashInBox=${x.cashInBox} '
+          'checks=${x.ordersCount}');
+    } catch (e) {
+      debugPrint('ShiftService refreshTotals ERROR: $e');
+    }
+  }
+
   /// Почати зміну: OPEN_SHIFT (з авто-Z за вчора) + службове внесення [deposit]
   /// (SaveSumDay — запис у Caché). Повертає `true` при успіху.
   static Future<bool> startShift(Money deposit) async {

@@ -755,7 +755,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         // залишок з останнього Z-звіту. Діалог показуємо лише коли потрібне.
         if (!ShiftService.state.isOpen) {
           ShiftService.checkServiceDeposit().then((check) {
-            if (!mounted || !check.needed) return;
+            if (!mounted) return;
+            // TEMP-діагностика: сира відповідь ProvSumZOtchet (звідки береться сума).
+            _showCopyDialog(
+                'ProvSumZOtchet', ShiftService.lastDepositDebug ?? 'нема даних');
+            if (!check.needed) return;
             showShiftStartDialog(
               context,
               pharmacist: selected.user,
@@ -2091,6 +2095,34 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       duration: const Duration(seconds: 3),
       behavior: SnackBarBehavior.floating,
     ));
+  }
+
+  /// Діалог із виділюваним текстом і кнопкою «Копіювати» — для діагностики.
+  void _showCopyDialog(String title, String body) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: SelectableText(body,
+            style: const TextStyle(fontSize: 12, height: 1.4)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: body));
+              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                content: Text('Скопійовано'),
+                duration: Duration(seconds: 1),
+              ));
+            },
+            child: const Text('Копіювати'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Закрити'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Move keyboard selection by [delta] rows (+1 down, -1 up).

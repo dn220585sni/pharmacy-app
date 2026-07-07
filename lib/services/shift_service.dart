@@ -81,8 +81,12 @@ class ShiftService {
 
   /// Перевірити, чи потрібне службове внесення на старті зміни, і отримати
   /// залишок з останнього Z-звіту (ProvSumZOtchet). Реальний бекенд.
+  /// TEMP-діагностика: сира відповідь ProvSumZOtchet (для UI).
+  static String? lastDepositDebug;
+
   static Future<ServiceDepositCheck> checkServiceDeposit() async {
     if (ApiConfig.useMock) {
+      lastDepositDebug = 'mock';
       return ServiceDepositCheck(needed: true, carryover: Money.fromHryvnia(1250));
     }
     try {
@@ -90,13 +94,16 @@ class ShiftService {
       if (r.isOk) {
         final carryover = Money.parse(r.data['SumZZvit']?.toString() ?? '');
         final needed = (r.data['ExVnos']?.toString() ?? '0') != '1';
-        debugPrint('ShiftService: ProvSumZOtchet SumZZvit=${carryover.format()} '
-            'needed=$needed');
+        lastDepositDebug = 'OK SumZZvit="${r.data['SumZZvit']}" '
+            'ExVnos="${r.data['ExVnos']}" keys=${r.data.keys.toList()}';
+        debugPrint('ShiftService: ProvSumZOtchet $lastDepositDebug');
         return ServiceDepositCheck(needed: needed, carryover: carryover);
       }
-      debugPrint('ShiftService ProvSumZOtchet FAIL: ${r.result}');
+      lastDepositDebug = 'FAIL: ${r.result}';
+      debugPrint('ShiftService ProvSumZOtchet $lastDepositDebug');
     } catch (e) {
-      debugPrint('ShiftService ProvSumZOtchet ERROR: $e');
+      lastDepositDebug = 'ERROR: $e';
+      debugPrint('ShiftService ProvSumZOtchet $lastDepositDebug');
     }
     // На помилку — краще показати діалог (із 0), ніж мовчки пропустити старт.
     return const ServiceDepositCheck(needed: true, carryover: Money.zero);

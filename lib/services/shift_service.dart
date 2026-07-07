@@ -157,20 +157,41 @@ class ShiftService {
     return true;
   }
 
+  /// Триває закриття (guard від паралельних викликів кнопка+вихід).
+  static bool _closing = false;
+
   /// Закрити зміну — Z-звіт у ПРРО, потім фіксація операції в БД Caché (ZRep).
   /// Повертає результат ПРРО (фіскально значущий крок).
+  ///
+  /// Ідемпотентний: якщо зміна вже закрита АБО закриття вже виконується — НЕ
+  /// робимо повторний Z/ZRep. Інакше кожен зайвий виклик створює ще один запис
+  /// «Вынос. Z-отчет» у касовій дисципліні (був баг: потрійний Z на одне закриття).
   static Future<PrroResult> closeShift() async {
-    if (ApiConfig.useMock) {
-      _state = const ShiftState(isOpen: false);
+    if (!_state.isOpen) {
+      debugPrint('ShiftService: closeShift — зміна вже закрита, пропускаємо');
       return const PrroResult(success: true);
     }
-    final r = await PrroService.zReport();
-    if (r.success) {
-      _state = const ShiftState(isOpen: false);
-      await _fixZReportInDb();
+    if (_closing) {
+      debugPrint('ShiftService: closeShift уже виконується — пропускаємо');
+      return const PrroResult(success: true);
     }
-    debugPrint('ShiftService: closeShift ${r.success ? "OK" : "FAIL: ${r.error}"}');
-    return r;
+    _closing = true;
+    try {
+      if (ApiConfig.useMock) {
+        _state = const ShiftState(isOpen: false);
+        return const PrroResult(success: true);
+      }
+      final r = await PrroService.zReport();
+      if (r.success) {
+        _state = const ShiftState(isOpen: false);
+        await _fixZReportInDb();
+      }
+      debugPrint(
+          'ShiftService: closeShift ${r.success ? "OK" : "FAIL: ${r.error}"}');
+      return r;
+    } finally {
+      _closing = false;
+    }
   }
 
   /// Зафіксувати Z-звіт у БД Caché (`ZRep`) — викликати ПІСЛЯ успішного Z у ПРРО.

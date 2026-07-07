@@ -198,15 +198,27 @@ class _ShiftDashboardState extends State<ShiftDashboard>
   }
 
   Widget _buildCloseShiftButton() {
+    final isOpen = ShiftService.state.isOpen;
+    // Блокуємо кнопку під час закриття І коли зміна вже закрита — щоб повторним
+    // натиском не згенерувати ще один Z-звіт / «Вынос. Z-отчет».
+    final disabled = _closingShift || !isOpen;
     return OutlinedButton.icon(
-      onPressed: _closingShift ? null : _closeShift,
+      onPressed: disabled ? null : _closeShift,
       icon: _closingShift
           ? const SizedBox(
               width: 16,
               height: 16,
               child: CircularProgressIndicator(strokeWidth: 2))
-          : const Icon(Icons.lock_clock_rounded, size: 18),
-      label: Text(_closingShift ? 'Закриття зміни…' : 'Закрити зміну (Z-звіт)'),
+          : Icon(
+              isOpen
+                  ? Icons.lock_clock_rounded
+                  : Icons.check_circle_outline_rounded,
+              size: 18),
+      label: Text(_closingShift
+          ? 'Закриття зміни…'
+          : isOpen
+              ? 'Закрити зміну (Z-звіт)'
+              : 'Зміну закрито'),
       style: OutlinedButton.styleFrom(
         foregroundColor: const Color(0xFFB91C1C),
         side: const BorderSide(color: Color(0xFFFCA5A5)),

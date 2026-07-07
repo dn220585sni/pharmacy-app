@@ -534,9 +534,6 @@ class BarCodeAnalysis {
 class DrugService {
   static final _api = CacheApiClient();
 
-  /// TEMP-діагностика скану: що останнього разу повернув AnalizBarCode (для UI).
-  static String? lastAnalizDebug;
-
   /// AnalizBarCode (Задача 27): серверний диспетчер сканування. Розпізнає, що
   /// саме просканували — товарний стікер (SKod/UKod), картку чи нерозпізнане
   /// (noscan=1). [form] задає контекст (NameForm): основна форма вибиття /
@@ -545,10 +542,7 @@ class DrugService {
     String barcode, {
     BarCodeForm form = BarCodeForm.main,
   }) async {
-    if (ApiConfig.useMock || barcode.isEmpty) {
-      lastAnalizDebug = 'пропущено (mock/порожній)';
-      return null;
-    }
+    if (ApiConfig.useMock || barcode.isEmpty) return null;
     try {
       final params = <String, String>{
         'BarCode': barcode,
@@ -556,21 +550,16 @@ class DrugService {
       };
       final r = await _api.call('AnalizBarCode', params: params);
       if (!r.isOk) {
-        lastAnalizDebug = 'bc=$barcode FAIL: ${r.result}';
-        debugPrint('AnalizBarCode $lastAnalizDebug');
+        debugPrint('AnalizBarCode FAIL bc=$barcode: ${r.result}');
         return null;
       }
       final res = BarCodeAnalysis.fromJson(r.data);
-      lastAnalizDebug = 'bc=$barcode → wasscanned="${res.wasScanned}" '
-          'SKod="${res.skod}" UKod="${res.ukod}" noscan=${res.needsRescan} '
-          'sparta="${res.spartaCard}" spec="${res.specCard}" '
-          'coupon=${res.hasCoupon} readBC="${res.readBC}" '
-          'keys=${r.data.keys.toList()}';
-      debugPrint('AnalizBarCode $lastAnalizDebug');
+      debugPrint('AnalizBarCode bc=$barcode → wasscanned="${res.wasScanned}" '
+          'SKod="${res.skod}" UKod="${res.ukod}" sparta="${res.spartaCard}" '
+          'coupon=${res.hasCoupon} readBC="${res.readBC}"');
       return res;
     } catch (e) {
-      lastAnalizDebug = 'bc=$barcode ERROR: $e';
-      debugPrint('AnalizBarCode $lastAnalizDebug');
+      debugPrint('AnalizBarCode ERROR bc=$barcode: $e');
       return null;
     }
   }

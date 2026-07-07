@@ -277,6 +277,13 @@ class PrroXReport {
   /// саме це поле використовуємо для розрізнення сьогодні/вчора).
   final DateTime? openedAt;
   final double cashInBox;
+
+  /// Готівка на початок зміни (розмінна монета/службове внесення) — з CashDesk
+  /// `cash_in_box_start`. Саме звідси має братись пропонована сума внесення.
+  final double cashInBoxStart;
+
+  /// Сума службових внесень за зміну — CashDesk `service_input`.
+  final double serviceInput;
   final int ordersCount;
   final double ordersSum;
   final List<PrroShiftCheck> checks;
@@ -289,6 +296,8 @@ class PrroXReport {
     required this.ordersCount,
     required this.ordersSum,
     required this.checks,
+    this.cashInBoxStart = 0,
+    this.serviceInput = 0,
     this.shiftDurationMinutes,
     this.openedAt,
     this.pdfBase64,
@@ -331,6 +340,8 @@ class PrroXReport {
     return PrroXReport(
       shiftOpen: _truthy(json['shift_state']),
       cashInBox: (json['cash_in_box'] as num?)?.toDouble() ?? 0,
+      cashInBoxStart: (json['cash_in_box_start'] as num?)?.toDouble() ?? 0,
+      serviceInput: (json['service_input'] as num?)?.toDouble() ?? 0,
       shiftDurationMinutes: _flexInt(json['shift_duration']),
       openedAt: parseDate(json['from_date']),
       ordersCount: (real['orders_count'] as num?)?.toInt() ?? 0,
@@ -724,7 +735,8 @@ class PrroService {
       if (decoded is! Map<String, dynamic>) return null;
       final report = PrroXReport.fromJson(decoded);
       debugPrint('PRRO xReport: shiftOpen=${report.shiftOpen} '
-          'openedAt=${report.openedAt} dur=${report.shiftDurationMinutes}');
+          'cashInBox=${report.cashInBox} cashInBoxStart=${report.cashInBoxStart} '
+          'serviceInput=${report.serviceInput} openedAt=${report.openedAt}');
       return report;
     } catch (e) {
       debugPrint('PRRO xReport ERROR: $e');

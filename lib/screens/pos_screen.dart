@@ -1808,11 +1808,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   // ── Manual barcode input (F4) ───────────────────────────────────────────
+  /// Ручне введення скана (F4) — проходить через той самий диспатч, що й
+  /// сканер (AnalizBarCode): товар → кошик, картка ЛАЙК → ідентифікація.
+  /// Зручно й для тесту без сканера (ввести код/номер картки повністю).
   Future<void> _showManualBarcodeDialog() async {
     final barcode = await showBarcodeInputDialog(context: context);
     if (barcode != null && barcode.isNotEmpty && mounted) {
-      _searchController.text = barcode;
-      _lookupBarcodeOnServer(barcode);
+      await _onScan(barcode);
     }
   }
 

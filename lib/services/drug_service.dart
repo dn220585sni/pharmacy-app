@@ -486,6 +486,8 @@ class BarCodeAnalysis {
   final String specCard;     // внутрішній дисконт ЕФ
   final String presentCard;  // подарункова картка
   final String cityCard;     // картка містянина
+  final String couponSpl;    // купон Спарти
+  final String couponCrm;    // купон внутрішньої CRM
 
   const BarCodeAnalysis({
     this.wasScanned = '',
@@ -497,10 +499,13 @@ class BarCodeAnalysis {
     this.specCard = '',
     this.presentCard = '',
     this.cityCard = '',
+    this.couponSpl = '',
+    this.couponCrm = '',
   });
 
   bool get isProduct => skod.isNotEmpty || ukod.isNotEmpty;
   bool get isSpartaCard => spartaCard.isNotEmpty;
+  bool get hasCoupon => couponSpl.isNotEmpty || couponCrm.isNotEmpty;
   bool get hasAnyCard =>
       spartaCard.isNotEmpty ||
       specCard.isNotEmpty ||
@@ -519,6 +524,8 @@ class BarCodeAnalysis {
         specCard: _s(j['SpecCard']),
         presentCard: _s(j['PresentCard']),
         cityCard: _s(j['CityCard']),
+        couponSpl: _s(j['CouponSPL']),
+        couponCrm: _s(j['CouponCRM']),
       );
 }
 
@@ -545,9 +552,11 @@ class DrugService {
         return null;
       }
       final res = BarCodeAnalysis.fromJson(r.data);
-      debugPrint('AnalizBarCode bc=$barcode → wasscanned=${res.wasScanned} '
-          'SKod=${res.skod} UKod=${res.ukod} noscan=${res.needsRescan} '
-          'sparta=${res.isSpartaCard} readBC=${res.readBC}');
+      debugPrint('AnalizBarCode bc=$barcode → wasscanned="${res.wasScanned}" '
+          'SKod="${res.skod}" UKod="${res.ukod}" noscan=${res.needsRescan} '
+          'sparta="${res.spartaCard}" spec="${res.specCard}" '
+          'coupon=${res.hasCoupon} readBC="${res.readBC}" '
+          'keys=${r.data.keys.toList()}');
       return res;
     } catch (e) {
       debugPrint('AnalizBarCode ERROR bc=$barcode: $e');

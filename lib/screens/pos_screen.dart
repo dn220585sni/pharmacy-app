@@ -1954,6 +1954,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _showScanMessage('Розпізнано картку — цей тип поки не підтримується');
       return;
     }
+    if (res.hasCoupon) {
+      // TODO(Задача 27): застосування купона Спарти / внутрішньої CRM.
+      _showScanMessage('Розпізнано купон — застосування в розробці');
+      return;
+    }
     if (res.isProduct) {
       await _addScannedProduct(res);
       return;

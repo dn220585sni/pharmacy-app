@@ -554,8 +554,9 @@ class DrugService {
         return null;
       }
       final res = BarCodeAnalysis.fromJson(r.data);
-      debugPrint('AnalizBarCode bc=$barcode → wasscanned="${res.wasScanned}" '
-          'SKod="${res.skod}" UKod="${res.ukod}" sparta="${res.spartaCard}" '
+      debugPrint('AnalizBarCode bc=$barcode NameForm=${form.param ?? "(основна)"} '
+          '→ wasscanned="${res.wasScanned}" SKod="${res.skod}" '
+          'UKod="${res.ukod}" sparta="${res.spartaCard}" '
           'coupon=${res.hasCoupon} readBC="${res.readBC}"');
       return res;
     } catch (e) {

@@ -532,6 +532,9 @@ class BarCodeAnalysis {
 class DrugService {
   static final _api = CacheApiClient();
 
+  /// TEMP-діагностика скану: що останнього разу повернув AnalizBarCode (для UI).
+  static String? lastAnalizDebug;
+
   /// AnalizBarCode (Задача 27): серверний диспетчер сканування. Розпізнає, що
   /// саме просканували — товарний стікер (SKod/UKod), картку чи нерозпізнане
   /// (noscan=1). [form] задає контекст (NameForm): основна форма вибиття /
@@ -540,7 +543,10 @@ class DrugService {
     String barcode, {
     BarCodeForm form = BarCodeForm.main,
   }) async {
-    if (ApiConfig.useMock || barcode.isEmpty) return null;
+    if (ApiConfig.useMock || barcode.isEmpty) {
+      lastAnalizDebug = 'пропущено (mock/порожній)';
+      return null;
+    }
     try {
       final params = <String, String>{
         'BarCode': barcode,
@@ -548,18 +554,21 @@ class DrugService {
       };
       final r = await _api.call('AnalizBarCode', params: params);
       if (!r.isOk) {
-        debugPrint('AnalizBarCode FAIL bc=$barcode: ${r.result}');
+        lastAnalizDebug = 'bc=$barcode FAIL: ${r.result}';
+        debugPrint('AnalizBarCode $lastAnalizDebug');
         return null;
       }
       final res = BarCodeAnalysis.fromJson(r.data);
-      debugPrint('AnalizBarCode bc=$barcode → wasscanned="${res.wasScanned}" '
+      lastAnalizDebug = 'bc=$barcode → wasscanned="${res.wasScanned}" '
           'SKod="${res.skod}" UKod="${res.ukod}" noscan=${res.needsRescan} '
           'sparta="${res.spartaCard}" spec="${res.specCard}" '
           'coupon=${res.hasCoupon} readBC="${res.readBC}" '
-          'keys=${r.data.keys.toList()}');
+          'keys=${r.data.keys.toList()}';
+      debugPrint('AnalizBarCode $lastAnalizDebug');
       return res;
     } catch (e) {
-      debugPrint('AnalizBarCode ERROR bc=$barcode: $e');
+      lastAnalizDebug = 'bc=$barcode ERROR: $e';
+      debugPrint('AnalizBarCode $lastAnalizDebug');
       return null;
     }
   }

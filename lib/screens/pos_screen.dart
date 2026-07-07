@@ -1935,6 +1935,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         : BarCodeForm.main;
     final res = await DrugService.analizBarCode(code, form: form);
     if (!mounted) return;
+    // TEMP-діагностика скану: сира відповідь AnalizBarCode (діалог + копіювати).
+    _showScanDebugDialog(DrugService.lastAnalizDebug ?? 'нема даних');
     if (res == null) {
       _showScanMessage('Помилка сканування — спробуйте ще раз');
       return;
@@ -2053,6 +2055,34 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       duration: const Duration(seconds: 3),
       behavior: SnackBarBehavior.floating,
     ));
+  }
+
+  /// TEMP-діагностика скану: сира відповідь AnalizBarCode із кнопкою «Копіювати».
+  void _showScanDebugDialog(String dbg) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('AnalizBarCode'),
+        content: SelectableText(dbg,
+            style: const TextStyle(fontSize: 12, height: 1.4)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: dbg));
+              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                content: Text('Скопійовано'),
+                duration: Duration(seconds: 1),
+              ));
+            },
+            child: const Text('Копіювати'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Закрити'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Move keyboard selection by [delta] rows (+1 down, -1 up).

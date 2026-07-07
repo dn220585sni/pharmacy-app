@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 /// Shows a dialog for manual barcode entry.
 /// Returns the barcode string if submitted, null if cancelled.
@@ -79,10 +78,8 @@ class _BarcodeInputDialogState extends State<_BarcodeInputDialog> {
                 controller: _controller,
                 focusNode: _focusNode,
                 autofocus: true,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                ],
+                // Без обмеження на цифри: F4 тепер = ручний скан через
+                // AnalizBarCode, тож приймаємо й префікс символіки (напр. ]F0).
                 onSubmitted: (_) => _submit(),
                 decoration: InputDecoration(
                   hintText: 'Штрихкод...',

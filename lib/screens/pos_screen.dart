@@ -1993,10 +1993,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _showScanMessage('Відсканованого товару немає в кошику');
       return;
     }
-    final found = _cartPanelKey.currentState?.markScanned(match.drug.id) ?? false;
-    if (found) {
-      _showScanMessage('${match.drug.displayName} — відскановано ✓');
-    }
+    // Позначаємо позицію — зелена галочка в кошику і є фідбеком; снекбар не треба.
+    _cartPanelKey.currentState?.markScanned(match.drug.id);
   }
 
   /// Прибрати AIM-префікс символіки (`]` + 2 символи, напр. `]E0`/`]F0`/`]C1`) —

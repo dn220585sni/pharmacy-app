@@ -366,6 +366,9 @@ class PrroService {
   static DateTime? _tokenExpiresAt;
   static int? _activeFiscalNumber;
 
+  /// TEMP-діагностика: сира відповідь GET /tax_objects/{num_fiscal} (для UI).
+  static String? lastTaxObjectDebug;
+
   /// Активний фіскальний номер. Береться з `opened_shift` після авторизації;
   /// fallback — `PrroConfig.numFiscal`.
   static int get activeFiscalNumber =>
@@ -740,6 +743,38 @@ class PrroService {
       return report;
     } catch (e) {
       debugPrint('PRRO xReport ERROR: $e');
+      return null;
+    }
+  }
+
+  /// GET /tax_objects/{num_fiscal} — статус каси + підсумки (готівка, стан зміни),
+  /// доступний і між змінами. Кандидат на джерело суми службового внесення
+  /// (розмінна монета). Наразі лише логуємо сиру відповідь — щоб побачити реальні
+  /// поля на касі й вирішити, звідки брати суму.
+  static Future<Map<String, dynamic>?> taxObjectStatus() async {
+    if (!await _ensureAuth()) {
+      lastTaxObjectDebug = 'помилка авторизації ПРРО';
+      return null;
+    }
+    try {
+      final url =
+          '${PrroConfig.environment.baseUrl}/tax_objects/$activeFiscalNumber';
+      final response = await _client
+          .get(Uri.parse(url), headers: _headers)
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        lastTaxObjectDebug =
+            'HTTP ${response.statusCode}: ${utf8.decode(response.bodyBytes)}';
+        debugPrint('PRRO tax_objects FAIL: HTTP ${response.statusCode}');
+        return null;
+      }
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      lastTaxObjectDebug = jsonEncode(decoded);
+      debugPrint('PRRO tax_objects: $lastTaxObjectDebug');
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } catch (e) {
+      lastTaxObjectDebug = 'ERROR: $e';
+      debugPrint('PRRO tax_objects ERROR: $e');
       return null;
     }
   }

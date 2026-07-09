@@ -51,7 +51,6 @@ import '../widgets/barcode_input_dialog.dart';
 import '../widgets/robot_panel.dart';
 import '../services/api_config.dart';
 import '../services/prro_queue.dart';
-import '../services/prro_service.dart';
 import '../data/mock_messages.dart';
 import '../models/prescription.dart';
 import '../models/nearby_pharmacy.dart';
@@ -755,14 +754,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         // Початок зміни: ProvSumZOtchet — чи потрібне службове внесення +
         // залишок з останнього Z-звіту. Діалог показуємо лише коли потрібне.
         if (!ShiftService.state.isOpen) {
-          // TEMP: подивитись, що віддає CashDesk tax_objects (кандидат на джерело
-          // суми службового внесення).
-          PrroService.taxObjectStatus().then((_) {
-            if (mounted) {
-              _showCopyDialog('tax_objects',
-                  PrroService.lastTaxObjectDebug ?? 'нема даних');
-            }
-          });
           ShiftService.checkServiceDeposit().then((check) {
             if (!mounted || !check.needed) return;
             showShiftStartDialog(
@@ -2100,36 +2091,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       duration: const Duration(seconds: 3),
       behavior: SnackBarBehavior.floating,
     ));
-  }
-
-  /// Діалог із виділюваним текстом і кнопкою «Копіювати» — для діагностики.
-  void _showCopyDialog(String title, String body) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: SingleChildScrollView(
-          child: SelectableText(body,
-              style: const TextStyle(fontSize: 12, height: 1.4)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: body));
-              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                content: Text('Скопійовано'),
-                duration: Duration(seconds: 1),
-              ));
-            },
-            child: const Text('Копіювати'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Закрити'),
-          ),
-        ],
-      ),
-    );
   }
 
   /// Move keyboard selection by [delta] rows (+1 down, -1 up).

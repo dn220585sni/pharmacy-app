@@ -343,7 +343,9 @@ class PrroXReport {
       cashInBoxStart: (json['cash_in_box_start'] as num?)?.toDouble() ?? 0,
       serviceInput: (json['service_input'] as num?)?.toDouble() ?? 0,
       shiftDurationMinutes: _flexInt(json['shift_duration']),
-      openedAt: parseDate(json['from_date']),
+      // Час відкриття: SmartConnect (прод) віддає його в OPEN_SESSION_TIME
+      // (from_date порожній, shift_duration відсутній); cloud-test — у from_date.
+      openedAt: parseDate(json['OPEN_SESSION_TIME']) ?? parseDate(json['from_date']),
       ordersCount: (real['orders_count'] as num?)?.toInt() ?? 0,
       ordersSum: (real['sum'] as num?)?.toDouble() ?? 0,
       checks: list
@@ -365,9 +367,6 @@ class PrroService {
   static String? _token;
   static DateTime? _tokenExpiresAt;
   static int? _activeFiscalNumber;
-
-  /// TEMP-діагностика: сира відповідь GET /tax_objects/{num_fiscal} (для UI).
-  static String? lastTaxObjectDebug;
 
   /// Активний фіскальний номер. Береться з `opened_shift` після авторизації;
   /// fallback — `PrroConfig.numFiscal`.
@@ -743,38 +742,6 @@ class PrroService {
       return report;
     } catch (e) {
       debugPrint('PRRO xReport ERROR: $e');
-      return null;
-    }
-  }
-
-  /// GET /tax_objects/{num_fiscal} — статус каси + підсумки (готівка, стан зміни),
-  /// доступний і між змінами. Кандидат на джерело суми службового внесення
-  /// (розмінна монета). Наразі лише логуємо сиру відповідь — щоб побачити реальні
-  /// поля на касі й вирішити, звідки брати суму.
-  static Future<Map<String, dynamic>?> taxObjectStatus() async {
-    if (!await _ensureAuth()) {
-      lastTaxObjectDebug = 'помилка авторизації ПРРО';
-      return null;
-    }
-    try {
-      final url =
-          '${PrroConfig.environment.baseUrl}/tax_objects/$activeFiscalNumber';
-      final response = await _client
-          .get(Uri.parse(url), headers: _headers)
-          .timeout(const Duration(seconds: 20));
-      if (response.statusCode != 200 && response.statusCode != 201) {
-        lastTaxObjectDebug =
-            'HTTP ${response.statusCode}: ${utf8.decode(response.bodyBytes)}';
-        debugPrint('PRRO tax_objects FAIL: HTTP ${response.statusCode}');
-        return null;
-      }
-      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-      lastTaxObjectDebug = jsonEncode(decoded);
-      debugPrint('PRRO tax_objects: $lastTaxObjectDebug');
-      return decoded is Map<String, dynamic> ? decoded : null;
-    } catch (e) {
-      lastTaxObjectDebug = 'ERROR: $e';
-      debugPrint('PRRO tax_objects ERROR: $e');
       return null;
     }
   }

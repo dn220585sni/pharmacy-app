@@ -1,4 +1,7 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/cash_operation.dart';
 import '../models/money.dart';
 import '../models/shift_state.dart';
@@ -85,23 +88,24 @@ class ShiftService {
     if (ApiConfig.useMock) {
       return ServiceDepositCheck(needed: true, carryover: Money.fromHryvnia(1250));
     }
+    // Пропонована розмінна монета = готівка в касі на момент останнього Z-звіту
+    // (збережено в closeShift; CashDesk `cash_in_box`). Фармацевт може змінити.
+    final carryover = await _loadCarryover() ?? Money.zero;
     try {
+      // ProvSumZOtchet — лише щоб зрозуміти, чи внесення взагалі потрібне (ExVnos).
       final r = await CacheApiClient().call('ProvSumZOtchet');
       if (r.isOk) {
-        // УВАГА (бекенд): сервер віддає SumZZvit порожнім навіть після Z-звіту
-        // → carryover=0. Питання до Каті — коли має заповнюватись залишок.
-        final carryover = Money.parse(r.data['SumZZvit']?.toString() ?? '');
         final needed = (r.data['ExVnos']?.toString() ?? '0') != '1';
-        debugPrint('ShiftService: ProvSumZOtchet SumZZvit="${r.data['SumZZvit']}" '
-            'carryover=${carryover.format()} needed=$needed');
+        debugPrint('ShiftService: ProvSumZOtchet ExVnos="${r.data['ExVnos']}" '
+            'needed=$needed, розмінна(Z)=${carryover.format()}');
         return ServiceDepositCheck(needed: needed, carryover: carryover);
       }
       debugPrint('ShiftService ProvSumZOtchet FAIL: ${r.result}');
     } catch (e) {
       debugPrint('ShiftService ProvSumZOtchet ERROR: $e');
     }
-    // На помилку — краще показати діалог (із 0), ніж мовчки пропустити старт.
-    return const ServiceDepositCheck(needed: true, carryover: Money.zero);
+    // На помилку — краще показати діалог (з розмінною), ніж пропустити старт.
+    return ServiceDepositCheck(needed: true, carryover: carryover);
   }
 
   /// Підтягнути реальні підсумки відкритої зміни з ПРРО xReport (готівка в касі,
@@ -207,16 +211,60 @@ class ShiftService {
         _state = const ShiftState(isOpen: false);
         return const PrroResult(success: true);
       }
+      // Готівка в касі ДО Z — це пропонована розмінна монета для НАСТУПНОЇ зміни.
+      // Зберігаємо на диск (переживає рестарт), підставляється в checkServiceDeposit.
+      final x = await PrroService.xReport(includeChecks: false);
+      final cashAtZ = x != null ? Money.fromHryvnia(x.cashInBox) : Money.zero;
       final r = await PrroService.zReport();
       if (r.success) {
         _state = const ShiftState(isOpen: false);
         await _fixZReportInDb();
+        await _persistCarryover(cashAtZ);
       }
-      debugPrint(
-          'ShiftService: closeShift ${r.success ? "OK" : "FAIL: ${r.error}"}');
+      debugPrint('ShiftService: closeShift '
+          '${r.success ? "OK (cashAtZ=${cashAtZ.format()})" : "FAIL: ${r.error}"}');
       return r;
     } finally {
       _closing = false;
+    }
+  }
+
+  // ── Перенос розмінної монети (cash_in_box на момент Z) ───────────────────────
+
+  static const _carryoverFile = 'shift_carryover.json';
+
+  static Future<File?> _carryoverPath() async {
+    if (kIsWeb) return null;
+    try {
+      final dir = await getApplicationSupportDirectory();
+      return File('${dir.path}/$_carryoverFile');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Зберегти готівку в касі на момент Z — пропонована розмінна для наступної зміни.
+  static Future<void> _persistCarryover(Money m) async {
+    final f = await _carryoverPath();
+    if (f == null) return;
+    try {
+      await f.writeAsString(jsonEncode({'kopiykas': m.kopiykas}));
+    } catch (e) {
+      debugPrint('ShiftService: persist carryover FAIL: $e');
+    }
+  }
+
+  /// Прочитати збережену розмінну (з останнього Z). null якщо ще не було.
+  static Future<Money?> _loadCarryover() async {
+    final f = await _carryoverPath();
+    if (f == null || !await f.exists()) return null;
+    try {
+      final j = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      final k = (j['kopiykas'] as num?)?.toInt();
+      return k != null ? Money.fromKopiykas(k) : null;
+    } catch (e) {
+      debugPrint('ShiftService: load carryover FAIL: $e');
+      return null;
     }
   }
 

@@ -56,6 +56,34 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
     super.dispose();
   }
 
+  Future<void> _closeWithoutShift() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('Продовжити без зміни?',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+        content: const Text(
+          'Ви впевнені, що хочете продовжити роботу без відкриття зміни?',
+          style: TextStyle(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Скасувати'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: _grey),
+            child: const Text('Так, продовжити'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) Navigator.of(context).pop();
+  }
+
   Future<void> _start() async {
     final deposit = Money.parse(_depositCtr.text);
     setState(() => _starting = true);
@@ -96,6 +124,16 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
                   const Text('Початок зміни',
                       style:
                           TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: _starting ? null : _closeWithoutShift,
+                    icon: const Icon(Icons.close, size: 20, color: _grey),
+                    tooltip: 'Продовжити без відкриття зміни',
+                    splashRadius: 18,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 32, minHeight: 32),
+                  ),
                 ],
               ),
               const SizedBox(height: 14),

@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import '../services/prro_service.dart';
-import '../services/shift_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock shift data (will be replaced by a service layer later)
@@ -66,8 +64,6 @@ class ShiftDashboard extends StatefulWidget {
 class _ShiftDashboardState extends State<ShiftDashboard>
     with SingleTickerProviderStateMixin {
   bool _expanded = false;
-  bool _openingShift = false;
-  bool _closingShift = false;
 
   // ── Earned counter animation ─────────────────────────────────────────────
   late AnimationController _earningCtrl;
@@ -148,100 +144,9 @@ class _ShiftDashboardState extends State<ShiftDashboard>
           ),
           const SizedBox(height: 12),
           _buildExpandable(),
-          const SizedBox(height: 20),
-          // Тимчасові операційні кнопки керування реальною зміною ПРРО
-          // (поки авто-старт зміни в логіні — мок). Закрити стару → відкрити нову.
-          _buildOpenShiftButton(),
-          const SizedBox(height: 10),
-          _buildCloseShiftButton(),
         ],
       ),
     );
-  }
-
-  // ── Open / Close shift (тимчасово, для керування реальною зміною ПРРО) ──────
-
-  Widget _buildOpenShiftButton() {
-    return ElevatedButton.icon(
-      onPressed: _openingShift ? null : _openShift,
-      icon: _openingShift
-          ? const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white))
-          : const Icon(Icons.play_circle_outline_rounded, size: 18),
-      label: Text(_openingShift ? 'Відкриття зміни…' : 'Відкрити зміну'),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFF1E7DC8),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
-  }
-
-  Future<void> _openShift() async {
-    setState(() => _openingShift = true);
-    final result = await PrroService.openShift();
-    if (!mounted) return;
-    setState(() => _openingShift = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(result.success
-          ? 'Зміну відкрито'
-          : 'Не вдалося відкрити зміну: ${result.error}'),
-      backgroundColor:
-          result.success ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
-      behavior: SnackBarBehavior.floating,
-    ));
-  }
-
-  Widget _buildCloseShiftButton() {
-    final isOpen = ShiftService.state.isOpen;
-    // Блокуємо кнопку під час закриття І коли зміна вже закрита — щоб повторним
-    // натиском не згенерувати ще один Z-звіт / «Вынос. Z-отчет».
-    final disabled = _closingShift || !isOpen;
-    return OutlinedButton.icon(
-      onPressed: disabled ? null : _closeShift,
-      icon: _closingShift
-          ? const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2))
-          : Icon(
-              isOpen
-                  ? Icons.lock_clock_rounded
-                  : Icons.check_circle_outline_rounded,
-              size: 18),
-      label: Text(_closingShift
-          ? 'Закриття зміни…'
-          : isOpen
-              ? 'Закрити зміну (Z-звіт)'
-              : 'Зміну закрито'),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xFFB91C1C),
-        side: const BorderSide(color: Color(0xFFFCA5A5)),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
-  }
-
-  Future<void> _closeShift() async {
-    setState(() => _closingShift = true);
-    // Z-звіт у ПРРО + фіксація в БД Caché (ZRep) — централізовано в ShiftService.
-    final result = await ShiftService.closeShift();
-    if (!mounted) return;
-    setState(() => _closingShift = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(result.success
-          ? 'Зміну закрито — Z-звіт сформовано'
-          : 'Не вдалося закрити зміну: ${result.error}'),
-      backgroundColor:
-          result.success ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
-      behavior: SnackBarBehavior.floating,
-    ));
   }
 
   // ── Earned card ──────────────────────────────────────────────────────────

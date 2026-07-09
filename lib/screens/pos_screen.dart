@@ -20,6 +20,7 @@ import '../services/skarb_service.dart';
 import '../services/session_service.dart';
 import '../services/shift_service.dart';
 import '../widgets/shift_start_dialog.dart';
+import '../widgets/shift_end_dialog.dart';
 import '../widgets/cash_operation_dialog.dart';
 import '../widgets/cash_settings_dialog.dart';
 import '../widgets/fractional_input_dialog.dart';
@@ -838,6 +839,25 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                     style: TextStyle(fontSize: 13)),
                 onTap: () => Navigator.of(ctx).pop('cash_settings'),
               ),
+            // Відкрити / закрити зміну — залежно від поточного стану.
+            if (!ShiftService.state.isOpen)
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.play_circle_outline_rounded,
+                    size: 20, color: Color(0xFF1E7DC8)),
+                title: const Text('Відкрити зміну',
+                    style: TextStyle(fontSize: 13)),
+                onTap: () => Navigator.of(ctx).pop('open_shift'),
+              )
+            else
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.lock_clock_rounded,
+                    size: 20, color: Color(0xFFB91C1C)),
+                title: const Text('Закрити зміну (Z-звіт)',
+                    style: TextStyle(fontSize: 13, color: Color(0xFFB91C1C))),
+                onTap: () => Navigator.of(ctx).pop('close_shift'),
+              ),
             // Change pharmacist
             ListTile(
               dense: true,
@@ -870,6 +890,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         if (_currentPharmacist?.isSpecial == true) showCashSettingsDialog(context);
         return;
       }
+      if (action == 'open_shift') {
+        await _openShiftFromMenu();
+        return;
+      }
+      if (action == 'close_shift') {
+        await _closeShiftFromMenu();
+        return;
+      }
       if (action == 'logout' || action == 'change') {
         // Очистити кошик і серверний сеанс перед зміною/виходом фармацевта.
         _clearCart();
@@ -880,6 +908,37 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
       }
     });
+  }
+
+  /// «Відкрити зміну» з меню фармацевта: діалог службового внесення
+  /// (той самий, що після логіну) з розмінною монетою з останнього Z-звіту.
+  Future<void> _openShiftFromMenu() async {
+    final check = await ShiftService.checkServiceDeposit();
+    if (!mounted || _currentPharmacist == null) return;
+    await showShiftStartDialog(
+      context,
+      pharmacist: _currentPharmacist!.user,
+      carryover: check.carryover,
+    );
+  }
+
+  /// «Закрити зміну» з меню фармацевта: свіжі підсумки з xReport → діалог
+  /// з пропозицією Z-звіту (без «Ні, лише вийти» — це не вихід з програми).
+  Future<void> _closeShiftFromMenu() async {
+    await ShiftService.refreshTotals();
+    if (!mounted) return;
+    final choice = await showShiftEndDialog(context, showJustExit: false);
+    if (choice != ShiftEndChoice.closeShift || !mounted) return;
+    final result = await ShiftService.closeShift();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(result.success
+          ? 'Зміну закрито — Z-звіт сформовано'
+          : 'Не вдалося закрити зміну: ${result.error}'),
+      backgroundColor:
+          result.success ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   /// LogoutRlz — закрити сесію при виході.

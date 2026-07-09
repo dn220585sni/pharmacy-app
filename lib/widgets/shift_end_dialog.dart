@@ -15,18 +15,24 @@ enum ShiftEndChoice {
 }
 
 /// Попап «Завершення зміни» — показується при спробі закрити програму
-/// (хрестик), якщо зміна відкрита.
-Future<ShiftEndChoice> showShiftEndDialog(BuildContext context) async {
+/// (хрестик), якщо зміна відкрита, а також з меню фармацевта («Закрити зміну»).
+/// [showJustExit] — показувати кнопку «Ні, лише вийти» (лише у флоу виходу
+/// з програми; з меню вибір «закрити зміну / скасувати»).
+Future<ShiftEndChoice> showShiftEndDialog(
+  BuildContext context, {
+  bool showJustExit = true,
+}) async {
   final choice = await showDialog<ShiftEndChoice>(
     context: context,
     barrierDismissible: true,
-    builder: (_) => const _ShiftEndDialog(),
+    builder: (_) => _ShiftEndDialog(showJustExit: showJustExit),
   );
   return choice ?? ShiftEndChoice.cancel;
 }
 
 class _ShiftEndDialog extends StatelessWidget {
-  const _ShiftEndDialog();
+  final bool showJustExit;
+  const _ShiftEndDialog({required this.showJustExit});
 
   static const _grey = Color(0xFF6B7280);
 
@@ -122,21 +128,23 @@ class _ShiftEndDialog extends StatelessWidget {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () =>
-                          Navigator.of(context).pop(ShiftEndChoice.justExit),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: _grey,
-                        side: const BorderSide(color: Color(0xFFE5E7EB)),
-                        padding: const EdgeInsets.symmetric(vertical: 11),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
+                  if (showJustExit) ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () =>
+                            Navigator.of(context).pop(ShiftEndChoice.justExit),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _grey,
+                          side: const BorderSide(color: Color(0xFFE5E7EB)),
+                          padding: const EdgeInsets.symmetric(vertical: 11),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('Ні, лише вийти'),
                       ),
-                      child: const Text('Ні, лише вийти'),
                     ),
-                  ),
-                  const SizedBox(width: 8),
+                    const SizedBox(width: 8),
+                  ],
                   Expanded(
                     child: TextButton(
                       onPressed: () =>

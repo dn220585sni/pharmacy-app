@@ -211,18 +211,18 @@ class ShiftService {
         _state = const ShiftState(isOpen: false);
         return const PrroResult(success: true);
       }
-      // Готівка в касі ДО Z — це пропонована розмінна монета для НАСТУПНОЇ зміни.
-      // Зберігаємо на диск (переживає рестарт), підставляється в checkServiceDeposit.
-      final x = await PrroService.xReport(includeChecks: false);
-      final cashAtZ = x != null ? Money.fromHryvnia(x.cashInBox) : Money.zero;
       final r = await PrroService.zReport();
       if (r.success) {
         _state = const ShiftState(isOpen: false);
         await _fixZReportInDb();
+        // `cash_in_box` з відповіді Z-звіту = гроші в касі на момент Z = пропонована
+        // розмінна монета для НАСТУПНОЇ зміни. Зберігаємо (переживає рестарт).
+        final cashAtZ = Money.fromHryvnia(r.cashInBox ?? 0);
         await _persistCarryover(cashAtZ);
+        debugPrint('ShiftService: closeShift OK (cashAtZ=${cashAtZ.format()})');
+      } else {
+        debugPrint('ShiftService: closeShift FAIL: ${r.error}');
       }
-      debugPrint('ShiftService: closeShift '
-          '${r.success ? "OK (cashAtZ=${cashAtZ.format()})" : "FAIL: ${r.error}"}');
       return r;
     } finally {
       _closing = false;

@@ -83,6 +83,9 @@ class PrroResult {
   final String? pdfBase64;    // PDF чеку (base64)
   final String? link;         // Посилання на чек на сайті
   final bool isOffline;       // Ознака офлайн чеку
+  /// Гроші в касі — присутнє у відповіді Z-звіту (`cash_in_box`). На момент Z =
+  /// пропоноване службове внесення для наступної зміни.
+  final double? cashInBox;
   final String? error;
   final PrroErrorKind? errorKind;
 
@@ -98,6 +101,7 @@ class PrroResult {
     this.pdfBase64,
     this.link,
     this.isOffline = false,
+    this.cashInBox,
     this.error,
     this.errorKind,
   });
@@ -115,7 +119,8 @@ class PrroResult {
         textPrint = null,
         pdfBase64 = null,
         link = null,
-        isOffline = false;
+        isOffline = false,
+        cashInBox = null;
 }
 
 /// Товар для фіскального чеку.
@@ -838,6 +843,8 @@ class PrroService {
           checkId: json['uuid']?.toString(),
           textPrint: json['text_print']?.toString(),
           pdfBase64: json['pdf']?.toString(),
+          // Гроші в касі на момент Z — пропоноване внесення для наступної зміни.
+          cashInBox: (json['cash_in_box'] as num?)?.toDouble(),
         );
       } else {
         return PrroResult.failure(

@@ -47,8 +47,10 @@ void main() {
 class _AppCloseObserver extends WidgetsBindingObserver {
   @override
   Future<AppExitResponse> didRequestAppExit() async {
-    // Якщо зміна відкрита — спитати про завершення (Z-звіт) перед виходом.
-    if (ShiftService.state.isOpen) {
+    // Свіжо перевірити РРО, чи зміна відкрита (локальний стан міг застаріти
+    // після рестарту з відновленою зміною) — інакше при виході не пропонувався
+    // Z для реально відкритої зміни.
+    if (await ShiftService.isShiftOpenOnServer()) {
       // Підтягнути реальні суми (готівка/чеки) з xReport перед діалогом.
       await ShiftService.refreshTotals();
       final ctx = navigatorKey.currentContext; // свіжий контекст після await

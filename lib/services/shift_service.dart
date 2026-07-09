@@ -132,6 +132,32 @@ class ShiftService {
     }
   }
 
+  /// Свіжо перевірити на РРО, чи зміна відкрита (`xReport`), і синхронізувати
+  /// локальний `_state`. Для перевірки ПЕРЕД ВИХОДОМ: локальний стан міг
+  /// застаріти (рестарт, коли відновлення на старті не спрацювало / було
+  /// закешоване), і тоді при виході не пропонувався Z для відкритої зміни.
+  static Future<bool> isShiftOpenOnServer() async {
+    if (ApiConfig.useMock) return _state.isOpen;
+    try {
+      final x = await PrroService.xReport(includeChecks: false);
+      if (x == null) return _state.isOpen;
+      if (x.shiftOpen && !_state.isOpen) {
+        _state = ShiftState(
+          isOpen: true,
+          openedAt: x.openedAt,
+          cashInBox: Money.fromHryvnia(x.cashInBox),
+          checksCount: x.ordersCount,
+        );
+      } else if (!x.shiftOpen && _state.isOpen) {
+        _state = const ShiftState(isOpen: false);
+      }
+      return x.shiftOpen;
+    } catch (e) {
+      debugPrint('ShiftService isShiftOpenOnServer ERROR: $e');
+      return _state.isOpen;
+    }
+  }
+
   /// Почати зміну: OPEN_SHIFT (з авто-Z за вчора) + службове внесення [deposit]
   /// (SaveSumDay — запис у Caché). Повертає `true` при успіху.
   static Future<bool> startShift(Money deposit) async {

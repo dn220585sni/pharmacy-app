@@ -202,7 +202,17 @@ class ShiftService {
       debugPrint('ShiftService startShift: OPEN_SHIFT FAIL: ${open.error}');
       return false;
     }
-    // 2. Службове внесення — запис операції в Caché (SaveSumDay), morning-причина.
+    // 2. Службове внесення в ПРРО (CashDesk `/check/service`) — інакше
+    // `cash_in_box` у X/Z-звітах не знає про розмінну монету і діалог
+    // закриття зміни показує «Готівка в касі: 0». Збій не блокує старт.
+    if (deposit.isPositive) {
+      final svc = await PrroService.serviceCash(
+          isInput: true, sum: deposit.kopiykas / 100);
+      if (!svc.success) {
+        debugPrint('ShiftService: службове внесення в ПРРО FAIL: ${svc.error}');
+      }
+    }
+    // 3. Службове внесення — запис операції в Caché (SaveSumDay), morning-причина.
     final reasons = await CashService.getReasons(CashDirection.cashIn);
     final reason = morningReason(reasons)?.name ?? 'Служебное внесение';
     await CashService.saveOperation(

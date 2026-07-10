@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/cash_operation.dart';
 import '../models/money.dart';
 import '../services/cash_service.dart';
+import '../services/prro_service.dart';
 
 /// Діалог службових операцій каси — внесення / винесення (інкасація).
 /// Напрям → причини (GetOperKassa) → сума → збереження (SaveSumDay).
@@ -77,14 +78,32 @@ class _CashOperationDialogState extends State<_CashOperationDialog> {
       reason: _reason!,
       sum: sum,
     );
+    // Фіскалізувати готівкову операцію в ПРРО (`/check/service`) — щоб
+    // `cash_in_box` у CashDesk відповідав реальній касі (X/Z-звіти,
+    // діалог закриття зміни). Збій ПРРО не скасовує запис у Caché.
+    String? prroWarn;
+    if (ok) {
+      final r = await PrroService.serviceCash(
+        isInput: _direction == CashDirection.cashIn,
+        sum: sum.kopiykas / 100,
+      );
+      if (!r.success) prroWarn = r.error;
+    }
     if (!mounted) return;
     setState(() => _saving = false);
     if (ok) Navigator.of(context).pop();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok
-          ? '${_direction.label}: ${sum.format()} ₴ — збережено'
-          : 'Не вдалося зберегти операцію'),
-      backgroundColor: ok ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+      content: Text(!ok
+          ? 'Не вдалося зберегти операцію'
+          : prroWarn != null
+              ? '${_direction.label}: ${sum.format()} ₴ — збережено, '
+                  'але ПРРО не зафіксував: $prroWarn'
+              : '${_direction.label}: ${sum.format()} ₴ — збережено'),
+      backgroundColor: !ok
+          ? const Color(0xFFDC2626)
+          : prroWarn != null
+              ? const Color(0xFFB45309)
+              : const Color(0xFF16A34A),
       behavior: SnackBarBehavior.floating,
     ));
   }

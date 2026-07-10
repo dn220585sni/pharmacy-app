@@ -809,6 +809,70 @@ class PrroService {
     }
   }
 
+  /// Службове внесення ([isInput] = true) / службова видача готівки.
+  /// Endpoint `POST /check/service`, `action_type: SERVICE_INPUT|SERVICE_OUTPUT`
+  /// (док. CashDesk). Саме ця операція наповнює `cash_in_box` у CashDesk —
+  /// без неї розмінна монета/інкасація не видні в X/Z-звітах.
+  static Future<PrroResult> serviceCash({
+    required bool isInput,
+    required double sum,
+  }) async {
+    if (!await _ensureAuth()) {
+      return const PrroResult.failure(
+        error: 'Помилка авторизації ПРРО',
+        errorKind: PrroErrorKind.auth,
+      );
+    }
+    try {
+      final body = {
+        'action_type': isInput ? 'SERVICE_INPUT' : 'SERVICE_OUTPUT',
+        'num_fiscal': activeFiscalNumber,
+        'type': 0,
+        'name': 'ГОТІВКА',
+        'sum': sum,
+        'no_pdf': true,
+      };
+      final response = await _client
+          .post(
+            Uri.parse('${PrroConfig.environment.baseUrl}/check/service'),
+            headers: _headers,
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        debugPrint('PRRO serviceCash ${isInput ? 'INPUT' : 'OUTPUT'} $sum OK '
+            '(uuid=${json['uuid']})');
+        return PrroResult(success: true, checkId: json['uuid']?.toString());
+      }
+      return PrroResult.failure(
+        error: json['message']?.toString() ?? 'Помилка службової операції',
+        errorKind: response.statusCode == 401
+            ? PrroErrorKind.auth
+            : PrroErrorKind.logical,
+      );
+    } on TimeoutException {
+      return const PrroResult.failure(
+        error: 'Таймаут службової операції ПРРО',
+        errorKind: PrroErrorKind.connection,
+      );
+    } on SocketException {
+      return const PrroResult.failure(
+        error: 'Немає з\'єднання з ПРРО',
+        errorKind: PrroErrorKind.connection,
+      );
+    } catch (e) {
+      debugPrint('PRRO serviceCash ERROR: $e');
+      return PrroResult.failure(
+        error: 'Помилка службової операції: $e',
+        errorKind: PrroErrorKind.logical,
+      );
+    }
+  }
+
   /// Z-звіт — закрити поточну зміну.
   /// Endpoint `POST /shift` з `action_type: Z_REPORT` (док. CashDesk).
   /// УВАГА: `/shift/xReport` — це X-звіт (НЕ закриває зміну), не плутати.

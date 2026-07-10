@@ -1,0 +1,16 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\SOFTWARE\ZSMU\Farm]
+"bearer"=-
+"ekkPort"="4000952779"
+"ekkIP"="http://10.15.30.61:8000/api/v2/"
+"ekkIPPort"="https://test.cashdesk.com.ua/api/v2/"
+"ekkSpeed"="40"
+"ekkKolBukv"="38"
+"edVerMini"="4000952779@anc.net.ua"
+"edPassMini"="123456"
+"chkSkidkaSumma"="1"
+"cbChKredit"="1"
+"koef_scale"="0.75"
+"monofont"="Arial"
+"PRRO_index_printer"="0"

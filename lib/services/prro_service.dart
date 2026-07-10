@@ -498,6 +498,11 @@ class PrroService {
   // ---------------------------------------------------------------------------
 
   /// Авторизуватися в ПРРО. Отримує Bearer token + opened_shift.
+  ///
+  /// УВАГА (Попов): у SmartConnect `/authenticate` має НАЙНИЖЧИЙ пріоритет —
+  /// у рознині великий шанс таймауту. Тому основний шлях — bearer з реєстру
+  /// (див. [_ensureAuth]); сюди потрапляємо лише коли він відсутній/прострочений.
+  /// Таймаут 60 с (більше за 30 с cash_uft.dll — саме через низький пріоритет).
   static Future<bool> authenticate() async {
     try {
       final response = await _client.post(
@@ -511,7 +516,7 @@ class PrroService {
           'email': PrroConfig.email,
           'password': PrroConfig.password,
         }),
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 60));
 
       if (response.statusCode != 200) {
         debugPrint('PRRO auth FAIL: HTTP ${response.statusCode}');
@@ -816,11 +821,13 @@ class PrroService {
         'developer-id': PrroConfig.developerId,
       };
 
+      // 30 с як у cash_uft.dll: реєстрація в податковій з АЦСК займає до 27 с,
+      // і черга SmartConnect може тримати навіть читаючі запити.
       final response = await _client.post(
         Uri.parse('${PrroConfig.baseUrl}/shift/xReport'),
         headers: _headers,
         body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 20));
+      ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode != 200 && response.statusCode != 201) {
         debugPrint('PRRO xReport FAIL: HTTP ${response.statusCode}');
@@ -1036,7 +1043,7 @@ class PrroService {
       final response = await _client.get(
         Uri.parse(url),
         headers: _headers,
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
         return utf8.decode(response.bodyBytes);
@@ -1055,7 +1062,7 @@ class PrroService {
       final response = await _client.get(
         Uri.parse(url),
         headers: _headers,
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
         return utf8.decode(response.bodyBytes);

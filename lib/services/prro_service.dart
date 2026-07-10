@@ -27,26 +27,72 @@ enum PrroEnvironment {
 }
 
 /// Конфігурація ПРРО (CashDesk).
+///
+/// Compile-time дефолти — для розробки (cloud test). На касі значення
+/// перевизначаються з реєстру `HKCU\Software\ZSMU\Farm` у
+/// `RegistryConfig.load()` — ключі сумісні з cash_uft.dll
+/// (специфікація Попова 2026-07-10).
 class PrroConfig {
-  /// Активне середовище. Змінити на `smartConnectTest`/`smartConnectProd`
-  /// при деплої на робоче місце аптеки.
+  /// Дефолтне середовище для розробки (коли реєстр не налаштований).
   static const environment = PrroEnvironment.cloudTest;
 
-  /// Облікові дані для авторизації.
-  /// Передаються через --dart-define-from-file=dart_define.json (gitignored).
-  /// Порожні за замовчуванням — без файлу авторизація впаде явно.
-  static const email = String.fromEnvironment('PRRO_EMAIL');
-  static const password = String.fromEnvironment('PRRO_PASSWORD');
+  /// Робочий URL ПРРО. Реєстр: `ekkIP` — локальний SmartConnect
+  /// (offline-модуль на сервері аптеки, тримає чергу чеків без інтернету).
+  static String baseUrl = environment.baseUrl;
 
-  /// Developer ID (обов'язковий заголовок).
+  /// Online CashDesk. Реєстр: `ekkIPPort` — для звітів за період
+  /// (їх немає в БД SmartConnect). Поки не використовується.
+  static String? onlineBaseUrl;
+
+  /// Облікові дані для отримання токена, коли bearer відсутній або
+  /// прострочений. Реєстр: `edVerMini` (email) / `edPassMini` (password).
+  /// Дефолти — з --dart-define-from-file=dart_define.json (gitignored).
+  static String email = const String.fromEnvironment('PRRO_EMAIL');
+  static String password = const String.fromEnvironment('PRRO_PASSWORD');
+
+  /// Developer ID (обов'язковий заголовок) — ідентифікація наших чеків
+  /// у моніторингу CashDesk по всіх юрособах.
   static const developerId = 'ANC';
 
-  /// Фіскальний номер РРО за замовчуванням.
-  /// Реальний номер визначається з `opened_shift` після авторизації
+  /// Фіскальний номер РРО. Реєстр: `ekkPort`.
+  /// Дефолт 4000952779 — тестовий ФН (Дмитрій-тестировщик 2026-05-11),
+  /// не пересікається з online-розничкою. Реальний номер також
+  /// підтверджується з `opened_shift` після авторизації
   /// (див. [PrroService.activeFiscalNumber]).
-  /// 4000952779 — тестовий ФН з відкритою через SmartConnect зміною
-  /// (Дмитрій-тестировщик 2026-05-11). Не пересікається з online-розничкою.
-  static const numFiscal = 4000952779;
+  static int numFiscal = 4000952779;
+
+  /// ФН прийшов з реєстру (бойова каса) — контроль, що чеки не йдуть
+  /// на тестовий ФН (критерій A5).
+  static bool fiscalFromRegistry = false;
+
+  /// Готовий Bearer-токен з реєстру (`bearer`, з ОК ПРРО, живе ~365 днів).
+  /// Використовується поки не прострочений; після ре-авторизації новий
+  /// пишеться назад у реєстр через [persistBearerToRegistry].
+  static String? registryBearer;
+
+  /// Записати оновлений bearer назад у реєстр (ставить RegistryConfig,
+  /// щоб уникнути циклічного імпорту). null — реєстр недоступний.
+  static void Function(String bearer)? persistBearerToRegistry;
+
+  /// Ширина рядка TXT-чека (`text_print`, друк на термопринтері).
+  /// Реєстр: `ekkKolBukv`. Іде в `print_width`.
+  static int printWidth = 40;
+
+  /// Ширина рядка PDF-представлення (чеки, X/Z-звіти; зберігається в папці
+  /// out на 7 днів для друку без інтернету). Реєстр: `ekkSpeed`. Іде в `pdf_width`.
+  static int pdfWidth = 40;
+
+  /// Друк чеків (поки не використовується — на майбутнє):
+  /// коефіцієнт масштабу QR (`koef_scale`), фонт TXT-чека (`monofont`),
+  /// номер принтера (`PRRO_index_printer`).
+  static double qrScale = 0.75;
+  static String monoFont = 'Arial';
+  static int printerIndex = 1;
+
+  /// Логіка формування чека (`chkSkidkaSumma`, `cbChKredit`) — читаємо,
+  /// семантику уточнюємо в Попова.
+  static String chkSkidkaSumma = '1';
+  static String cbChKredit = '1';
 
   /// Хост хмарного кабінету (для read-only перегляду каси).
   static const cabinetHost = 'https://test.cashdesk.com.ua';
@@ -410,7 +456,7 @@ class PrroService {
         'token': _token,
         'expires_at': _tokenExpiresAt?.toIso8601String(),
         'fiscal': _activeFiscalNumber,
-        'env': PrroConfig.environment.name,
+        'base_url': PrroConfig.baseUrl,
       }));
     } catch (e) {
       debugPrint('PRRO token persist FAIL: $e');
@@ -424,9 +470,9 @@ class PrroService {
     try {
       final json = jsonDecode(await file.readAsString())
           as Map<String, dynamic>;
-      // Інвалідувати кеш якщо змінили середовище або фіскальний номер.
-      if (json['env'] != PrroConfig.environment.name) {
-        debugPrint('PRRO token cache MISS: env mismatch');
+      // Інвалідувати кеш якщо змінили середовище/URL або фіскальний номер.
+      if (json['base_url'] != PrroConfig.baseUrl) {
+        debugPrint('PRRO token cache MISS: base_url mismatch');
         return;
       }
       final cachedFiscal = (json['fiscal'] as num?)?.toInt();
@@ -455,7 +501,7 @@ class PrroService {
   static Future<bool> authenticate() async {
     try {
       final response = await _client.post(
-        Uri.parse('${PrroConfig.environment.baseUrl}/authenticate'),
+        Uri.parse('${PrroConfig.baseUrl}/authenticate'),
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
@@ -480,7 +526,14 @@ class PrroService {
       _tokenExpiresAt = _parseExpiresAt(json['token_expires_at']?.toString());
       debugPrint('PRRO auth OK: shift=$_activeFiscalNumber '
           'expires=$_tokenExpiresAt');
-      if (_token != null) await _persistToken();
+      if (_token != null) {
+        await _persistToken();
+        // Оновлений токен — назад у реєстр (`bearer`), як робить cash_uft.dll:
+        // з ним працюють і наступні запуски, і legacy-модуль.
+        final t = _token!;
+        PrroConfig.persistBearerToRegistry
+            ?.call(t.startsWith('Bearer') ? t : 'Bearer $t');
+      }
       return _token != null;
     } catch (e) {
       debugPrint('PRRO auth ERROR: $e');
@@ -502,12 +555,48 @@ class PrroService {
     );
   }
 
-  /// Гарантувати, що токен валідний. Якщо ні — авторизуватися.
+  /// `exp` з payload JWT (unix seconds) → DateTime. null — не розпарсилось.
+  static DateTime? _jwtExpiry(String bearer) {
+    try {
+      final parts = bearer.replaceFirst('Bearer ', '').trim().split('.');
+      if (parts.length < 2) return null;
+      final payload = jsonDecode(
+              utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))))
+          as Map<String, dynamic>;
+      final exp = (payload['exp'] as num?)?.toDouble();
+      if (exp == null) return null;
+      return DateTime.fromMillisecondsSinceEpoch((exp * 1000).round());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _registryBearerTried = false;
+
+  /// Гарантувати, що токен валідний. Пріоритет: чинний токен → bearer з
+  /// реєстру (`ZSMU\Farm\bearer`, живе ~365 днів) → authenticate
+  /// (edVerMini/edPassMini), новий токен пишеться назад у реєстр.
   static Future<bool> _ensureAuth() async {
     if (_token != null &&
         (_tokenExpiresAt == null ||
             _tokenExpiresAt!.isAfter(DateTime.now().add(const Duration(minutes: 5))))) {
       return true;
+    }
+    if (!_registryBearerTried) {
+      _registryBearerTried = true;
+      final b = PrroConfig.registryBearer;
+      if (b != null) {
+        final exp = _jwtExpiry(b);
+        if (exp != null &&
+            exp.isAfter(DateTime.now().add(const Duration(minutes: 5)))) {
+          _token = b;
+          _tokenExpiresAt = exp;
+          debugPrint('PRRO: bearer з реєстру, діє до $exp');
+          return true;
+        }
+        debugPrint('PRRO: bearer з реєстру прострочений/битий (exp=$exp) — '
+            'authenticate');
+      }
     }
     return await authenticate();
   }
@@ -564,7 +653,7 @@ class PrroService {
           'localNumber=$localNumber');
 
       final response = await _client.post(
-        Uri.parse('${PrroConfig.environment.baseUrl}/check/sale'),
+        Uri.parse('${PrroConfig.baseUrl}/check/sale'),
         headers: _headers,
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 30));
@@ -666,7 +755,7 @@ class PrroService {
       };
 
       final response = await _client.post(
-        Uri.parse('${PrroConfig.environment.baseUrl}/check/sale'),
+        Uri.parse('${PrroConfig.baseUrl}/check/sale'),
         headers: _headers,
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 30));
@@ -714,21 +803,21 @@ class PrroService {
   /// [includeChecks] — включати список чеків зміни.
   static Future<PrroXReport?> xReport({
     bool includeChecks = true,
-    int printWidth = 40,
+    int? printWidth,
   }) async {
     if (!await _ensureAuth()) return null;
 
     try {
       final body = {
         'num_fiscal': activeFiscalNumber.toString(),
-        'print_width': printWidth,
-        'pdf_width': printWidth,
+        'print_width': printWidth ?? PrroConfig.printWidth,
+        'pdf_width': printWidth ?? PrroConfig.pdfWidth,
         'include_checks': includeChecks,
         'developer-id': PrroConfig.developerId,
       };
 
       final response = await _client.post(
-        Uri.parse('${PrroConfig.environment.baseUrl}/shift/xReport'),
+        Uri.parse('${PrroConfig.baseUrl}/shift/xReport'),
         headers: _headers,
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 20));
@@ -770,7 +859,7 @@ class PrroService {
       };
       final response = await _client
           .post(
-            Uri.parse('${PrroConfig.environment.baseUrl}/shift'),
+            Uri.parse('${PrroConfig.baseUrl}/shift'),
             headers: _headers,
             body: jsonEncode(body),
           )
@@ -834,7 +923,7 @@ class PrroService {
       };
       final response = await _client
           .post(
-            Uri.parse('${PrroConfig.environment.baseUrl}/check/service'),
+            Uri.parse('${PrroConfig.baseUrl}/check/service'),
             headers: _headers,
             body: jsonEncode(body),
           )
@@ -876,7 +965,7 @@ class PrroService {
   /// Z-звіт — закрити поточну зміну.
   /// Endpoint `POST /shift` з `action_type: Z_REPORT` (док. CashDesk).
   /// УВАГА: `/shift/xReport` — це X-звіт (НЕ закриває зміну), не плутати.
-  static Future<PrroResult> zReport({int printWidth = 40}) async {
+  static Future<PrroResult> zReport({int? printWidth}) async {
     if (!await _ensureAuth()) {
       return const PrroResult.failure(
         error: 'Помилка авторизації ПРРО',
@@ -888,12 +977,12 @@ class PrroService {
       final body = {
         'action_type': 'Z_REPORT',
         'num_fiscal': activeFiscalNumber,
-        'print_width': printWidth,
-        'pdf_width': printWidth,
+        'print_width': printWidth ?? PrroConfig.printWidth,
+        'pdf_width': printWidth ?? PrroConfig.pdfWidth,
       };
 
       final response = await _client.post(
-        Uri.parse('${PrroConfig.environment.baseUrl}/shift'),
+        Uri.parse('${PrroConfig.baseUrl}/shift'),
         headers: _headers,
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 30));
@@ -942,7 +1031,7 @@ class PrroService {
   /// Отримати текстове представлення чеку.
   static Future<String?> getReceiptText(String checkId) async {
     try {
-      final url = '${PrroConfig.environment.baseUrl}'
+      final url = '${PrroConfig.baseUrl}'
           '/checks/$checkId/text?print_width=48';
       final response = await _client.get(
         Uri.parse(url),
@@ -961,7 +1050,7 @@ class PrroService {
   /// Отримати QR-код чеку як URL.
   static Future<String?> getReceiptQr(String checkId) async {
     try {
-      final url = '${PrroConfig.environment.baseUrl}'
+      final url = '${PrroConfig.baseUrl}'
           '/checks/$checkId/qr?ascii=1';
       final response = await _client.get(
         Uri.parse(url),

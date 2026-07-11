@@ -118,7 +118,12 @@ class DrugSearchItem {
       expiryDate: _nonEmpty(json['expiryDate']),
       comingPrice: _nonEmpty(json['comingPrice']),
       comingCode: _nonEmpty(json['comingCode']),
-      bonus: int.tryParse(json['bonus']?.toString() ?? ''),
+      // SearchByNameSKU віддає бонус фармацевту під ключем `pharmacistBonus`
+      // (як GetSKUdetail); лишаємо і старий `bonus` як fallback. Без цього
+      // бонус був null на всіх рядках, крім першого (він єдиний ліниво тягнув
+      // SKUdetail як авто-вибраний) — бейджі «спалахували» лише після кліку.
+      bonus: int.tryParse(
+          (json['pharmacistBonus'] ?? json['bonus'])?.toString() ?? ''),
       isOwnBrand: json['isOwnBrand']?.toString() == '1',
       category: _nonEmpty(json['category']),
       dosageForm: _nonEmpty(json['dosageForm']),

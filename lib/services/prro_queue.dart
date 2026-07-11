@@ -15,6 +15,7 @@ class PrroQueuedReceipt {
   final List<Map<String, dynamic>> products;
   final List<Map<String, dynamic>> payments;
   final double totalSum;
+  final double roundSum;
   final int? localNumber;
   final DateTime createdAt;
   int attempts;
@@ -27,6 +28,7 @@ class PrroQueuedReceipt {
     required this.payments,
     required this.totalSum,
     required this.createdAt,
+    this.roundSum = 0,
     this.localNumber,
     this.attempts = 0,
     this.lastError,
@@ -38,6 +40,7 @@ class PrroQueuedReceipt {
         'products': products,
         'payments': payments,
         'total_sum': totalSum,
+        'round_sum': roundSum,
         'local_number': localNumber,
         'created_at': createdAt.toIso8601String(),
         'attempts': attempts,
@@ -58,6 +61,7 @@ class PrroQueuedReceipt {
             .whereType<Map<String, dynamic>>()
             .toList(),
         totalSum: (json['total_sum'] as num?)?.toDouble() ?? 0,
+        roundSum: (json['round_sum'] as num?)?.toDouble() ?? 0,
         localNumber: (json['local_number'] as num?)?.toInt(),
         createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ??
             DateTime.now(),
@@ -115,6 +119,7 @@ class PrroQueue {
     required List<PrroProduct> products,
     required List<PrroPayment> payments,
     required double totalSum,
+    double roundSum = 0,
     int? localNumber,
     String? error,
   }) async {
@@ -125,6 +130,7 @@ class PrroQueue {
       products: products.map((p) => p.toJson()).toList(),
       payments: payments.map((p) => p.toJson()).toList(),
       totalSum: totalSum,
+      roundSum: roundSum,
       localNumber: localNumber,
       createdAt: DateTime.now(),
       lastError: error,
@@ -160,6 +166,7 @@ class PrroQueue {
                 products: products,
                 payments: payments,
                 totalSum: item.totalSum,
+                roundSum: item.roundSum,
                 localNumber: item.localNumber,
               )
             : await PrroService.createReturnReceipt(
@@ -238,7 +245,7 @@ class PrroQueue {
         code: j['code']?.toString(),
         barcode: j['bar_code']?.toString(),
         letters: j['letters']?.toString(),
-        taxPrc: (j['tax_prc'] as num?)?.toDouble() ?? 7,
+        taxPrc: (j['tax_prc'] as num?)?.toDouble(),
         unitName: j['unit_name']?.toString() ?? 'штука',
         unitCode: j['unit_code']?.toString(),
         discount: (j['sum_discount'] as num?)?.toDouble(),

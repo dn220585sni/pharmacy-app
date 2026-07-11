@@ -14,6 +14,7 @@ import '../models/social_project.dart';
 import '../models/stop_price_action.dart';
 import '../services/api_config.dart';
 import '../services/cart_price_service.dart';
+import '../services/fiscal_log.dart';
 import '../services/terminal_service.dart';
 import '../services/prro_queue.dart';
 import '../services/prro_service.dart';
@@ -128,8 +129,14 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   double get finalTotal {
     // Якщо є відповідь з сервера — пріоритет. Cash withdrawal накладаємо
     // зверху бо це окрема операція (видача готівки), не частина чеку.
-    final base = widget.serverPricing?.total ??
-        (baseTotal - discountAmount - effectiveBonusAmount);
+    // Знижка округлення (skidka_sumcheck) діє ЛИШЕ на готівку: карткою
+    // клієнт платить неокруглену суму (SumCheck + повернута знижка).
+    final sp = widget.serverPricing;
+    final base = sp != null
+        ? (paymentMethod == PaymentMethod.card
+            ? sp.total + sp.roundingDiscount
+            : sp.total)
+        : (baseTotal - discountAmount - effectiveBonusAmount);
     final raw = base + _cashWithdrawalAmount;
     return raw < 0 ? 0 : raw;
   }
@@ -551,19 +558,59 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   /// - connection error → поклав у чергу, продовжуємо
   /// - логічна помилка ПРРО → блок (`false`)
   Future<bool> _sendFiscalReceipt() async {
-    final products = _buildPrroProducts();
+    var products = _buildPrroProducts();
+    final isCard = paymentMethod == PaymentMethod.card;
     // Сума рядків у копійках (без float-дрейфу), потім назад у грн.
-    final saleTotal = products
-        .fold(Money.zero, (Money s, p) => s + Money.fromHryvnia(p.cost))
-        .toHryvnia();
-    // Payments вирівнюються з sum(products.cost) — інакше ПРРО відхилить
-    // ("payments not equal products sum"). Округлення на чек (skidka_sumcheck)
-    // і cash_withdrawal — поки не передаємо у ПРРО.
+    var productsSum = products
+        .fold(Money.zero, (Money s, p) => s + Money.fromHryvnia(p.cost));
+
+    // Чекова знижка GetSumSkid (округлення «До сплати» вниз кроком 50 коп,
+    // skidka_sumcheck): SmartConnect НЕ приймає її ні через round_sum
+    // (±5/±25 коп), ні через sum_discount (ДОДАЄТЬСЯ до суми) — єдиний
+    // канал це ЦІНИ позицій (як cash_uft.dll із chkSkidkaSumma=1).
+    // Вшиваємо різницю в ціни, щоб чек == «До сплати» на екрані.
+    // Знижка округлення діє ЛИШЕ на готівку: для картки ціль — неокруглена
+    // сума (SumCheck + skidka_sumcheck), як показує finalTotal.
+    final sp = widget.serverPricing;
+    if (sp != null && sp.fromServer) {
+      final target = Money.fromHryvnia(sp.total) +
+          (isCard ? Money.fromHryvnia(sp.roundingDiscount) : Money.zero);
+      final delta = productsSum - target;
+      if (delta.kopiykas > 0 && delta.kopiykas <= 50) {
+        final adjusted = _embedCheckDiscount(products, delta);
+        if (adjusted != null) {
+          products = adjusted;
+          productsSum = target;
+          FiscalLog.log('знижка ${delta.format()} вшита в ціни позицій '
+              '(чек = ${target.format()}, ${isCard ? "картка без округлення" : "готівка"})');
+        } else {
+          FiscalLog.log('РОЗСИНХРОН: знижку ${delta.format()} не вдалося '
+              'вшити в ціни (позиції qty>1?) — чек за сумою позицій');
+        }
+      } else if (delta.kopiykas != 0) {
+        // Сервер дорожчий за позиції або різниця > 50 коп (бонуси/чекові
+        // знижки, яких чек ще не вміє) — чек за позиціями, у лог для розбору.
+        FiscalLog.log('РОЗСИНХРОН: ціль=${target.format()} '
+            '(SumCheck=${sp.total}+rd=${sp.roundingDiscount}) позиції='
+            '${productsSum.toHryvnia()} (Δ=${delta.format()}) — чек за '
+            'сумою позицій');
+      }
+    }
+
+    // Готівка має бути кратною 10 коп (НБУ, SmartConnect вимагає):
+    // після вшивання знижки сума вже кратна (крок 50 коп), інакше — докат
+    // round_sum. Безготівка не округлюється. cash_withdrawal — не в чеку.
+    double saleTotal = productsSum.toHryvnia();
+    double roundSum = 0;
+    if (!isCard) {
+      final rounded = _round10(productsSum);
+      roundSum = (rounded - productsSum).kopiykas / 100;
+      saleTotal = rounded.toHryvnia();
+    }
     final payments = _buildPrroPayments(saleTotal);
 
     // Накладна перед фіскалізацією: SaveSgVNakl → NumNakl (→ local_number ПРРО).
     // KodKli: готівка=код каси, картка=код банку (kodterm). TypeNakl: 2/5.
-    final isCard = paymentMethod == PaymentMethod.card;
     final numNakl = await SessionService.saveNakladna(
       kodKli: isCard ? (_selectedTerminal?.kodterm ?? '') : ApiConfig.ekkKodKli,
       typeNakl: isCard ? '5' : '2',
@@ -573,14 +620,23 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     final localNumber = int.tryParse(numNakl ?? '') ??
         DateTime.now().millisecondsSinceEpoch % 10000000000;
 
+    FiscalLog.log('SALE: total=$saleTotal round=$roundSum '
+        'sumCheck=${sp?.total} nakl=$localNumber ${isCard ? "картка" : "готівка"} '
+        'позиції: ${products.map((p) => '${p.code ?? "?"}=${p.price}x'
+            '${p.amount}=${p.cost}').join('; ')}');
+
     final result = await PrroService.createSaleReceipt(
       products: products,
       payments: payments,
       totalSum: saleTotal,
+      roundSum: roundSum,
       localNumber: localNumber,
     );
 
     if (!mounted) return false;
+    FiscalLog.log(result.success
+        ? 'SALE OK: №${result.orderNum} (nakl=$localNumber)'
+        : 'SALE FAIL: ${result.error} (nakl=$localNumber)');
 
     if (result.success) {
       await PrroReceiptDialog.show(context, result);
@@ -594,6 +650,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         products: products,
         payments: payments,
         totalSum: saleTotal,
+        roundSum: roundSum,
         localNumber: localNumber,
         error: result.error,
       );
@@ -628,43 +685,123 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   /// Сформувати список товарів для фіскального чеку.
   ///
-  /// Payload товарів дзеркалить кошик (ті самі `item.*`, що показані клієнту),
-  /// щоб сума чека ПРРО точно дорівнювала кошику. Серверне per-item ціноутворення
-  /// тут НЕ використовуємо: його `itemAt` може бути зміщене відносно порядку
-  /// кошика, що давало чужу ціну в чеку.
+  /// Джерело цін — GetSumSkid (`serverPricing.itemAt(i)`, матчинг за s-кодом):
+  /// ті самі серверні ціни з усіма знижками, що бачить клієнт у кошику, —
+  /// тож чек ПРРО збігається з «До сплати» (audit A2). Фолбек на локальні
+  /// `item.*` — для незматчених позицій (u-код/ЄДК; дисплей для них теж
+  /// показує item.total), дробових (блістерна модель ПРРО) і коли серверна
+  /// ціна не б'ється в копійки (ПРРО вимагає cost == price × amount точно).
   List<PrroProduct> _buildPrroProducts() {
     final items = widget.cart;
     if (items.isEmpty) return const [];
+    final sp = widget.serverPricing;
 
     return List.generate(items.length, (i) {
       final item = items[i];
       final isFractional = item.isFractional;
+      final srv = (!isFractional && sp != null && sp.fromServer)
+          ? sp.itemAt(i)
+          : null;
 
-      // ПРРО вимагає cost == price * amount. Щоб рівність трималась точно,
-      // одиниця продажу має бути цілою: для блістерів — це БЛІСТЕР (price за
-      // блістер у копійках, amount = ціле число блістерів), а не дробова
-      // частка паковки (де price*amount = нескінченний дріб і ПРРО відхиляє).
-      final Money unitMoney =
-          isFractional ? item.blisterPriceMoney : Money.fromHryvnia(item.effectivePrice);
-      final double amount =
-          isFractional ? item.fractionalQty!.toDouble() : item.quantity.toDouble();
-
-      // price і cost — чисті 2 знаки (через Money). cost == item.totalMoney,
-      // тож чек збігається з кошиком до копійки.
-      final price = unitMoney.toHryvnia();
-      final cost = item.totalMoney.toHryvnia();
+      Money unitMoney;
+      double amount;
+      Money costMoney;
+      if (srv != null &&
+          srv.quantity == srv.quantity.roundToDouble() &&
+          Money.fromHryvnia(srv.unitPrice) * srv.quantity.round() ==
+              Money.fromHryvnia(srv.cost)) {
+        unitMoney = Money.fromHryvnia(srv.unitPrice);
+        amount = srv.quantity;
+        costMoney = Money.fromHryvnia(srv.cost);
+      } else {
+        if (!isFractional && sp != null && sp.fromServer) {
+          // Позиція піде за ЛОКАЛЬНОЮ ціною — джерело розсинхронів чека
+          // з «До сплати»; фіксуємо в лог, який саме id не зматчився.
+          FiscalLog.log('позиція без серверної ціни: id=${item.drug.id} '
+              'skuCode=${item.drug.skuCode} srv=${srv == null ? "не зматчено"
+                  : "ціна не б'ється (${srv.unitPrice}x${srv.quantity}"
+                      "!=${srv.cost})"}');
+        }
+        // ПРРО вимагає cost == price * amount. Щоб рівність трималась точно,
+        // одиниця продажу має бути цілою: для блістерів — це БЛІСТЕР (price за
+        // блістер у копійках, amount = ціле число блістерів), а не дробова
+        // частка паковки (де price*amount = нескінченний дріб і ПРРО відхиляє).
+        unitMoney = isFractional
+            ? item.blisterPriceMoney
+            : Money.fromHryvnia(item.effectivePrice);
+        amount = isFractional
+            ? item.fractionalQty!.toDouble()
+            : item.quantity.toDouble();
+        costMoney = item.totalMoney;
+      }
 
       return PrroProduct.classified(
         name: item.drug.displayName,
         amount: amount,
-        price: price,
-        cost: cost,
+        price: unitMoney.toHryvnia(),
+        cost: costMoney.toHryvnia(),
         isMedicine: item.drug.isMedicine,
         code: item.drug.skuCode,
         barcode: item.drug.barcode,
         unitName: isFractional ? 'блістер' : 'штука',
       );
     }, growable: false);
+  }
+
+  /// Округлення готівки за НБУ до 10 коп (1–4 вниз, 5–9 вгору) —
+  /// SmartConnect вимагає кратний 10 коп total_sum для готівкових чеків.
+  static Money _round10(Money m) =>
+      Money.fromKopiykas(((m.kopiykas / 10).round()) * 10);
+
+  /// Вшити чекову знижку [delta] (копійки, > 0) у ціни позицій, щоб
+  /// Σcost == SumCheck. ПРРО вимагає cost == price × amount точно, тому:
+  /// позиції з amount == 1 приймають довільну частку, з amount > 1 — лише
+  /// кратну amount. Жадібно, з найдорожчих. null — розкидати не вдалося
+  /// (залишок нікуди подіти); ціни не опускаємо нижче 1 коп.
+  static List<PrroProduct>? _embedCheckDiscount(
+      List<PrroProduct> products, Money delta) {
+    var remaining = delta.kopiykas;
+    final price = [
+      for (final p in products) Money.fromHryvnia(p.price).kopiykas
+    ];
+    final cost = [for (final p in products) Money.fromHryvnia(p.cost).kopiykas];
+    final order = List.generate(products.length, (i) => i)
+      ..sort((a, b) => cost[b].compareTo(cost[a]));
+
+    for (final singlesFirst in [true, false]) {
+      for (final i in order) {
+        if (remaining <= 0) break;
+        final amt = products[i].amount;
+        if (amt != amt.roundToDouble()) continue; // дробові (блістер) не чіпаємо
+        final q = amt.round();
+        if (q <= 0 || (singlesFirst ? q != 1 : q == 1)) continue;
+        // Скільки можна зняти: кратно q, ціна лишається ≥ 1 коп.
+        var off = remaining < (price[i] - 1) * q ? remaining : (price[i] - 1) * q;
+        off -= off % q;
+        if (off <= 0) continue;
+        price[i] -= off ~/ q;
+        cost[i] -= off;
+        remaining -= off;
+      }
+    }
+    if (remaining > 0) return null;
+
+    return [
+      for (var i = 0; i < products.length; i++)
+        PrroProduct(
+          name: products[i].name,
+          amount: products[i].amount,
+          price: Money.fromKopiykas(price[i]).toHryvnia(),
+          cost: Money.fromKopiykas(cost[i]).toHryvnia(),
+          code: products[i].code,
+          barcode: products[i].barcode,
+          letters: products[i].letters,
+          taxPrc: products[i].taxPrc,
+          unitName: products[i].unitName,
+          unitCode: products[i].unitCode,
+          discount: products[i].discount,
+        ),
+    ];
   }
 
   /// Інструкція оплати для Пакунка Малюка — лише контактна оплата

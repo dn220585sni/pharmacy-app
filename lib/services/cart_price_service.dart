@@ -43,6 +43,10 @@ class CartPricing {
   /// Підсумок до оплати (без cash withdrawal).
   final double total;
 
+  /// Знижка від округлення готівки (`skidka_sumcheck`) — копійки, вже
+  /// враховані в [total]. Для ПРРО-чека йде окремим полем `round_sum`.
+  final double roundingDiscount;
+
   /// Чи це відповідь сервера (`true`) чи локальна калькуляція-фолбек (`false`).
   final bool fromServer;
 
@@ -55,6 +59,7 @@ class CartPricing {
     required this.discount,
     required this.total,
     required this.fromServer,
+    this.roundingDiscount = 0,
     DateTime? computedAt,
   }) : computedAt = computedAt ?? DateTime.now();
 
@@ -370,6 +375,7 @@ class CartPriceService {
       subtotal: subtotal,
       discount: discount,
       total: total,
+      roundingDiscount: _round2(response.roundingDiscount),
       fromServer: true,
     );
   }

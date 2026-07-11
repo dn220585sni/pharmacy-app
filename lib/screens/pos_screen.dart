@@ -1927,8 +1927,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           ));
         }
 
+        // id — з s-коду партії (НЕ зі штрихкоду): на s-код зав'язані
+        // резервування (sgVRoznSetLock) і матчинг серверних цін GetSumSkid
+        // у чек ПРРО. З id='srv_<штрихкод>' позиція не матчилась → у чек
+        // ішла локальна ціна і сума розходилась із «До сплати».
+        final skod = result.batches.isNotEmpty
+            ? result.batches.first.skod
+            : '';
         final drug = Drug(
-          id: 'srv_$barcode',
+          id: 'srv_${skod.isNotEmpty ? skod : barcode}',
           name: result.nameUkr ?? result.name ?? 'Невідомо',
           nameUkr: result.nameUkr,
           manufacturer: result.manufacturer ?? '',
@@ -1937,6 +1944,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           stock: result.totalStock,
           unit: 'шт',
           barcode: barcode,
+          skuCode: skod.isNotEmpty ? skod : null,
           locationCode: result.stelazh,
           storageLocations: locations.isNotEmpty ? locations : null,
         );
@@ -2075,7 +2083,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _showScanMessage('Товар не знайдено (${res.readBC})');
       return;
     }
-    final skod = res.skod.isNotEmpty ? res.skod : barcode;
+    // s-код: з AnalizBarCode → з партії GetSKUprice → (крайнє) штрихкод.
+    // На s-код зав'язані резервування і матчинг цін GetSumSkid у чек ПРРО.
+    final batchSkod = r.batches.isNotEmpty ? r.batches.first.skod : '';
+    final skod = res.skod.isNotEmpty
+        ? res.skod
+        : (batchSkod.isNotEmpty ? batchSkod : barcode);
     final drug = Drug(
       id: 'srv_$skod',
       name: r.nameUkr ?? r.name ?? 'Невідомо',

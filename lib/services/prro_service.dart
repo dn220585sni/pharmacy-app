@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'fiscal_log.dart';
 
 /// Середовище ПРРО.
 ///
@@ -94,6 +95,14 @@ class PrroConfig {
   static String chkSkidkaSumma = '1';
   static String cbChKredit = '1';
 
+  /// Ставки ПДВ для чеків (ліки / решта). null → `tax_prc` не шлеться =
+  /// «Без ПДВ». НЕ хардкодимо 7/20: податкові групи — властивість реєстрації
+  /// РРО в ДПС (тестовий 4000952779/АВІС-ФАРМА має лише «БЕЗ ПДВ», SmartConnect
+  /// відхиляв 7% — «Податок "БЕЗ ПДВ" має бути 0%»). [БЕКЕНД]: уточнити в
+  /// Попова, звідки cash_uft.dll бере групу/ставку товару для бойових РРО.
+  static double? medicineTaxPrc;
+  static double? generalTaxPrc;
+
   /// Хост хмарного кабінету (для read-only перегляду каси).
   static const cabinetHost = 'https://test.cashdesk.com.ua';
 
@@ -182,7 +191,13 @@ class PrroProduct {
   /// відхиляє літери 'А'/'В'/'Б'/'B'/'A' з помилкою "invalid". Поки
   /// безпечніше залишати null.
   final String? letters;
-  final double taxPrc;        // ставка податку
+
+  /// Ставка податку. null → поле `tax_prc` НЕ шлеться = «Без ПДВ».
+  /// Податкові групи — властивість реєстрації конкретного РРО в ДПС:
+  /// тестовий 4000952779 (АВІС-ФАРМА) має ЛИШЕ «БЕЗ ПДВ», SmartConnect
+  /// відхиляв хардкод 7% («Податок "БЕЗ ПДВ" має бути 0%»). Ставки для
+  /// бойових РРО — з [PrroConfig.medicineTaxPrc]/[PrroConfig.generalTaxPrc].
+  final double? taxPrc;
   final String unitName;      // одиниця виміру
   final String? unitCode;     // код одиниці виміру (КСПОВО)
   final double? discount;     // сума знижки
@@ -195,7 +210,7 @@ class PrroProduct {
     this.code,
     this.barcode,
     this.letters,
-    this.taxPrc = 7,          // ліки — ПДВ 7% (дефолт)
+    this.taxPrc,
     this.unitName = 'штука',
     this.unitCode = '2009',
     this.discount,
@@ -221,7 +236,9 @@ class PrroProduct {
       cost: cost,
       code: code,
       barcode: barcode,
-      taxPrc: isMedicine ? 7 : 20,
+      taxPrc: isMedicine
+          ? PrroConfig.medicineTaxPrc
+          : PrroConfig.generalTaxPrc,
       unitName: unitName,
       unitCode: unitCode,
       discount: discount,
@@ -236,7 +253,7 @@ class PrroProduct {
     if (code != null) 'code': code,
     if (barcode != null) 'bar_code': barcode,
     if (letters != null) 'letters': letters,
-    'tax_prc': taxPrc,
+    if (taxPrc != null) 'tax_prc': taxPrc,
     'unit_name': unitName,
     if (unitCode != null) 'unit_code': unitCode,
     if (discount != null && discount! > 0) 'sum_discount': discount,
@@ -417,12 +434,12 @@ class PrroService {
   static final _client = http.Client();
   static String? _token;
   static DateTime? _tokenExpiresAt;
-  static int? _activeFiscalNumber;
-
-  /// Активний фіскальний номер. Береться з `opened_shift` після авторизації;
-  /// fallback — `PrroConfig.numFiscal`.
-  static int get activeFiscalNumber =>
-      _activeFiscalNumber ?? PrroConfig.numFiscal;
+  /// Активний фіскальний номер — ЗАВЖДИ з конфігу (реєстр `ekkPort` / дефолт).
+  /// НЕ брати з `opened_shift` відповіді authenticate: обліковка бачить кілька
+  /// РРО, і там приходить ФН каси з відкритою зміною БУДЬ-ЯКОЇ з них (на
+  /// SmartConnect прилетів чужий 4000952775 → OPEN_SHIFT падав). На cloud test
+  /// збігалось випадково, тому баг був невидимий.
+  static int get activeFiscalNumber => PrroConfig.numFiscal;
 
   static Map<String, String> get _headers => {
         'Accept': 'application/json',
@@ -455,7 +472,7 @@ class PrroService {
       await file.writeAsString(jsonEncode({
         'token': _token,
         'expires_at': _tokenExpiresAt?.toIso8601String(),
-        'fiscal': _activeFiscalNumber,
+        'fiscal': PrroConfig.numFiscal,
         'base_url': PrroConfig.baseUrl,
       }));
     } catch (e) {
@@ -486,7 +503,6 @@ class PrroService {
       if (expires != null && expires.isBefore(DateTime.now())) return;
       _token = json['token']?.toString();
       _tokenExpiresAt = expires;
-      _activeFiscalNumber = cachedFiscal;
       debugPrint('PRRO token cache HIT: fiscal=$cachedFiscal expires=$expires');
     } catch (e) {
       debugPrint('PRRO token cache FAIL: $e');
@@ -526,11 +542,11 @@ class PrroService {
       final json = jsonDecode(utf8.decode(response.bodyBytes))
           as Map<String, dynamic>;
       _token = json['token']?.toString();
-      _activeFiscalNumber =
-          int.tryParse(json['opened_shift']?.toString() ?? '');
       _tokenExpiresAt = _parseExpiresAt(json['token_expires_at']?.toString());
-      debugPrint('PRRO auth OK: shift=$_activeFiscalNumber '
-          'expires=$_tokenExpiresAt');
+      // `opened_shift` НЕ використовуємо як активний ФН (чужий РРО тієї ж
+      // обліковки; див. activeFiscalNumber) — лише в лог для діагностики.
+      debugPrint('PRRO auth OK: opened_shift=${json['opened_shift']} '
+          '(активний ФН=${PrroConfig.numFiscal}) expires=$_tokenExpiresAt');
       if (_token != null) {
         await _persistToken();
         // Оновлений токен — назад у реєстр (`bearer`), як робить cash_uft.dll:
@@ -603,7 +619,9 @@ class PrroService {
             'authenticate');
       }
     }
-    return await authenticate();
+    final ok = await authenticate();
+    if (!ok) FiscalLog.log('ПРРО: authenticate НЕ вдалась');
+    return ok;
   }
 
   // ---------------------------------------------------------------------------
@@ -622,6 +640,7 @@ class PrroService {
     required List<PrroProduct> products,
     required List<PrroPayment> payments,
     required double totalSum,
+    double roundSum = 0,
     int? localNumber,
   }) async {
     if (PrroConfig.useMockSuccess) {
@@ -644,7 +663,12 @@ class PrroService {
       final body = <String, dynamic>{
         'num_fiscal': activeFiscalNumber,
         'action_type': 'Z_SALE',
+        // Готівка округлюється до 10 коп (НБУ): total_sum = ОКРУГЛЕНА сума,
+        // round_sum = різниця з сумою позицій. SmartConnect звіряє сам і
+        // відхиляє чек, якщо total_sum не збігається з очікуваним округленням.
         'total_sum': totalSum,
+        'round_rule': 10,
+        'round_sum': roundSum,
         'products': products.map((p) => p.toJson()).toList(),
         'payments': payments.map((p) => p.toJson()).toList(),
         'no_pdf': true,
@@ -813,12 +837,15 @@ class PrroService {
     if (!await _ensureAuth()) return null;
 
     try {
+      // developer-id — ЛИШЕ в заголовках (_headers). Дублювання його ще й у
+      // тілі → SmartConnect відхиляє з HTTP 400 «Присутній дублікат поля
+      // developer-id» (через це xReport завжди падав: готівка в касі = 0,
+      // Z-діалог при виході не показувався, стан зміни не відновлювався).
       final body = {
         'num_fiscal': activeFiscalNumber.toString(),
         'print_width': printWidth ?? PrroConfig.printWidth,
         'pdf_width': printWidth ?? PrroConfig.pdfWidth,
         'include_checks': includeChecks,
-        'developer-id': PrroConfig.developerId,
       };
 
       // 30 с як у cash_uft.dll: реєстрація в податковій з АЦСК займає до 27 с,
@@ -830,7 +857,9 @@ class PrroService {
       ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode != 200 && response.statusCode != 201) {
-        debugPrint('PRRO xReport FAIL: HTTP ${response.statusCode}');
+        FiscalLog.log('xReport FAIL: HTTP ${response.statusCode} '
+            '${utf8.decode(response.bodyBytes).substring(0,
+                utf8.decode(response.bodyBytes).length.clamp(0, 120))}');
         return null;
       }
 
@@ -842,7 +871,7 @@ class PrroService {
           'serviceInput=${report.serviceInput} openedAt=${report.openedAt}');
       return report;
     } catch (e) {
-      debugPrint('PRRO xReport ERROR: $e');
+      FiscalLog.log('xReport ERROR: $e');
       return null;
     }
   }

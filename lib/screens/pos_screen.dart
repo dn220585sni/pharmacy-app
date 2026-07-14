@@ -951,8 +951,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   @override
   void dispose() {
     _pricingDebounce?.cancel();
-    // Зняти резервування всіх товарів у кошику при закритті
-    _unlockAllCart();
+    // Скинути серверний сеанс (кошик + резерви) одним NewClient при закритті.
+    if (_cart.isNotEmpty) unawaited(SessionService.newClient());
     // LogoutRlz — fire-and-forget при закритті додатка
     _logoutPharmacist();
     _ctrlQtyResetTimer?.cancel();
@@ -2286,13 +2286,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
   }
 
-  /// Зняти резервування для всіх товарів в кошику.
-  void _unlockAllCart() {
-    for (final item in _cart) {
-      _lockStock(item.drug, 0.0);
-    }
-  }
-
   void _setQuantity(Drug drug, int qty) async {
     _suppressHelpingHand();
     // Дані упаковки (barcode для ПРРО, intakeWarning, дільник) тягнемо ліниво —
@@ -2921,9 +2914,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }
 
   void _clearCart() {
-    // Зняти блокування для всіх товарів перед очищенням
-    _unlockAllCart();
-    // NewClient — серверний reset сеансу (відмова / очищення кошика).
+    // NewClient — серверний reset сеансу: одним запитом скидає весь кошик
+    // і резерви залишків (Катя). Раніше тут ще був _unlockAllCart — N окремих
+    // sgVRoznSetLock(qty=0) на кожну позицію, що дублювало роботу NewClient.
     unawaited(SessionService.newClient());
 
     // Reset search without triggering _filterDrugs (which would auto-select)
@@ -3265,11 +3258,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _registerLoyaltySale(paidByPoints: paidByPoints);
     }
 
-    // Очистити server-side cart (sgVRoznSetLock з qty=0 для кожної позиції) —
-    // інакше товари залишаться в server-side кошику і GetSumSkid буде
-    // повертати їх у наступних викликах разом з новими.
-    _unlockAllCart();
-    // NewClient — серверний reset сеансу для наступного клієнта (після продажу).
+    // NewClient — серверний reset сеансу для наступного клієнта: одним запитом
+    // очищає server-side кошик і резерви (інакше GetSumSkid тягнув би старі
+    // товари в наступні виклики). Замінює поштучний _unlockAllCart.
     unawaited(SessionService.newClient());
 
     // Bypass the listener so _filterDrugs doesn't auto-select a drug,
@@ -3340,8 +3331,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _searchController.clear();
     _searchController.addListener(_filterDrugs);
     _helpingHandTimer?.cancel();
-    // Очистити server-side cart перед локальним.
-    _unlockAllCart();
+    // NewClient — скидає server-side кошик і резерви одним запитом.
+    unawaited(SessionService.newClient());
     setState(() {
       _totalEarned += amount;
       _ordersOpen = false;

@@ -122,8 +122,13 @@ class DrugSearchItem {
       // (як GetSKUdetail); лишаємо і старий `bonus` як fallback. Без цього
       // бонус був null на всіх рядках, крім першого (він єдиний ліниво тягнув
       // SKUdetail як авто-вибраний) — бейджі «спалахували» лише після кліку.
-      bonus: int.tryParse(
-          (json['pharmacistBonus'] ?? json['bonus'])?.toString() ?? ''),
+      // 0 → null (як у SKUDetailResult): інакше бейдж показує «0» на кожному
+      // рядку без бонусу й перекриває мітку «ВТМ» у СТМ-товарів.
+      bonus: () {
+        final b = int.tryParse(
+            (json['pharmacistBonus'] ?? json['bonus'])?.toString() ?? '');
+        return (b != null && b > 0) ? b : null;
+      }(),
       isOwnBrand: json['isOwnBrand']?.toString() == '1',
       category: _nonEmpty(json['category']),
       dosageForm: _nonEmpty(json['dosageForm']),

@@ -217,6 +217,12 @@ class CacheApiClient {
         fixedBody = fixedBody.replaceAllMapped(
             RegExp(r'([,{])"(\w+):"'), (m) => '${m[1]}"${m[2]}":"');
 
+        // Fix Caché JSON: GetDataRRO — порожній bar_code йде як "bar_code":,
+        // (після двокрапки одразу , або }) — невалідно. → "bar_code":"".
+        // Заповнений bar_code — число без лапок (валідно, не чіпаємо).
+        fixedBody = fixedBody.replaceAllMapped(
+            RegExp(r'"bar_code":\s*(?=[,}])'), (m) => '"bar_code":""');
+
         // Fix Caché JSON: відсутній ]} в кінці (масив + об'єкт не закриті)
         final trimmed = fixedBody.trimRight();
         if (trimmed.isNotEmpty && !trimmed.endsWith(']}') && !trimmed.endsWith('}}')) {

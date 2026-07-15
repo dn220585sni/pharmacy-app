@@ -2,6 +2,15 @@ import 'package:flutter/foundation.dart';
 import 'api_config.dart';
 import 'cache_api_client.dart';
 
+/// Готові дані для фіскального чека з `GetDataRRO` — сирий проброс у
+/// CashDesk `/check/sale` без парсингу в типізовані моделі (нечутливо до
+/// `pay_terminal`/`uktzed`/нових полів).
+class RroData {
+  final List<Map<String, dynamic>> products;
+  final List<Map<String, dynamic>> payments;
+  const RroData({required this.products, required this.payments});
+}
+
 /// Сервіси серверного сеансу обслуговування (накладна).
 ///   NewClient — повний reset сеансу/кошика (після продажу / при відмові);
 ///   IdentSPL  — зберегти клієнта ЛАЙК у сеансі (для накладної).
@@ -50,6 +59,37 @@ class SessionService {
     }
     return null;
   }
+
+  /// Отримати готові products/payments для ПРРО-чека за номером накладної
+  /// (`GetDataRRO`, Задача 30). Caché проставляє tax_prc/letters/cost/sum_discount
+  /// і вже округлену payments.sum. Повертає `null` при помилці/порожньому —
+  /// викликач падає на клієнтську збірку (fallback).
+  static Future<RroData?> getDataRRO(String numNakl) async {
+    if (ApiConfig.useMock || numNakl.isEmpty) return null;
+    try {
+      final r = await CacheApiClient().call('GetDataRRO', params: {
+        'NumNakl': numNakl,
+      });
+      if (!r.isOk) {
+        debugPrint('SessionService GetDataRRO FAIL: ${r.result}');
+        return null;
+      }
+      final products = _mapList(r.data['products']);
+      final payments = _mapList(r.data['payments']);
+      if (products.isEmpty || payments.isEmpty) {
+        debugPrint('SessionService GetDataRRO: порожні products/payments');
+        return null;
+      }
+      return RroData(products: products, payments: payments);
+    } catch (e) {
+      debugPrint('SessionService GetDataRRO ERROR: $e');
+      return null;
+    }
+  }
+
+  static List<Map<String, dynamic>> _mapList(dynamic v) => v is List
+      ? v.whereType<Map<String, dynamic>>().toList()
+      : const [];
 
   /// Ідентифікація клієнта ЛАЙК для накладної.
   /// Онлайн: [phone] + [card] зі Sparta. Офлайн (card відсутній): SpartaCard=SpartaPhone.

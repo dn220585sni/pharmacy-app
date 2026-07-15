@@ -16,6 +16,10 @@ class PrroQueuedReceipt {
   final List<Map<String, dynamic>> payments;
   final double totalSum;
   final double roundSum;
+
+  /// `true` — чек із GetDataRRO (готові products/payments) → переграш через
+  /// `createSaleReceiptRaw`. `false` — клієнтська збірка → `createSaleReceipt`.
+  final bool raw;
   final int? localNumber;
   final DateTime createdAt;
   int attempts;
@@ -29,6 +33,7 @@ class PrroQueuedReceipt {
     required this.totalSum,
     required this.createdAt,
     this.roundSum = 0,
+    this.raw = false,
     this.localNumber,
     this.attempts = 0,
     this.lastError,
@@ -41,6 +46,7 @@ class PrroQueuedReceipt {
         'payments': payments,
         'total_sum': totalSum,
         'round_sum': roundSum,
+        'raw': raw,
         'local_number': localNumber,
         'created_at': createdAt.toIso8601String(),
         'attempts': attempts,
@@ -62,6 +68,7 @@ class PrroQueuedReceipt {
             .toList(),
         totalSum: (json['total_sum'] as num?)?.toDouble() ?? 0,
         roundSum: (json['round_sum'] as num?)?.toDouble() ?? 0,
+        raw: json['raw'] == true,
         localNumber: (json['local_number'] as num?)?.toInt(),
         createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ??
             DateTime.now(),
@@ -141,6 +148,33 @@ class PrroQueue {
         '(total=${entry.totalSum}, queue=${_items.length})');
   }
 
+  /// Покласти в чергу чек із ГОТОВИМИ products/payments (GetDataRRO). Переграш —
+  /// через `createSaleReceiptRaw` (прапорець `raw=true`).
+  static Future<void> enqueueSaleRaw({
+    required List<Map<String, dynamic>> products,
+    required List<Map<String, dynamic>> payments,
+    required double totalSum,
+    int? localNumber,
+    String? error,
+  }) async {
+    await load();
+    final entry = PrroQueuedReceipt(
+      id: '${DateTime.now().microsecondsSinceEpoch}',
+      type: PrroQueueType.sale,
+      products: products,
+      payments: payments,
+      totalSum: totalSum,
+      raw: true,
+      localNumber: localNumber,
+      createdAt: DateTime.now(),
+      lastError: error,
+    );
+    _items.add(entry);
+    await _persist();
+    debugPrint('PRRO queue: enqueued ${entry.id} '
+        '(total=${entry.totalSum}, queue=${_items.length})');
+  }
+
   /// Спробувати відправити всі відкладені чеки.
   /// Повертає кількість успішно відправлених.
   static Future<int> flush() async {
@@ -154,27 +188,34 @@ class PrroQueue {
       // Копія, щоб ітерувати і одночасно модифікувати _items.
       final snapshot = List<PrroQueuedReceipt>.from(_items);
       for (final item in snapshot) {
-        final products = item.products
-            .map(_productFromJson)
-            .toList();
-        final payments = item.payments
-            .map(_paymentFromJson)
-            .toList();
-
-        final result = item.type == PrroQueueType.sale
-            ? await PrroService.createSaleReceipt(
-                products: products,
-                payments: payments,
-                totalSum: item.totalSum,
-                roundSum: item.roundSum,
-                localNumber: item.localNumber,
-              )
-            : await PrroService.createReturnReceipt(
-                products: products,
-                payments: payments,
-                totalSum: item.totalSum,
-                localNumber: item.localNumber,
-              );
+        final PrroResult result;
+        if (item.raw) {
+          // Готові products/payments з GetDataRRO — сирий проброс.
+          result = await PrroService.createSaleReceiptRaw(
+            products: item.products,
+            payments: item.payments,
+            totalSum: item.totalSum,
+            localNumber: item.localNumber,
+            isReturn: item.type == PrroQueueType.returnSale,
+          );
+        } else {
+          final products = item.products.map(_productFromJson).toList();
+          final payments = item.payments.map(_paymentFromJson).toList();
+          result = item.type == PrroQueueType.sale
+              ? await PrroService.createSaleReceipt(
+                  products: products,
+                  payments: payments,
+                  totalSum: item.totalSum,
+                  roundSum: item.roundSum,
+                  localNumber: item.localNumber,
+                )
+              : await PrroService.createReturnReceipt(
+                  products: products,
+                  payments: payments,
+                  totalSum: item.totalSum,
+                  localNumber: item.localNumber,
+                );
+        }
 
         if (result.success) {
           _items.removeWhere((e) => e.id == item.id);

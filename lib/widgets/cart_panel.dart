@@ -558,56 +558,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   /// - connection error → поклав у чергу, продовжуємо
   /// - логічна помилка ПРРО → блок (`false`)
   Future<bool> _sendFiscalReceipt() async {
-    var products = _buildPrroProducts();
     final isCard = paymentMethod == PaymentMethod.card;
-    // Сума рядків у копійках (без float-дрейфу), потім назад у грн.
-    var productsSum = products
-        .fold(Money.zero, (Money s, p) => s + Money.fromHryvnia(p.cost));
-
-    // Чекова знижка GetSumSkid (округлення «До сплати» вниз кроком 50 коп,
-    // skidka_sumcheck): SmartConnect НЕ приймає її ні через round_sum
-    // (±5/±25 коп), ні через sum_discount (ДОДАЄТЬСЯ до суми) — єдиний
-    // канал це ЦІНИ позицій (як cash_uft.dll із chkSkidkaSumma=1).
-    // Вшиваємо різницю в ціни, щоб чек == «До сплати» на екрані.
-    // Знижка округлення діє ЛИШЕ на готівку: для картки ціль — неокруглена
-    // сума (SumCheck + skidka_sumcheck), як показує finalTotal.
-    final sp = widget.serverPricing;
-    if (sp != null && sp.fromServer) {
-      final target = Money.fromHryvnia(sp.total) +
-          (isCard ? Money.fromHryvnia(sp.roundingDiscount) : Money.zero);
-      final delta = productsSum - target;
-      if (delta.kopiykas > 0 && delta.kopiykas <= 50) {
-        final adjusted = _embedCheckDiscount(products, delta);
-        if (adjusted != null) {
-          products = adjusted;
-          productsSum = target;
-          FiscalLog.log('знижка ${delta.format()} вшита в ціни позицій '
-              '(чек = ${target.format()}, ${isCard ? "картка без округлення" : "готівка"})');
-        } else {
-          FiscalLog.log('РОЗСИНХРОН: знижку ${delta.format()} не вдалося '
-              'вшити в ціни (позиції qty>1?) — чек за сумою позицій');
-        }
-      } else if (delta.kopiykas != 0) {
-        // Сервер дорожчий за позиції або різниця > 50 коп (бонуси/чекові
-        // знижки, яких чек ще не вміє) — чек за позиціями, у лог для розбору.
-        FiscalLog.log('РОЗСИНХРОН: ціль=${target.format()} '
-            '(SumCheck=${sp.total}+rd=${sp.roundingDiscount}) позиції='
-            '${productsSum.toHryvnia()} (Δ=${delta.format()}) — чек за '
-            'сумою позицій');
-      }
-    }
-
-    // Готівка має бути кратною 10 коп (НБУ, SmartConnect вимагає):
-    // після вшивання знижки сума вже кратна (крок 50 коп), інакше — докат
-    // round_sum. Безготівка не округлюється. cash_withdrawal — не в чеку.
-    double saleTotal = productsSum.toHryvnia();
-    double roundSum = 0;
-    if (!isCard) {
-      final rounded = _round10(productsSum);
-      roundSum = (rounded - productsSum).kopiykas / 100;
-      saleTotal = rounded.toHryvnia();
-    }
-    final payments = _buildPrroPayments(saleTotal);
 
     // Накладна перед фіскалізацією: SaveSgVNakl → NumNakl (→ local_number ПРРО).
     // KodKli: готівка=код каси, картка=код банку (kodterm). TypeNakl: 2/5.
@@ -620,18 +571,57 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     final localNumber = int.tryParse(numNakl ?? '') ??
         DateTime.now().millisecondsSinceEpoch % 10000000000;
 
-    FiscalLog.log('SALE: total=$saleTotal round=$roundSum '
-        'sumCheck=${sp?.total} nakl=$localNumber ${isCard ? "картка" : "готівка"} '
-        'позиції: ${products.map((p) => '${p.code ?? "?"}=${p.price}x'
-            '${p.amount}=${p.cost}').join('; ')}');
+    // Основний шлях: готові products/payments з GetDataRRO (Caché проставляє
+    // tax_prc/letters і вже округлює payments.sum). Fallback — клієнтська збірка.
+    final rro =
+        numNakl != null ? await SessionService.getDataRRO(numNakl) : null;
+    if (!mounted) return false;
+    final isRaw = rro != null;
 
-    final result = await PrroService.createSaleReceipt(
-      products: products,
-      payments: payments,
-      totalSum: saleTotal,
-      roundSum: roundSum,
-      localNumber: localNumber,
-    );
+    // Дані чека — для передачі в ПРРО і в offline-чергу (гілка raw / fallback).
+    List<Map<String, dynamic>> rawProducts = const [], rawPayments = const [];
+    List<PrroProduct> fbProducts = const [];
+    List<PrroPayment> fbPayments = const [];
+    double saleTotal;
+    double roundSum = 0;
+    if (isRaw) {
+      rawProducts = rro.products;
+      rawPayments = rro.payments;
+      saleTotal = rawPayments
+          .fold(
+              Money.zero,
+              (Money s, p) =>
+                  s + Money.fromHryvnia((p['sum'] as num?)?.toDouble() ?? 0))
+          .toHryvnia();
+      FiscalLog.log('SALE via GetDataRRO: total=$saleTotal nakl=$localNumber '
+          '${isCard ? "картка" : "готівка"} позиції: '
+          '${rawProducts.map((p) => '${p['code']}=${p['cost']}').join('; ')}');
+    } else {
+      final fb = _buildFallbackReceipt(isCard);
+      fbProducts = fb.products;
+      fbPayments = fb.payments;
+      saleTotal = fb.totalSum;
+      roundSum = fb.roundSum;
+      FiscalLog.log('SALE fallback клієнтська збірка (GetDataRRO недоступний): '
+          'total=$saleTotal round=$roundSum nakl=$localNumber '
+          '${isCard ? "картка" : "готівка"} позиції: '
+          '${fbProducts.map((p) => '${p.code ?? "?"}=${p.cost}').join('; ')}');
+    }
+
+    final result = isRaw
+        ? await PrroService.createSaleReceiptRaw(
+            products: rawProducts,
+            payments: rawPayments,
+            totalSum: saleTotal,
+            localNumber: localNumber,
+          )
+        : await PrroService.createSaleReceipt(
+            products: fbProducts,
+            payments: fbPayments,
+            totalSum: saleTotal,
+            roundSum: roundSum,
+            localNumber: localNumber,
+          );
 
     if (!mounted) return false;
     FiscalLog.log(result.success
@@ -646,14 +636,24 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     }
 
     if (result.errorKind == PrroErrorKind.connection) {
-      await PrroQueue.enqueueSale(
-        products: products,
-        payments: payments,
-        totalSum: saleTotal,
-        roundSum: roundSum,
-        localNumber: localNumber,
-        error: result.error,
-      );
+      if (isRaw) {
+        await PrroQueue.enqueueSaleRaw(
+          products: rawProducts,
+          payments: rawPayments,
+          totalSum: saleTotal,
+          localNumber: localNumber,
+          error: result.error,
+        );
+      } else {
+        await PrroQueue.enqueueSale(
+          products: fbProducts,
+          payments: fbPayments,
+          totalSum: saleTotal,
+          roundSum: roundSum,
+          localNumber: localNumber,
+          error: result.error,
+        );
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -681,6 +681,50 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       );
     }
     return false;
+  }
+
+  /// АВАРІЙНА клієнтська збірка чека (коли GetDataRRO недоступний): будує
+  /// products із кошика/GetSumSkid, вшиває чекову знижку округлення в ціни,
+  /// округлює готівку до 10 коп. Основний шлях — готові дані з GetDataRRO;
+  /// це лише fallback, щоб каса не стала при збої Caché (може містити наші
+  /// хаки округлення, тому НЕ tax_prc бойових РРО).
+  ({
+    List<PrroProduct> products,
+    List<PrroPayment> payments,
+    double totalSum,
+    double roundSum,
+  }) _buildFallbackReceipt(bool isCard) {
+    var products = _buildPrroProducts();
+    var productsSum =
+        products.fold(Money.zero, (Money s, p) => s + Money.fromHryvnia(p.cost));
+
+    final sp = widget.serverPricing;
+    if (sp != null && sp.fromServer) {
+      final target = Money.fromHryvnia(sp.total) +
+          (isCard ? Money.fromHryvnia(sp.roundingDiscount) : Money.zero);
+      final delta = productsSum - target;
+      if (delta.kopiykas > 0 && delta.kopiykas <= 50) {
+        final adjusted = _embedCheckDiscount(products, delta);
+        if (adjusted != null) {
+          products = adjusted;
+          productsSum = target;
+        }
+      }
+    }
+
+    double saleTotal = productsSum.toHryvnia();
+    double roundSum = 0;
+    if (!isCard) {
+      final rounded = _round10(productsSum);
+      roundSum = (rounded - productsSum).kopiykas / 100;
+      saleTotal = rounded.toHryvnia();
+    }
+    return (
+      products: products,
+      payments: _buildPrroPayments(saleTotal),
+      totalSum: saleTotal,
+      roundSum: roundSum,
+    );
   }
 
   /// Сформувати список товарів для фіскального чеку.

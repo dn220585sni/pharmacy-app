@@ -741,6 +741,94 @@ class PrroService {
     }
   }
 
+  /// Створити фіскальний чек із ГОТОВИХ products/payments від `GetDataRRO`
+  /// (сирий проброс). Caché уже проставив tax_prc/letters/cost/sum_discount і
+  /// округлив payments.sum → БЕЗ `round_rule`/`round_sum` і без клієнтських
+  /// розрахунків. [totalSum] = Σ payments[].sum.
+  static Future<PrroResult> createSaleReceiptRaw({
+    required List<Map<String, dynamic>> products,
+    required List<Map<String, dynamic>> payments,
+    required double totalSum,
+    int? localNumber,
+    bool isReturn = false,
+  }) async {
+    if (!await _ensureAuth()) {
+      return const PrroResult.failure(
+        error: 'Помилка авторизації ПРРО',
+        errorKind: PrroErrorKind.auth,
+      );
+    }
+    try {
+      final body = <String, dynamic>{
+        'num_fiscal': activeFiscalNumber,
+        'action_type': isReturn ? 'Z_RETURN' : 'Z_SALE',
+        'total_sum': totalSum,
+        'products': products,
+        'payments': payments,
+        'no_pdf': true,
+        'no_qr': false,
+        'no_text_print': false,
+        // ignore: use_null_aware_elements
+        if (localNumber != null) 'local_number': localNumber,
+      };
+      debugPrint('PRRO sale(raw): ${products.length} products, total=$totalSum, '
+          'localNumber=$localNumber');
+
+      final response = await _client.post(
+        Uri.parse('${PrroConfig.baseUrl}/check/sale'),
+        headers: _headers,
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 30));
+
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final result = PrroResult(
+          success: true,
+          checkId: json['uuid']?.toString(),
+          orderNum: json['ORDERNUM']?.toString() ?? json['order_num']?.toString(),
+          orderDate: json['ORDERDATE']?.toString(),
+          orderTime: json['ORDERTIME']?.toString(),
+          qrData: json['qr_data']?.toString(),
+          qrBase64: json['qr']?.toString(),
+          textPrint: json['text_print']?.toString(),
+          pdfBase64: json['pdf']?.toString(),
+          link: json['link']?.toString(),
+          isOffline: json['is_offline'] == true,
+        );
+        debugPrint('PRRO sale(raw) OK: orderNum=${result.orderNum} '
+            'link=${result.link} offline=${result.isOffline}');
+        return result;
+      }
+      final error = json['message']?.toString() ??
+          'Помилка ПРРО (${response.statusCode})';
+      debugPrint('PRRO sale(raw) FAIL: $error data=$json');
+      return PrroResult.failure(
+        error: error,
+        errorKind: response.statusCode == 401
+            ? PrroErrorKind.auth
+            : PrroErrorKind.logical,
+      );
+    } on TimeoutException {
+      return const PrroResult.failure(
+        error: 'Таймаут з\'єднання з ПРРО',
+        errorKind: PrroErrorKind.connection,
+      );
+    } on SocketException {
+      return const PrroResult.failure(
+        error: 'Немає з\'єднання з ПРРО',
+        errorKind: PrroErrorKind.connection,
+      );
+    } catch (e) {
+      debugPrint('PRRO sale(raw) ERROR: $e');
+      return PrroResult.failure(
+        error: 'Помилка ПРРО: $e',
+        errorKind: PrroErrorKind.logical,
+      );
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Чек повернення
   // ---------------------------------------------------------------------------

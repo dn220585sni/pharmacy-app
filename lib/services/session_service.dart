@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'api_config.dart';
 import 'cache_api_client.dart';
+import 'fiscal_log.dart';
 
 /// Готові дані для фіскального чека з `GetDataRRO` — сирий проброс у
 /// CashDesk `/check/sale` без парсингу в типізовані моделі (нечутливо до
@@ -71,18 +72,20 @@ class SessionService {
         'NumNakl': numNakl,
       });
       if (!r.isOk) {
-        debugPrint('SessionService GetDataRRO FAIL: ${r.result}');
+        FiscalLog.log('GetDataRRO FAIL nakl=$numNakl: ${r.result}');
         return null;
       }
       final products = _mapList(r.data['products']);
       final payments = _mapList(r.data['payments']);
       if (products.isEmpty || payments.isEmpty) {
-        debugPrint('SessionService GetDataRRO: порожні products/payments');
+        FiscalLog.log('GetDataRRO nakl=$numNakl порожні: '
+            'products=${products.length} payments=${payments.length} '
+            'ключі=${r.data.keys.join(",")}');
         return null;
       }
       return RroData(products: products, payments: payments);
     } catch (e) {
-      debugPrint('SessionService GetDataRRO ERROR: $e');
+      FiscalLog.log('GetDataRRO ERROR nakl=$numNakl: $e');
       return null;
     }
   }

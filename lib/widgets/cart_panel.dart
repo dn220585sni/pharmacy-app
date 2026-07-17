@@ -604,6 +604,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       roundSum = fb.roundSum;
       FiscalLog.log('SALE fallback клієнтська збірка (GetDataRRO недоступний): '
           'total=$saleTotal round=$roundSum nakl=$localNumber '
+          'numNakl=${numNakl ?? "NULL"} '
           '${isCard ? "картка" : "готівка"} позиції: '
           '${fbProducts.map((p) => '${p.code ?? "?"}=${p.cost}').join('; ')}');
     }

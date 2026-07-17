@@ -52,9 +52,14 @@ class SessionService {
       if (r.isOk) {
         final numNakl = r.data['NumNakl']?.toString();
         debugPrint('SessionService: SaveSgVNakl NumNakl=$numNakl');
+        if (numNakl == null || numNakl.isEmpty) {
+          FiscalLog.log('SavesgVNakl OK але NumNakl порожній: '
+              'ключі=${r.data.keys.join(",")}');
+        }
         return numNakl;
       }
-      debugPrint('SessionService SaveSgVNakl FAIL: ${r.result}');
+      FiscalLog.log('SavesgVNakl FAIL (KodKli=$kodKli TypeNakl=$typeNakl): '
+          '${r.result}');
     } catch (e) {
       debugPrint('SessionService SaveSgVNakl ERROR: $e');
     }

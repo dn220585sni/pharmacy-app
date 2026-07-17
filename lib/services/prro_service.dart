@@ -780,7 +780,14 @@ class PrroService {
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 30));
 
-      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final respBody = utf8.decode(response.bodyBytes);
+      // На помилку — лог request (products із letters/tax_prc) + відповідь,
+      // щоб діагностувати податкові групи (base64 qr/pdf в успіху не логуємо).
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        FiscalLog.log('check/sale FAIL ${response.statusCode}\n'
+            'products=${jsonEncode(products)}\nresp=$respBody');
+      }
+      final decoded = jsonDecode(respBody);
       final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
 
       if (response.statusCode == 200 || response.statusCode == 201) {

@@ -696,13 +696,17 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         : 'SALE FAIL: ${result.error} (nakl=$localNumber)');
 
     if (result.success) {
-      // ── ЛАЙК: завершення ланцюга після успішного чека ──
-      // PutKasa (фіксація чека) → orderModify(+лінк ФН) → orderStatusChange(D)
-      // → PutKasaSPL(1). Робимо лише коли order pending пройшов (sparta != null).
-      if (sparta != null && orderNo != null && numNakl != null) {
-        final fiscN = result.orderNum ?? '';
-        final urlN = result.link ?? '';
+      final fiscN = result.orderNum ?? '';
+      final urlN = result.link ?? '';
+      // PutKasa — фіксація чека ПРРО в касі/накладній для БУДЬ-ЯКОГО чека
+      // (готівка/картка, Лайк/не-Лайк). Без цього чек проходить по ПРРО, але
+      // НЕ відмічається пробитим по касі (Задача 31, пост-фіскалізація A3).
+      if (numNakl != null) {
         await SessionService.putKasa(numNakl, fiscN, '0', urlN);
+      }
+      // ── ЛАЙК: завершення ланцюга (лише коли order pending пройшов) ──
+      // orderModify(+лінк ФН) → orderStatusChange(D) → PutKasaSPL(1).
+      if (sparta != null && orderNo != null && numNakl != null) {
         await sparta.orderModify(
           no: numNakl,
           orderNo: orderNo,
@@ -719,7 +723,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         if (prId != null) {
           await SessionService.putKasaSPL(numNakl, '1', prId);
         }
-        FiscalLog.log('SPL завершено: PutKasa + orderModify + D + PutKasaSPL(1)');
+        FiscalLog.log('SPL завершено: orderModify + D + PutKasaSPL(1)');
       }
       if (!mounted) return true;
       await PrroReceiptDialog.show(context, result);

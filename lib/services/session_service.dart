@@ -12,6 +12,21 @@ class RroData {
   const RroData({required this.products, required this.payments});
 }
 
+/// Готові масиви для Sparta `tx/order` з `GetDataSPL` — сирий проброс у
+/// `SpartaService.order()`.
+class SplData {
+  final List<Map<String, dynamic>> basket;
+  final List<Map<String, dynamic>> mops;
+  final List<Map<String, dynamic>> params;
+  final List<Map<String, dynamic>> coupons;
+  const SplData({
+    required this.basket,
+    required this.mops,
+    required this.params,
+    this.coupons = const [],
+  });
+}
+
 /// Сервіси серверного сеансу обслуговування (накладна).
 ///   NewClient — повний reset сеансу/кошика (після продажу / при відмові);
 ///   IdentSPL  — зберегти клієнта ЛАЙК у сеансі (для накладної).
@@ -93,6 +108,80 @@ class SessionService {
       FiscalLog.log('GetDataRRO ERROR nakl=$numNakl: $e');
       return null;
     }
+  }
+
+  /// Готовий Sparta-кошик для `tx/order` (`GetDataSPL`, Задача 28) за номером
+  /// накладної. basket/mops/params (coupons — якщо є). null при помилці/порожньому.
+  static Future<SplData?> getDataSPL(String numNakl) async {
+    if (ApiConfig.useMock || numNakl.isEmpty) return null;
+    try {
+      final r = await CacheApiClient().call('GetDataSPL', params: {
+        'NumNakl': numNakl,
+      });
+      if (!r.isOk) {
+        FiscalLog.log('GetDataSPL FAIL nakl=$numNakl: ${r.result}');
+        return null;
+      }
+      final basket = _mapList(r.data['basket']);
+      final mops = _mapList(r.data['mops']);
+      if (basket.isEmpty || mops.isEmpty) {
+        FiscalLog.log('GetDataSPL nakl=$numNakl порожні: '
+            'basket=${basket.length} mops=${mops.length} '
+            'ключі=${r.data.keys.join(",")}');
+        return null;
+      }
+      return SplData(
+        basket: basket,
+        mops: mops,
+        params: _mapList(r.data['params']),
+        coupons: _mapList(r.data['coupons']),
+      );
+    } catch (e) {
+      FiscalLog.log('GetDataSPL ERROR nakl=$numNakl: $e');
+      return null;
+    }
+  }
+
+  /// Зафіксувати статус транзакції ЛАЙК у сеансі (`PutKasaSPL`, Задача 29).
+  /// [prSPL]: «-1» проміжне (після order pending), «1» успішна (після
+  /// orderStatusChange D), «2» офлайн. [prId] — id транзакції зі Sparta order.
+  /// Best-effort: збій НЕ скасовує вже проведене.
+  static Future<bool> putKasaSPL(
+      String numNakl, String prSPL, String prId) async {
+    if (ApiConfig.useMock || numNakl.isEmpty) return false;
+    try {
+      final r = await CacheApiClient().call('PutKasaSPL', params: {
+        'NumNakl': numNakl,
+        'PrSPL': prSPL,
+        'PrId': prId,
+      });
+      if (r.isOk) return true;
+      FiscalLog.log('PutKasaSPL FAIL nakl=$numNakl PrSPL=$prSPL: ${r.result}');
+    } catch (e) {
+      FiscalLog.log('PutKasaSPL ERROR nakl=$numNakl: $e');
+    }
+    return false;
+  }
+
+  /// Зафіксувати чек ПРРО в накладній (`PutKasa`, Задача 31 = пост-фіскалізація
+  /// A3) після успіху `/check/sale`. [fiscN] — ORDERNUM, [urlN] — link чека,
+  /// [flPend] — прапорець pending/offline. Best-effort.
+  static Future<bool> putKasa(
+      String numNakl, String fiscN, String flPend, String urlN) async {
+    if (ApiConfig.useMock || numNakl.isEmpty) return false;
+    try {
+      final r = await CacheApiClient().call('PutKasa', params: {
+        'NumNakl': numNakl,
+        'fiscN': fiscN,
+        'flPend': flPend,
+        'urlN': urlN,
+      });
+      if (r.isOk) return true;
+      FiscalLog.log('PutKasa FAIL nakl=$numNakl fiscN=$fiscN: ${r.result}');
+    } catch (e) {
+      FiscalLog.log('PutKasa ERROR nakl=$numNakl: $e');
+    }
+    return false;
   }
 
   static List<Map<String, dynamic>> _mapList(dynamic v) => v is List

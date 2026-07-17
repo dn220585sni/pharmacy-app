@@ -751,6 +751,7 @@ class PrroService {
     required double totalSum,
     int? localNumber,
     bool isReturn = false,
+    String? comment,
   }) async {
     if (!await _ensureAuth()) {
       return const PrroResult.failure(
@@ -768,6 +769,9 @@ class PrroService {
         'no_pdf': true,
         'no_qr': false,
         'no_text_print': false,
+        // Коментар (блок «ПРОГРАМА ЛОЯЛЬНОСТI») друкується в чеку. ⚠️ Назва
+        // поля НЕ підтверджена (пробуємо `footer`) — звірити з Андрієм на тесті.
+        if (comment != null && comment.isNotEmpty) 'footer': comment,
         // ignore: use_null_aware_elements
         if (localNumber != null) 'local_number': localNumber,
       };

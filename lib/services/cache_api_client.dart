@@ -109,6 +109,8 @@ class CacheApiClient {
     'SaveSumDay',   // службове внесення/винесення грошей у касу
     'SavesgVNakl',  // створення накладної
     'ZRep',         // фіксація Z-звіту в БД
+    'PutKasa',      // фіксація чека ПРРО в накладній (пост-фіскалізація)
+    'PutKasaSPL',   // фіксація статусу транзакції ЛАЙК
   };
 
   Future<CacheResponse> call(

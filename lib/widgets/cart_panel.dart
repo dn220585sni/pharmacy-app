@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../mixins/checkout_mixin.dart';
@@ -19,6 +20,9 @@ import '../services/terminal_service.dart';
 import '../services/prro_queue.dart';
 import '../services/prro_service.dart';
 import '../services/session_service.dart';
+import '../services/sparta_service.dart';
+import '../services/spl_params_service.dart';
+import '../services/loyalty_receipt.dart';
 import '../services/skarb_service.dart';
 import 'cart_item_widget.dart';
 import 'cart_offer_card.dart';
@@ -571,6 +575,67 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     final localNumber = int.tryParse(numNakl ?? '') ??
         DateTime.now().millisecondsSinceEpoch % 10000000000;
 
+    // ── ЛАЙК: Sparta tx/order (pending) ПЕРЕД ПРРО — бонуси в коментар чека.
+    // order OK → prId + баланси + коментар; FAIL/немає кредів → чек без бонусів
+    // (fallback, каса не блокується). Завершення (orderModify/D/PutKasa) — після
+    // успіху чека нижче. Ключі response Спарти ще не підтверджені → лог сирого.
+    String? loyaltyComment, orderNo, prId, loyaltyCard;
+    SpartaService? sparta; // != null лише коли order pending успішний
+    DateTime orderDate = DateTime.now();
+    List<Map<String, dynamic>> splBasket = const [],
+        splMops = const [],
+        splParamsList = const [],
+        splCoupons = const [];
+    final loyalty = widget.loyalty;
+    if (loyalty?.cardNo != null &&
+        loyalty!.cardNo!.isNotEmpty &&
+        numNakl != null) {
+      loyaltyCard = loyalty.cardNo;
+      final splParams = await SplParamsService.fetch();
+      final spl = await SessionService.getDataSPL(numNakl);
+      if (splParams != null && splParams.isUsable && spl != null) {
+        orderNo = splParams.orderNoFor(numNakl);
+        splBasket = spl.basket;
+        splMops = spl.mops;
+        splParamsList = spl.params;
+        splCoupons = spl.coupons;
+        final s = SpartaService(splParams, posCode: ApiConfig.ekkKodKli);
+        final orderRes = await s.order(
+          no: numNakl,
+          orderNo: orderNo,
+          date: orderDate,
+          cardNo: loyaltyCard!,
+          basket: splBasket,
+          mops: splMops,
+          params: splParamsList,
+          coupons: splCoupons,
+        );
+        FiscalLog.log('SPL order ok=${orderRes.ok} prId=${orderRes.prId} '
+            'earn=${orderRes.balanceEarn} burn=${orderRes.balanceBurn} '
+            'after=${orderRes.balanceAfter} resp=${jsonEncode(orderRes.response)}');
+        if (orderRes.ok) {
+          sparta = s;
+          prId = orderRes.prId;
+          if (prId != null) {
+            await SessionService.putKasaSPL(numNakl, '-1', prId);
+          }
+          loyaltyComment = LoyaltyReceipt.build(
+            phone: loyalty.phone,
+            card: loyaltyCard,
+            online: true,
+            earn: orderRes.balanceEarn,
+            burn: orderRes.balanceBurn,
+            after: orderRes.balanceAfter,
+          );
+        } else {
+          FiscalLog.log('SPL order FAIL: ${orderRes.msg} — чек без бонусів');
+        }
+      } else {
+        FiscalLog.log('SPL: немає кредів/GetDataSPL — чек без бонусів');
+      }
+      if (!mounted) return false;
+    }
+
     // Основний шлях: готові products/payments з GetDataRRO (Caché проставляє
     // tax_prc/letters і вже округлює payments.sum). Fallback — клієнтська збірка.
     final rro =
@@ -615,6 +680,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
             payments: rawPayments,
             totalSum: saleTotal,
             localNumber: localNumber,
+            comment: loyaltyComment,
           )
         : await PrroService.createSaleReceipt(
             products: fbProducts,
@@ -630,6 +696,32 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         : 'SALE FAIL: ${result.error} (nakl=$localNumber)');
 
     if (result.success) {
+      // ── ЛАЙК: завершення ланцюга після успішного чека ──
+      // PutKasa (фіксація чека) → orderModify(+лінк ФН) → orderStatusChange(D)
+      // → PutKasaSPL(1). Робимо лише коли order pending пройшов (sparta != null).
+      if (sparta != null && orderNo != null && numNakl != null) {
+        final fiscN = result.orderNum ?? '';
+        final urlN = result.link ?? '';
+        await SessionService.putKasa(numNakl, fiscN, '0', urlN);
+        await sparta.orderModify(
+          no: numNakl,
+          orderNo: orderNo,
+          date: orderDate,
+          cardNo: loyaltyCard!,
+          basket: splBasket,
+          mops: splMops,
+          cashReceiptLinkUrl: urlN,
+          params: splParamsList,
+          coupons: splCoupons,
+        );
+        await sparta.orderStatusChange(
+            orderNo: orderNo, date: orderDate, status: 'D');
+        if (prId != null) {
+          await SessionService.putKasaSPL(numNakl, '1', prId);
+        }
+        FiscalLog.log('SPL завершено: PutKasa + orderModify + D + PutKasaSPL(1)');
+      }
+      if (!mounted) return true;
       await PrroReceiptDialog.show(context, result);
       // Спробувати скинути попередньо відкладені чеки у фоні.
       unawaited(PrroQueue.flush());

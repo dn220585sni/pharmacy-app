@@ -19,7 +19,6 @@ import '../services/product_browser_service.dart';
 import '../services/skarb_service.dart';
 import '../services/session_service.dart';
 import '../services/shift_service.dart';
-import '../services/fiscal_log.dart';
 import '../widgets/shift_start_dialog.dart';
 import '../widgets/shift_end_dialog.dart';
 import '../widgets/cash_operation_dialog.dart';
@@ -3254,10 +3253,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
     final earned = percentEarning + bonusBadgesTotal;
 
-    // ── ЛАЙК: fire-and-forget sale registration ──────────────────────────
-    if (_customerLoyalty != null && _customerLoyalty!.cardNo != null) {
-      _registerLoyaltySale(paidByPoints: paidByPoints);
-    }
+    // ЛАЙК-нарахування тепер у синхронному order-флоу всередині
+    // cart_panel._sendFiscalReceipt (Sparta order→ПРРО з коментарем→orderModify→
+    // orderStatusChange). Старий fire-and-forget sale прибрано (падав HTTP 500).
 
     // NewClient — серверний reset сеансу для наступного клієнта: одним запитом
     // очищає server-side кошик і резерви (інакше GetSumSkid тягнув би старі
@@ -3278,48 +3276,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       // Продаж міг покласти offline-чек у чергу (connection error у cart_panel)
       // або, навпаки, флашнути — оновити індикатор одразу.
       _prroPendingCount = PrroQueue.count;
-    });
-  }
-
-  /// Register sale with Sparta Loyalty (ЛАЙК) — fire-and-forget.
-  ///
-  /// Formats cart items into Sparta basket format and calls sale API.
-  /// Runs asynchronously; failures are logged but don't block the user.
-  void _registerLoyaltySale({double paidByPoints = 0}) {
-    final loyalty = _customerLoyalty;
-    if (loyalty == null || loyalty.cardNo == null) return;
-
-    // Format cart → Sparta basket
-    final basket = _cart.map((item) {
-      final qty = item.isFractional
-          ? item.fractionalQty! / item.drug.unitsPerPackage!
-          : item.quantity.toDouble();
-      return <String, dynamic>{
-        'sku': item.drug.id.replaceFirst('srv_', ''),
-        'price': item.effectivePrice,
-        'qty': qty,
-        // sum == price*qty з повною точністю (як очікують зовнішні API);
-        // item.total округлений у копійки — лише для відображення.
-        'sum': item.effectivePrice * qty,
-      };
-    }).toList();
-
-    // Generate receipt number: timestamp-based for uniqueness
-    final receiptNo = 'POS-${DateTime.now().millisecondsSinceEpoch}';
-
-    LoyaltyService.sale(
-      receiptNo: receiptNo,
-      basket: basket,
-      cardNo: loyalty.cardNo,
-      paidByPoints: paidByPoints,
-      cashierName: _currentPharmacist?.user,
-    ).then((result) {
-      FiscalLog.log(result.success
-          ? 'ЛАЙК OK (${loyalty.cardNo}): нараховано=${result.balanceEarn} '
-              'списано=${result.balanceBurn} баланс=${result.balanceAfter}'
-          : 'ЛАЙК FAIL (${loyalty.cardNo}): ${result.errorMsg}');
-    }).catchError((e) {
-      FiscalLog.log('ЛАЙК ERROR (${loyalty.cardNo}): $e');
     });
   }
 

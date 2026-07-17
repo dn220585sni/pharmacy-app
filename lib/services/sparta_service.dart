@@ -36,6 +36,33 @@ class SpartaResult {
 
   factory SpartaResult.failure(String msg) =>
       SpartaResult(ok: false, errorCode: 'CLIENT', msg: msg);
+
+  // Дані з response `tx/order` для наступних кроків ланцюга.
+  // ⚠️ Точні ключі відповіді Спарти НЕ підтверджені — беремо з кількох
+  // ймовірних варіантів; на першому живому тесті звірити з логом response.
+  double _num(List<String> keys) {
+    for (final k in keys) {
+      final v = response[k];
+      if (v is num) return v.toDouble();
+      final p = double.tryParse(v?.toString() ?? '');
+      if (p != null) return p;
+    }
+    return 0;
+  }
+
+  /// Ідентифікатор транзакції ЛАЙК (для PutKasaSPL / orderStatusChange).
+  String? get prId =>
+      (response['prId'] ?? response['transactionId'] ?? response['id'])
+          ?.toString();
+
+  /// Нараховано бонусів за покупку.
+  double get balanceEarn => _num(['balanceEarn', 'earn']);
+
+  /// Списано/заощаджено бонусів.
+  double get balanceBurn => _num(['balanceBurn', 'burn']);
+
+  /// Баланс після операції.
+  double get balanceAfter => _num(['balanceAfter', 'balance', 'after']);
 }
 
 /// Клієнт Спарти (ЛАЙК) — реєстрація/підтвердження транзакції чека.

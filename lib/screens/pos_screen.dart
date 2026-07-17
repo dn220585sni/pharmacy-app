@@ -19,6 +19,7 @@ import '../services/product_browser_service.dart';
 import '../services/skarb_service.dart';
 import '../services/session_service.dart';
 import '../services/shift_service.dart';
+import '../services/fiscal_log.dart';
 import '../widgets/shift_start_dialog.dart';
 import '../widgets/shift_end_dialog.dart';
 import '../widgets/cash_operation_dialog.dart';
@@ -3313,14 +3314,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       paidByPoints: paidByPoints,
       cashierName: _currentPharmacist?.user,
     ).then((result) {
-      if (result.success) {
-        debugPrint('[ЛАЙК] Sale OK: earned=${result.balanceEarn}, '
-            'burned=${result.balanceBurn}, after=${result.balanceAfter}');
-      } else {
-        debugPrint('[ЛАЙК] Sale FAILED: ${result.errorMsg}');
-      }
+      FiscalLog.log(result.success
+          ? 'ЛАЙК OK (${loyalty.cardNo}): нараховано=${result.balanceEarn} '
+              'списано=${result.balanceBurn} баланс=${result.balanceAfter}'
+          : 'ЛАЙК FAIL (${loyalty.cardNo}): ${result.errorMsg}');
     }).catchError((e) {
-      debugPrint('[ЛАЙК] Sale ERROR: $e');
+      FiscalLog.log('ЛАЙК ERROR (${loyalty.cardNo}): $e');
     });
   }
 

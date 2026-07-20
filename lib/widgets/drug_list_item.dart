@@ -449,10 +449,14 @@ class _DrugListItemState extends State<DrugListItem> {
                     ),
                   ),
 
-                  // Dispensed (qty input)
+                  // Dispensed (qty input). Показуємо за БУДЬ-ЯКОГО залишку
+                  // (!isOutOfStock), а не лише цілих упаковок: розпочата упаковка
+                  // має дробовий stockRaw (напр. 0.2 = 1/5), stock=0 — поле мусить
+                  // бути активним, щоб її можна було обрати й продати блістерами.
+                  // (або товар уже в кошику — залишок 0 через резерв сюди).
                   SizedBox(
                     width: kColDispensed,
-                    child: (drug.stock > 0 || _inCart)
+                    child: (!drug.isOutOfStock || _inCart)
                         ? Center(
                             child: SizedBox(
                               width: 48,

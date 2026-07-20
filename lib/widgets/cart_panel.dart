@@ -61,6 +61,14 @@ class CartPanel extends StatefulWidget {
   /// тільки картка, тільки контактна (чіп/магнітна стрічка), без NFC.
   final bool isPakunokMode;
 
+  /// Відскановані позиції (за `drug.id`) — стан сеансу клієнта. Живе в
+  /// `PosScreen` разом з кошиком, щоб не скидатись при переходах між вікнами
+  /// (картка товару ↔ кошик ↔ вкладки), інакше товар довелося б сканувати заново.
+  final Set<String> scannedDrugIds;
+
+  /// Позначити позицію відсканованою (parent додає `drug.id` у `scannedDrugIds`).
+  final ValueChanged<String>? onItemScanned;
+
   const CartPanel({
     super.key,
     required this.cart,
@@ -80,6 +88,8 @@ class CartPanel extends StatefulWidget {
     this.socialProjects = const [],
     this.stopPrices = const {},
     this.isPakunokMode = false,
+    this.scannedDrugIds = const {},
+    this.onItemScanned,
   });
 
   @override
@@ -90,9 +100,6 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   // ── Two-screen mode ────────────────────────────────────────────────────────
   bool _checkoutMode = false;
   bool _isProcessingPayment = false;
-
-  // Scanned drug IDs (simulated barcode scan by tapping price)
-  final Set<String> _scannedDrugIds = {};
 
   // Cash withdrawal (видача готівки з картки)
   bool _cashWithdrawal = false;
@@ -211,11 +218,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   /// Whether all cart items have been scanned (barcode confirmed).
   bool get _allCartScanned {
     if (widget.cart.isEmpty) return false;
-    return widget.cart.every((i) => _scannedDrugIds.contains(i.drug.id));
+    return widget.cart.every((i) => widget.scannedDrugIds.contains(i.drug.id));
   }
 
   void _scanCartItem(CartItem item) {
-    setState(() => _scannedDrugIds.add(item.drug.id));
+    widget.onItemScanned?.call(item.drug.id);
   }
 
   /// Позначити позицію кошика (за `drug.id`) як відскановану — викликається зі
@@ -223,8 +230,8 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   /// Повертає `true`, якщо така позиція є в кошику.
   bool markScanned(String drugId) {
     final exists = widget.cart.any((i) => i.drug.id == drugId);
-    if (exists && !_scannedDrugIds.contains(drugId)) {
-      setState(() => _scannedDrugIds.add(drugId));
+    if (exists && !widget.scannedDrugIds.contains(drugId)) {
+      widget.onItemScanned?.call(drugId);
     }
     return exists;
   }
@@ -1080,7 +1087,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   void _resetCheckoutState() {
     resetCheckout();
-    _scannedDrugIds.clear();
+    // scannedDrugIds чистить PosScreen разом із кошиком (після оплати/NewClient).
     _redemptionCodeController.clear();
     _isRedemptionVerified = false;
     _isVerifyingRedemption = false;
@@ -1259,7 +1266,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
             onIncrease: () => setState(() => widget.onIncrease(i)),
             onDecrease: () => setState(() => widget.onDecrease(i)),
             onRemove: () => setState(() => widget.onRemove(i)),
-            isScanned: _scannedDrugIds.contains(widget.cart[i].drug.id),
+            isScanned: widget.scannedDrugIds.contains(widget.cart[i].drug.id),
             onScan: () => _scanCartItem(widget.cart[i]),
             serverUnitPrice: widget.serverPricing?.itemAt(i)?.unitPrice,
             serverCost: widget.serverPricing?.itemAt(i)?.cost,

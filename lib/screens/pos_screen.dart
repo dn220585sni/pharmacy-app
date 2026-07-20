@@ -76,6 +76,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   List<Drug> _searchResults = [];
   final List<CartItem> _cart = [];
+
+  /// Відскановані позиції кошика (за `drug.id`) — стан сеансу клієнта. Живе тут,
+  /// поряд із `_cart`, щоб переживати переходи між вікнами (картка ↔ кошик ↔
+  /// вкладки); інакше товар довелося б сканувати заново після кожного переходу.
+  /// Чиститься разом із кошиком (_clearCart / після оплати / NewClient).
+  final Set<String> _scannedDrugIds = {};
+
   Drug? _selectedDrug;
 
   /// Накопичувач цифр для Ctrl+цифра (багатоцифрове дробове введення, напр. 35).
@@ -2061,7 +2068,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return;
     }
     // Позначаємо позицію — зелена галочка в кошику і є фідбеком; снекбар не треба.
-    _cartPanelKey.currentState?.markScanned(match.drug.id);
+    // Стан «відскановано» тримаємо тут (переживає переходи між вікнами).
+    final scannedId = match.drug.id;
+    setState(() => _scannedDrugIds.add(scannedId));
   }
 
   /// Прибрати AIM-префікс символіки (`]` + 2 символи, напр. `]E0`/`]F0`/`]C1`) —
@@ -2947,6 +2956,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _helpingHandTimer?.cancel();
     setState(() {
       _cart.clear();
+      _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
       _selectedSymptom = 'Всі';
@@ -3288,6 +3298,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     setState(() {
       _totalEarned += earned;
       _cart.clear();
+      _scannedDrugIds.clear();
       _selectedDrug = null;   // show ShiftDashboard after payment
       _searchResults = [];
       _resetLoyalty();
@@ -3310,6 +3321,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _totalEarned += amount;
       _ordersOpen = false;
       _cart.clear();
+      _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
       _selectedSymptom = 'Всі';
@@ -3574,6 +3586,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         socialProjects: _socialProjects,
         stopPrices: _cartStopPrices,
         isPakunokMode: _isPakunokMode,
+        scannedDrugIds: _scannedDrugIds,
+        onItemScanned: (id) => setState(() => _scannedDrugIds.add(id)),
       );
     }
     if (_ordersOpen) {

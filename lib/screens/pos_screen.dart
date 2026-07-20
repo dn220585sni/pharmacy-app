@@ -2307,7 +2307,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return;
     }
 
-    final clamped = qty.clamp(1, drug.stock);
+    // Залишок у таблиці вже зменшений на зарезервоване в кошику, тому верхня
+    // межа = поточний залишок + уже зарезервоване для цього товару (інакше при
+    // залишку 0 було б clamp(1, 0) — краш, і не можна було б зменшити кількість).
+    final inCartIdx = _cart.indexWhere((item) => item.drug.id == drug.id);
+    final inCartQty = inCartIdx >= 0 ? _cart[inCartIdx].quantity : 0;
+    final maxQty = drug.stock + inCartQty;
+    if (maxQty < 1) return;
+    final clamped = qty.clamp(1, maxQty);
 
     // Спочатку резервуємо на сервері
     final result = await _lockStock(drug, clamped.toDouble());
@@ -4088,7 +4095,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             _fetchExternalAnalogues(drug);
             _fetchCacheAnalogues(drug);
             _fetchSKUDetail(drug);
-            if (drug.isOutOfStock) _fetchNearbyPharmacies(drug);
+            if (drug.isOutOfStock && cartItem == null) {
+              _fetchNearbyPharmacies(drug);
+            }
           },
           onQuantityChanged: (qty) => _setQuantity(drug, qty),
           onFractionalChanged: (blisters) =>

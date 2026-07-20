@@ -131,7 +131,7 @@ class _DrugListItemState extends State<DrugListItem> {
               selection: TextSelection.collapsed(offset: pending.length),
             );
             final qty = int.tryParse(pending) ?? 0;
-            final clamped = qty.clamp(0, widget.drug.stock);
+            final clamped = qty.clamp(0, _maxQty);
             if (clamped > 0) widget.onQuantityChanged(clamped);
           } else {
             _qtyController.selection = TextSelection(
@@ -156,6 +156,17 @@ class _DrugListItemState extends State<DrugListItem> {
     _focusNode.dispose();
     super.dispose();
   }
+
+  /// Товар уже в кошику (цілими упаковками або блістерно). Якщо так — рядок
+  /// лишається активним і поле кількості редагованим навіть коли залишок став 0
+  /// (його зарезервували саме в цей кошик), щоб касир міг зменшити чи прибрати
+  /// кількість. Без цього рядок помилково виглядав як «відсутній».
+  bool get _inCart =>
+      widget.cartQuantity > 0 || widget.cartFractionalQty != null;
+
+  /// Верхня межа кількості для введення: залишок у таблиці вже зменшений на
+  /// зарезервоване в кошику, тому додаємо його назад.
+  int get _maxQty => widget.drug.stock + widget.cartQuantity;
 
   /// Map Ctrl+key to digit 0-9, or null if not a digit key.
   static int? _ctrlDigit(LogicalKeyboardKey key) {
@@ -189,8 +200,9 @@ class _DrugListItemState extends State<DrugListItem> {
   Widget _buildBadge() {
     final drug = widget.drug;
 
-    // 0. Out-of-stock: gray status badge (overrides bonus/transit)
-    if (drug.isOutOfStock) {
+    // 0. Out-of-stock: gray status badge (overrides bonus/transit).
+    // Виняток — товар у кошику: залишок 0 через резерв у цей чек, рядок активний.
+    if (drug.isOutOfStock && !_inCart) {
       return _buildAvailabilityBadge(drug);
     }
 
@@ -337,7 +349,8 @@ class _DrugListItemState extends State<DrugListItem> {
   @override
   Widget build(BuildContext context) {
     final drug = widget.drug;
-    final bool isDimmed = drug.isOutOfStock || drug.isExpired;
+    // Товар у кошику не тьмяніє, навіть якщо залишок став 0 (зарезервований сюди).
+    final bool isDimmed = (drug.isOutOfStock && !_inCart) || drug.isExpired;
 
     final Color textPrimary =
         isDimmed ? const Color(0xFFB0B7C3) : const Color(0xFF1C1C2E);
@@ -439,7 +452,7 @@ class _DrugListItemState extends State<DrugListItem> {
                   // Dispensed (qty input)
                   SizedBox(
                     width: kColDispensed,
-                    child: drug.stock > 0
+                    child: (drug.stock > 0 || _inCart)
                         ? Center(
                             child: SizedBox(
                               width: 48,
@@ -489,7 +502,7 @@ class _DrugListItemState extends State<DrugListItem> {
                                   // Ignore programmatic "N/M" values
                                   if (value.contains('/')) return;
                                   final qty = int.tryParse(value) ?? 0;
-                                  final clamped = qty.clamp(0, drug.stock);
+                                  final clamped = qty.clamp(0, _maxQty);
                                   widget.onQuantityChanged(clamped);
                                 },
                                 onTap: () {

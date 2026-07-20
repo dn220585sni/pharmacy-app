@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../mixins/checkout_mixin.dart';
@@ -593,9 +592,6 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       loyaltyCard = loyalty.cardNo;
       final splParams = await SplParamsService.fetch();
       final spl = await SessionService.getDataSPL(numNakl);
-      FiscalLog.log('SPL діагностика: splParams=${splParams == null ? "null" :
-          (splParams.isUsable ? "ok" : "неповні")} '
-          'getDataSPL=${spl == null ? "null" : "ok(${spl.basket.length} basket)"}');
       if (splParams != null && splParams.isUsable && spl != null) {
         orderNo = splParams.orderNoFor(numNakl);
         splBasket = spl.basket;
@@ -613,9 +609,10 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
           params: splParamsList,
           coupons: splCoupons,
         );
-        FiscalLog.log('SPL order ok=${orderRes.ok} prId=${orderRes.prId} '
-            'earn=${orderRes.balanceEarn} burn=${orderRes.balanceBurn} '
-            'after=${orderRes.balanceAfter} resp=${jsonEncode(orderRes.response)}');
+        FiscalLog.log('SPL order ok=${orderRes.ok} '
+            'нараховано=${orderRes.balanceEarn} списано=${orderRes.balanceBurn} '
+            'баланс=${orderRes.balanceAfter}'
+            '${orderRes.ok ? "" : " (${orderRes.msg})"}');
         if (orderRes.ok) {
           sparta = s;
           prId = orderRes.prId;

@@ -593,6 +593,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       loyaltyCard = loyalty.cardNo;
       final splParams = await SplParamsService.fetch();
       final spl = await SessionService.getDataSPL(numNakl);
+      FiscalLog.log('SPL діагностика: splParams=${splParams == null ? "null" :
+          (splParams.isUsable ? "ok" : "неповні")} '
+          'getDataSPL=${spl == null ? "null" : "ok(${spl.basket.length} basket)"}');
       if (splParams != null && splParams.isUsable && spl != null) {
         orderNo = splParams.orderNoFor(numNakl);
         splBasket = spl.basket;

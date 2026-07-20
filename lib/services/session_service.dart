@@ -176,8 +176,11 @@ class SessionService {
         'flPend': flPend,
         'urlN': urlN,
       });
-      if (r.isOk) return true;
-      FiscalLog.log('PutKasa FAIL nakl=$numNakl fiscN=$fiscN: ${r.result}');
+      // TEMP-діагностика: логуємо ЗАВЖДИ (OK+FAIL) з відповіддю сервера —
+      // з'ясувати, чому чек не відмічається пробитим по касі.
+      FiscalLog.log('PutKasa ${r.isOk ? "OK" : "FAIL"} nakl=$numNakl '
+          'fiscN=$fiscN result="${r.result}" ключі=${r.data.keys.join(",")}');
+      return r.isOk;
     } catch (e) {
       FiscalLog.log('PutKasa ERROR nakl=$numNakl: $e');
     }

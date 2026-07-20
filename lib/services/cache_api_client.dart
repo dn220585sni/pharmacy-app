@@ -225,6 +225,11 @@ class CacheApiClient {
         fixedBody = fixedBody.replaceAllMapped(
             RegExp(r'"bar_code":\s*(?=[,}])'), (m) => '"bar_code":""');
 
+        // Fix Caché JSON: GetDataSPL — порожній `code` у discounts[] іде як
+        // "code":","order":1 (пропущена закривна лапка) → "code":"","order":1.
+        fixedBody = fixedBody.replaceAllMapped(
+            RegExp(r'"code":","(\w+)":'), (m) => '"code":"","${m[1]}":');
+
         // Fix Caché JSON: відсутній ]} в кінці (масив + об'єкт не закриті)
         final trimmed = fixedBody.trimRight();
         if (trimmed.isNotEmpty && !trimmed.endsWith(']}') && !trimmed.endsWith('}}')) {

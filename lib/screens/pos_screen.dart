@@ -2508,6 +2508,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final d = drug.unitsPerPackage == res.total
         ? drug
         : drug.copyWithSKUDetail(unitsPerPackage: res.total);
+    // Записати дільник у рядок списку (_searchResults) та у вибраний товар.
+    // Інакше рядок лишається без Y: поле «Відпущ» не може показати X/Y (пусте),
+    // а _applyKolStock перебудовує рядок зі старого drug без дільника. Заразом
+    // тримає рядок і кошик на однаковому unitsPerPackage (узгоджена ціна).
+    if (!identical(d, drug)) {
+      setState(() {
+        _searchResults =
+            _searchResults.map((x) => x.id == d.id ? d : x).toList();
+        if (_selectedDrug?.id == d.id) _selectedDrug = d;
+      });
+    }
     // Прибрати наявний рядок цього товару, щоб оновити drug з новим Y.
     final idx = _cart.indexWhere((it) => it.drug.id == d.id);
     if (idx >= 0) setState(() => _cart.removeAt(idx));

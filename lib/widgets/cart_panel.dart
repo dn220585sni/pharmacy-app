@@ -723,10 +723,10 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         );
         await sparta.orderStatusChange(
             orderNo: orderNo, date: orderDate, status: 'D');
-        if (prId != null) {
-          await SessionService.putKasaSPL(numNakl, '1', prId);
-        }
-        FiscalLog.log('SPL завершено: orderModify + D + PutKasaSPL(1)');
+        final splFixed =
+            prId != null && await SessionService.putKasaSPL(numNakl, '1', prId);
+        FiscalLog.log('SPL завершено: orderModify + D, '
+            'PutKasaSPL(1)=${prId == null ? "пропущено (prId null)" : splFixed}');
       }
       if (!mounted) return true;
       await PrroReceiptDialog.show(context, result);

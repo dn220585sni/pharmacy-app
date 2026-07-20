@@ -50,10 +50,14 @@ class SpartaResult {
     return 0;
   }
 
-  /// Ідентифікатор транзакції ЛАЙК (для PutKasaSPL / orderStatusChange).
-  String? get prId =>
-      (response['prId'] ?? response['transactionId'] ?? response['id'])
-          ?.toString();
+  /// Ідентифікатор транзакції ЛАЙК (для PutKasaSPL). Спарта віддає його як
+  /// `processId` (підтверджено живою відповіддю tx/order 2026-07-20);
+  /// решта — запасні варіанти.
+  String? get prId => (response['processId'] ??
+          response['prId'] ??
+          response['transactionId'] ??
+          response['id'])
+      ?.toString();
 
   /// Нараховано бонусів за покупку.
   double get balanceEarn => _num(['balanceEarn', 'earn']);

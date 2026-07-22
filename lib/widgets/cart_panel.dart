@@ -14,6 +14,7 @@ import '../models/social_project.dart';
 import '../models/stop_price_action.dart';
 import '../services/api_config.dart';
 import '../services/cart_price_service.dart';
+import '../services/ecr_terminal_client.dart';
 import '../services/fiscal_log.dart';
 import '../services/terminal_service.dart';
 import '../services/prro_queue.dart';
@@ -112,6 +113,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   List<PaymentTerminal> _terminals = const [];
   PaymentTerminal? _selectedTerminal;
   bool _terminalsLoading = false;
+
+  /// Триває діагностична перевірка звʼязку з терміналом (ECR Ping+Identify).
+  bool _terminalChecking = false;
 
   // Social projects
   String? _selectedSocialProject;
@@ -278,6 +282,61 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     });
   }
 
+  /// Діагностика: перевірити звʼязок з обраним терміналом (ECR JSON —
+  /// TCP-конект + `PingDevice` + `identify`). Нічого не проводить по грошах.
+  /// Потрібна на етапі підключення терміналів (Етап 2): показує, чи взагалі
+  /// каса «бачить» пристрій за `termIP:termPort` з `GetTermBank`.
+  Future<void> _checkTerminalLink() async {
+    final t = _selectedTerminal;
+    if (t == null || _terminalChecking) return;
+
+    void say(String msg, {bool ok = false}) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: ok ? const Color(0xFF15803D) : const Color(0xFFB42318),
+      ));
+    }
+
+    if (!t.canConnect) {
+      say('${t.displayName}: немає адреси — це спосіб оплати, не ECR-термінал');
+      return;
+    }
+    final client = EcrTerminalClient.forTerminal(t);
+    if (client == null) {
+      say(t.protocol == TerminalProtocol.bpos
+          ? '${t.displayName}: протокол BPOS (Ощад) — ще не підтримується'
+          : '${t.displayName}: протокол терміналу не підтримується');
+      return;
+    }
+
+    setState(() => _terminalChecking = true);
+    final sw = Stopwatch()..start();
+    var ok = false;
+    try {
+      ok = await client.connect();
+    } catch (e) {
+      FiscalLog.log('ECR перевірка звʼязку ERROR: $e');
+    } finally {
+      sw.stop();
+      await client.close();
+    }
+    if (!mounted) return;
+    setState(() => _terminalChecking = false);
+
+    final addr = '${t.termIP}:${t.termPort}';
+    FiscalLog.log('ECR перевірка звʼязку $addr → ${ok ? "OK" : "FAIL"} '
+        '(${sw.elapsedMilliseconds} мс)');
+    say(
+      ok
+          ? 'Термінал $addr — звʼязок є (${sw.elapsedMilliseconds} мс)'
+          : 'Немає звʼязку з терміналом $addr',
+      ok: ok,
+    );
+  }
+
   /// Селектор платіжного термінала (показується при оплаті карткою).
   /// Дефолт — основний; якщо терміналів кілька, можна обрати резервний.
   Widget _buildTerminalSelector() {
@@ -384,6 +443,30 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                     onChanged: (t) => setState(() => _selectedTerminal = t),
                   ),
           ),
+          // Діагностика звʼязку — лише для ECR-пристроїв (є termIP:termPort).
+          if (sel != null && sel.canConnect) ...[
+            const SizedBox(width: 4),
+            _terminalChecking
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    child: SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : IconButton(
+                    onPressed: _checkTerminalLink,
+                    icon: const Icon(Icons.wifi_tethering_rounded, size: 17),
+                    tooltip: 'Перевірити звʼязок '
+                        '(${sel.termIP}:${sel.termPort})',
+                    color: const Color(0xFF1E7DC8),
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints.tightFor(width: 28, height: 28),
+                    visualDensity: VisualDensity.compact,
+                  ),
+          ],
         ],
       ),
     );

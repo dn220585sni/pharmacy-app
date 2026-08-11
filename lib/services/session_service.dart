@@ -186,6 +186,30 @@ class SessionService {
     return false;
   }
 
+  /// Зберегти деталі карткової оплати (`PutTermData`, Катя, контракт
+  /// TFS.OschadTrxComplete). Викликається після успішного `Purchase` на
+  /// терміналі. [paramsPayCard] — таб-роздільний рядок 21 поля
+  /// (`TerminalTxnResult.buildParamsPayCard`); [receiptCard] — оригінальний
+  /// чек/сліп з терміналу (`CurrentReceiptCard`). sessionId додає CacheApiClient.
+  static Future<bool> putTermData(
+      String numNakl, String paramsPayCard, String receiptCard) async {
+    if (ApiConfig.useMock) return false;
+    try {
+      final r = await CacheApiClient().call('PutTermData', params: {
+        'NumNakl': numNakl,
+        'ParamsPayCard': paramsPayCard,
+        'CurrentReceiptCard': receiptCard,
+      });
+      if (!r.isOk) {
+        FiscalLog.log('PutTermData FAIL nakl=$numNakl: ${r.result}');
+      }
+      return r.isOk;
+    } catch (e) {
+      FiscalLog.log('PutTermData ERROR nakl=$numNakl: $e');
+    }
+    return false;
+  }
+
   static List<Map<String, dynamic>> _mapList(dynamic v) => v is List
       ? v.whereType<Map<String, dynamic>>().toList()
       : const [];

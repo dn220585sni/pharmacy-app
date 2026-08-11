@@ -45,7 +45,11 @@ class TerminalTxnResult {
   final String paymentSystem; // VISA/MASTER → card_type
   final String cardExpiryDate;
   final String discount;
-  final String receipt; // текст сліпа для друку
+  final String discountName; // назва знижки (getDiscountName; у JSON зазвичай '')
+  final String rnk; // РНК клієнта (у JSON Purchase зазвичай відсутній)
+  final String signVerif; // 0 — підпис не потрібен, 1 — потрібен
+  final String txnType; // 1 Purchase / 2 Refund / 3 Void
+  final String receipt; // текст сліпа для друку (CurrentReceiptCard)
 
   const TerminalTxnResult({
     required this.method,
@@ -68,6 +72,10 @@ class TerminalTxnResult {
     this.paymentSystem = '',
     this.cardExpiryDate = '',
     this.discount = '',
+    this.discountName = '',
+    this.rnk = '',
+    this.signVerif = '',
+    this.txnType = '',
     this.receipt = '',
   });
 
@@ -107,6 +115,10 @@ class TerminalTxnResult {
       paymentSystem: s('paymentSystem'),
       cardExpiryDate: s('cardExpiryDate'),
       discount: s('discount'),
+      discountName: s('discountName'),
+      rnk: s('rnk'),
+      signVerif: s('signVerif'),
+      txnType: s('txnType'),
       receipt: s('receipt'),
     );
   }
@@ -137,6 +149,9 @@ class TerminalTxnResult {
     return '$yy${two(d[1])}${two(d[0])}${two(t[0])}${two(t[1])}${two(ss)}';
   }
 
+  /// Дата у форматі PutTermData `dd/mm/yyyy` (з JSON `date` "dd.mm.yyyy").
+  String get dateSlash => date.contains('.') ? date.replaceAll('.', '/') : date;
+
   /// Мапінг у блок `pay_terminal` (GetDataRRO) — для довідки/логів.
   Map<String, String> toPayTerminal() => {
         'auth_code': authCode,
@@ -148,32 +163,43 @@ class TerminalTxnResult {
         'additional_text': '',
       };
 
-  /// Мапінг у сервіс збереження банк-даних (`PutTermData`).
-  /// ⚠️ ПРОВІЗОРНО: точні назви параметрів чекаємо від Каті (контракт сервісу).
-  /// [ssum] — сума чека, [sumCash] — сума видачі готівки (ВХІДНІ, що шлемо в
-  /// термінал); решта — з відповіді. `trnBatchNum` для JSON завжди 0; `rnk`
-  /// у JSON-відповіді Purchase відсутній (лишаємо порожнім).
-  Map<String, String> toPutTermData({
+  /// Скласти `ParamsPayCard` для сервісу `PutTermData` (Катя, контракт
+  /// TFS.OschadTrxComplete): **21 поле, роздільник — ТАБУЛЯЦІЯ**, у точному
+  /// порядку. [ssum] — сума чека, [sumCash] — сума видачі готівки (ВХІДНІ, що
+  /// шлемо в термінал); [codeKsTerm] — `kodterm` обраного терміналу (до якої
+  /// каси прив'язаний). Оригінальний чек (`CurrentReceiptCard`) — це [receipt],
+  /// передається окремим параметром сервісу.
+  String buildParamsPayCard({
     required Money ssum,
     Money sumCash = Money.zero,
+    required String codeKsTerm,
   }) {
     String grn(Money m) => (m.kopiykas / 100).toStringAsFixed(2);
-    return {
-      'ssum': grn(ssum),
-      'sumCash': grn(sumCash),
-      'amount': amount,
-      'invoiceNumber': invoiceNumber,
-      'merchantId': merchant,
-      'cardHolder': cardHolderName,
-      'terminalId': terminalId,
-      'authCode': approvalCode,
-      'dateTime': dateTimeCompact,
-      'rrn': rrn,
-      'discountName': discount,
-      'pan': pan,
-      'rnk': '',
-      'rrnExt': rrnExt,
-      'trnBatchNum': '0',
-    };
+    // Прибрати табуляцію всередині значень, щоб не зламати роздільник полів.
+    String f(String v) => v.replaceAll('\t', ' ');
+    final fields = <String>[
+      f(terminalId), // 1
+      f(merchant), // 2
+      f(invoiceNumber), // 3
+      f(amount.replaceAll(',', '.')), // 4 — сума транзакції
+      f(issuerName), // 5 — тип карти
+      f(pan), // 6
+      cardHolderName.replaceAll('\t', ';'), // 7
+      f(approvalCode), // 8
+      f(rrn), // 9
+      f(dateSlash), // 10 — dd/mm/yyyy
+      f(time), // 11 — hh:mm:ss
+      f(signVerif), // 12
+      f(txnType), // 13 — 1 Purchase / 2 Refund / 3 Void
+      grn(ssum), // 14 — сума чека
+      grn(sumCash), // 15 — сума видачі готівки
+      f(discountName), // 16
+      f(rnk), // 17
+      f(rrnExt), // 18
+      '0', // 19 — TrnBatchNum (JSON завжди 0)
+      f(codeKsTerm), // 20 — CodeKsTerm
+      '', // 21 — lastresult (порожньо)
+    ];
+    return fields.join('\t');
   }
 }

@@ -8,6 +8,7 @@ import '../models/shift_state.dart';
 import 'api_config.dart';
 import 'cache_api_client.dart';
 import 'cash_service.dart';
+import 'fiscal_log.dart';
 import 'prro_service.dart';
 
 /// Результат перевірки потреби службового внесення (ProvSumZOtchet).
@@ -187,12 +188,16 @@ class ShiftService {
           openedAt != null && !_isSameDay(openedAt, DateTime.now());
       if (fromPrevDay) {
         debugPrint('ShiftService: авто-Z вчорашньої зміни перед відкриттям');
+        FiscalLog.log('startShift: зміна з попередньої доби '
+            '(відкрита $openedAt) → авто-Z і повторне відкриття');
         final autoZ = await PrroService.zReport();
         if (autoZ.success) await _fixZReportInDb();
         open = await PrroService.openShift();
       } else {
         debugPrint('ShiftService: зміна вже відкрита сьогодні — без Z, '
             'відновлюємо стан');
+        FiscalLog.log('startShift: зміна вже відкрита сьогодні '
+            '(з $openedAt) → без Z, відновлено стан');
         _state =
             ShiftState(isOpen: true, openedAt: openedAt ?? DateTime.now());
         return true;
@@ -200,8 +205,11 @@ class ShiftService {
     }
     if (!open.success) {
       debugPrint('ShiftService startShift: OPEN_SHIFT FAIL: ${open.error}');
+      FiscalLog.log('startShift ПРОВАЛ: ${open.error} '
+          '(kind=${open.errorKind}) — каса лишається без зміни');
       return false;
     }
+    FiscalLog.log('startShift: зміну відкрито, внесення=${deposit.toHryvnia()}');
     // 2. Службове внесення в ПРРО (CashDesk `/check/service`) — інакше
     // `cash_in_box` у X/Z-звітах не знає про розмінну монету і діалог
     // закриття зміни показує «Готівка в касі: 0». Збій не блокує старт.

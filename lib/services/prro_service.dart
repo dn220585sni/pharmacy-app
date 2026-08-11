@@ -982,6 +982,8 @@ class PrroService {
   /// Відкрити робочу зміну. Endpoint `POST /shift` з `action_type: OPEN_SHIFT`.
   static Future<PrroResult> openShift() async {
     if (!await _ensureAuth()) {
+      FiscalLog.log('OPEN_SHIFT: авторизація ПРРО не пройшла '
+          '(ФН=$activeFiscalNumber, ${PrroConfig.baseUrl})');
       return const PrroResult.failure(
         error: 'Помилка авторизації ПРРО',
         errorKind: PrroErrorKind.auth,
@@ -1004,28 +1006,37 @@ class PrroService {
       final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
 
       if (response.statusCode == 200 || response.statusCode == 201) {
+        FiscalLog.log('OPEN_SHIFT OK (ФН=$activeFiscalNumber)');
         return PrroResult(
           success: true,
           checkId: json['uuid']?.toString(),
           textPrint: json['text_print']?.toString(),
         );
       }
+      // Причина відмови має бути видима в release (журнал), інакше на касі
+      // видно лише «Не вдалося відкрити зміну» без жодної діагностики.
+      final msg = json['message']?.toString() ?? 'Помилка відкриття зміни';
+      FiscalLog.log('OPEN_SHIFT FAIL HTTP ${response.statusCode} '
+          '(ФН=$activeFiscalNumber): $msg');
       return PrroResult.failure(
-        error: json['message']?.toString() ?? 'Помилка відкриття зміни',
+        error: msg,
         errorKind: PrroErrorKind.logical,
       );
     } on TimeoutException {
+      FiscalLog.log('OPEN_SHIFT TIMEOUT (30с, ФН=$activeFiscalNumber)');
       return const PrroResult.failure(
         error: 'Таймаут відкриття зміни',
         errorKind: PrroErrorKind.connection,
       );
-    } on SocketException {
+    } on SocketException catch (e) {
+      FiscalLog.log('OPEN_SHIFT НЕМАЄ ЗВʼЯЗКУ з ${PrroConfig.baseUrl}: $e');
       return const PrroResult.failure(
         error: 'Немає з\'єднання з ПРРО',
         errorKind: PrroErrorKind.connection,
       );
     } catch (e) {
       debugPrint('PRRO openShift ERROR: $e');
+      FiscalLog.log('OPEN_SHIFT ERROR: $e');
       return PrroResult.failure(
         error: 'Помилка відкриття зміни: $e',
         errorKind: PrroErrorKind.logical,

@@ -24,6 +24,7 @@ import '../services/sparta_service.dart';
 import '../services/spl_params_service.dart';
 import '../services/loyalty_receipt.dart';
 import '../services/skarb_service.dart';
+import 'card_payment_dialog.dart';
 import 'cart_item_widget.dart';
 import 'cart_offer_card.dart';
 import 'checkout/bonus_discount_block.dart';
@@ -337,6 +338,43 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     );
   }
 
+  /// Демо-прев'ю вікна «Оплата банк.карткою» — показує обидва сценарії
+  /// (успіх / відхилено) без терміналу й без грошей. Для оцінки UI на касі.
+  Future<void> _previewCardDialog(PaymentTerminal t) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Text('Прев\'ю вікна оплати (демо, без грошей)',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle, color: Color(0xFF15803D)),
+              title: const Text('Сценарій: оплата успішна'),
+              onTap: () => Navigator.pop(ctx, 'success'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.cancel, color: Color(0xFFDC2626)),
+              title: const Text('Сценарій: операцію відхилено'),
+              onTap: () => Navigator.pop(ctx, 'declined'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    await CardPaymentDialog.show(
+      context,
+      terminal: t,
+      amount: Money.fromHryvnia(finalTotal),
+      demoOutcome: choice,
+    );
+  }
+
   /// Селектор платіжного термінала (показується при оплаті карткою).
   /// Дефолт — основний; якщо терміналів кілька, можна обрати резервний.
   Widget _buildTerminalSelector() {
@@ -455,16 +493,22 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   )
-                : IconButton(
-                    onPressed: _checkTerminalLink,
-                    icon: const Icon(Icons.wifi_tethering_rounded, size: 17),
-                    tooltip: 'Перевірити звʼязок '
-                        '(${sel.termIP}:${sel.termPort})',
-                    color: const Color(0xFF1E7DC8),
-                    padding: EdgeInsets.zero,
-                    constraints:
-                        const BoxConstraints.tightFor(width: 28, height: 28),
-                    visualDensity: VisualDensity.compact,
+                : GestureDetector(
+                    // Довге натискання — демо-прев'ю вікна оплати карткою
+                    // (без терміналу й грошей), щоб оцінити UI на касі.
+                    onLongPress: () => _previewCardDialog(sel),
+                    child: IconButton(
+                      onPressed: _checkTerminalLink,
+                      icon: const Icon(Icons.wifi_tethering_rounded, size: 17),
+                      tooltip: 'Перевірити звʼязок '
+                          '(${sel.termIP}:${sel.termPort}) · '
+                          'утримати — прев\'ю вікна оплати',
+                      color: const Color(0xFF1E7DC8),
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints.tightFor(width: 28, height: 28),
+                      visualDensity: VisualDensity.compact,
+                    ),
                   ),
           ],
         ],

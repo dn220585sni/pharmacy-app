@@ -34,14 +34,23 @@ class EcrTerminalClient {
     this.connectTimeout = const Duration(seconds: 5),
     this.commandTimeout = const Duration(seconds: 30),
     this.purchaseTimeout = const Duration(seconds: 90),
+    this.onStatus,
   });
+
+  /// Колбек проміжних статусів терміналу (напр. «ОЧІКУЮ КАРТКУ») — для UI.
+  /// Отримує вже людиночитабельний рядок.
+  final void Function(String status)? onStatus;
 
   /// Клієнт для обраного терміналу з `GetTermBank` (`termIP`/`termPort`).
   /// Повертає `null`, якщо термінал без адреси або не JSON-протоколу
   /// (BPOS/Ощад — окрема пізніша фаза).
-  static EcrTerminalClient? forTerminal(PaymentTerminal t) {
+  static EcrTerminalClient? forTerminal(
+    PaymentTerminal t, {
+    void Function(String status)? onStatus,
+  }) {
     if (!t.isSupported || t.portNumber <= 0) return null;
-    return EcrTerminalClient(host: t.termIP, port: t.portNumber);
+    return EcrTerminalClient(
+        host: t.termIP, port: t.portNumber, onStatus: onStatus);
   }
 
   final String host;
@@ -274,9 +283,18 @@ class EcrTerminalClient {
     if (p != null && !p.completer.isCompleted && method == p.responseMethod) {
       p.completer.complete(TerminalTxnResult.fromResponse(msg));
     } else {
-      // Проміжний статус (deviceBusy / ServiceMessage / інший method) — TODO:
-      // показувати оператору («ОЧІКУЮ КАРТКУ» тощо). Поки лог.
+      // Проміжний статус (deviceBusy / ServiceMessage / інший method) —
+      // логуємо і віддаємо в UI (напр. «ОЧІКУЮ КАРТКУ»).
       FiscalLog.log('ECR RX async: method=$method params=${msg['params']}');
+      final params = msg['params'];
+      final status = params is Map
+          ? (params['statMsgDescription'] ??
+                  params['description'] ??
+                  params['result'] ??
+                  method)
+              .toString()
+          : method;
+      if (status.isNotEmpty) onStatus?.call(status);
     }
   }
 

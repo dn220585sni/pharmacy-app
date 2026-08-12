@@ -697,16 +697,69 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   Future<bool> _sendFiscalReceipt() async {
     final isCard = paymentMethod == PaymentMethod.card;
 
+    // Готівка: сума від клієнта + решта (+ решта на Лайк-бонуси) — обов'язкові
+    // поля накладної (Катя). Для картки готівки нема → не передаємо.
+    Money? sumClient, sumChange, sumChangeSpl;
+    if (!isCard) {
+      final given = Money.tryParse(cashCtr.text);
+      if (given != null) {
+        sumClient = given;
+        final chg = given - Money.fromHryvnia(finalTotal);
+        sumChange = chg.isNegative ? Money.zero : chg;
+        if (transferChangeToBonus) {
+          sumChangeSpl = Money.tryParse(bonusTransferCtr.text) ?? Money.zero;
+        }
+      }
+    }
+
     // Накладна перед фіскалізацією: SaveSgVNakl → NumNakl (→ local_number ПРРО).
     // KodKli: готівка=код каси, картка=код банку (kodterm). TypeNakl: 2/5.
     final numNakl = await SessionService.saveNakladna(
       kodKli: isCard ? (_selectedTerminal?.kodterm ?? '') : ApiConfig.ekkKodKli,
       typeNakl: isCard ? '5' : '2',
+      sumClient: sumClient,
+      sumChange: sumChange,
+      sumChangeSpl: sumChangeSpl,
     );
     if (!mounted) return false;
     // local_number = NumNakl; фолбек timestamp якщо накладна не збереглась.
     final localNumber = int.tryParse(numNakl ?? '') ??
         DateTime.now().millisecondsSinceEpoch % 10000000000;
+
+    // ── КАРТКА (Етап 2): оплата на терміналі ПЕРЕД фіскалізацією ──
+    // Вікно «Оплата банк.карткою» з'являється тут, коли фармацевт натиснув
+    // «Провести оплату». Лише для JSON-терміналів з адресою (ПриватБанк):
+    //   approved → PutTermData(деталі) → GetDataRRO нижче підхопить pay_terminal;
+    //   відхилено/скасовано → фіскалізацію НЕ проводимо (return false — касир
+    //   може обрати готівку).
+    // BPOS/Ощад і термінали без адреси — поки без реального ECR-проведення (TODO).
+    if (isCard) {
+      final term = _selectedTerminal;
+      if (term != null && term.isSupported) {
+        final cardAmount = Money.fromHryvnia(finalTotal);
+        final res = await CardPaymentDialog.show(context,
+            terminal: term, amount: cardAmount);
+        if (!mounted) return false;
+        if (res == null || !res.approved) {
+          FiscalLog.log('Картка: оплату на терміналі не проведено — '
+              'фіскалізацію скасовано (nakl=$localNumber)');
+          return false;
+        }
+        // Деталі оплати → Caché (PutTermData); GetDataRRO візьме pay_terminal.
+        if (numNakl != null) {
+          await SessionService.putTermData(
+            numNakl,
+            res.buildParamsPayCard(ssum: cardAmount, codeKsTerm: term.kodterm),
+            res.receipt,
+          );
+          if (!mounted) return false;
+        }
+      } else {
+        FiscalLog.log('Картка: термінал "${term?.displayName ?? "не обрано"}" '
+            'без ECR-проведення (${term?.protocol.name ?? "null"}) — '
+            'фіскалізація без Purchase');
+      }
+    }
 
     // ── ЛАЙК: Sparta tx/order (pending) ПЕРЕД ПРРО — бонуси в коментар чека.
     // order OK → prId + баланси + коментар; FAIL/немає кредів → чек без бонусів

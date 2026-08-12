@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../models/money.dart';
 import 'api_config.dart';
 import 'cache_api_client.dart';
 import 'fiscal_log.dart';
@@ -52,18 +53,31 @@ class SessionService {
   /// (внутрішній номер накладної) або `null` при помилці.
   /// [kodKli]: готівка → код каси (ekkKodKli); картка → код банку (kodterm).
   /// [typeNakl]: готівка='2', картка='5'.
+  /// [sumClient] — сума, яку дав клієнт (готівка); [sumChange] — решта клієнту;
+  /// [sumChangeSpl] — частина решти, переказана на Лайк-бонуси. Обов'язкові для
+  /// готівки (Катя, 2026-08-12: без них губимо інформацію про суму/решту).
   static Future<String?> saveNakladna({
     required String kodKli,
     required String typeNakl,
+    Money? sumClient,
+    Money? sumChange,
+    Money? sumChangeSpl,
   }) async {
     if (ApiConfig.useMock) return null;
     try {
-      final r = await CacheApiClient().call('SavesgVNakl', params: {
+      String grn(Money m) => (m.kopiykas / 100).toStringAsFixed(2);
+      final params = <String, String>{
         'orderId': '',
         'NumIzmNakl': '',
         'KodKli': kodKli,
         'TypeNakl': typeNakl,
-      });
+      };
+      // Нові поля SavesgVNakl (Катя, 2026-08-12): SumClient/SumSdachi/SumSdachiSPL.
+      // Обов'язкові для готівки; для безготівки — необов'язкові, тож не передаємо.
+      if (sumClient != null) params['SumClient'] = grn(sumClient);
+      if (sumChange != null) params['SumSdachi'] = grn(sumChange);
+      if (sumChangeSpl != null) params['SumSdachiSPL'] = grn(sumChangeSpl);
+      final r = await CacheApiClient().call('SavesgVNakl', params: params);
       if (r.isOk) {
         final numNakl = r.data['NumNakl']?.toString();
         debugPrint('SessionService: SaveSgVNakl NumNakl=$numNakl');

@@ -20,6 +20,7 @@ import '../services/terminal_service.dart';
 import '../services/prro_queue.dart';
 import '../services/prro_service.dart';
 import '../services/receipt_archive.dart';
+import '../services/sale_journal.dart';
 import '../services/session_service.dart';
 import '../services/sparta_service.dart';
 import '../services/spl_params_service.dart';
@@ -733,9 +734,37 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       sumChangeSpl: sumChangeSpl,
     );
     if (!mounted) return false;
-    // local_number = NumNakl; фолбек timestamp якщо накладна не збереглась.
-    final localNumber = int.tryParse(numNakl ?? '') ??
-        DateTime.now().millisecondsSinceEpoch % 10000000000;
+    // A3: накладна не збереглась → продаж БЛОКУЄМО. Раніше тут був фолбек
+    // `local_number = timestamp`: чек ішов у ПРРО, але продажу не існувало в
+    // Caché — ні списання залишку, ні відмітки в касі, ні звірки за NumNakl
+    // (на цьому ж номері тримається відсікання дублікатів A1).
+    final localNumber = int.tryParse(numNakl ?? '');
+    if (numNakl == null || numNakl.isEmpty || localNumber == null) {
+      FiscalLog.log('A3 БЛОКУВАННЯ: накладна не збереглась '
+          '(SaveSgVNakl → "${numNakl ?? "null"}") — продаж не проводимо');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Накладна не збереглась на сервері — продаж '
+                'заблоковано. Спробуйте ще раз або викличте адміністратора.'),
+            duration: Duration(seconds: 5),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+      }
+      return false;
+    }
+
+    // Write-ahead: намір продати лягає на диск ДО фіскалізації, щоб падіння
+    // між «гроші взято» і «продаж зафіксовано» не загубило чек мовчки.
+    await SaleJournal.start(
+      numNakl: numNakl,
+      localNumber: localNumber,
+      total: finalTotal,
+      isCard: isCard,
+    );
+    if (!mounted) return false;
 
     // ── КАРТКА (Етап 2): оплата на терміналі ПЕРЕД фіскалізацією ──
     // Вікно «Оплата банк.карткою» з'являється тут, коли фармацевт натиснув
@@ -754,17 +783,17 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         if (res == null || !res.approved) {
           FiscalLog.log('Картка: оплату на терміналі не проведено — '
               'фіскалізацію скасовано (nakl=$localNumber)');
+          // Фіскального сліду немає — добивати нічого.
+          await SaleJournal.abort(numNakl, 'оплату карткою не проведено');
           return false;
         }
         // Деталі оплати → Caché (PutTermData); GetDataRRO візьме pay_terminal.
-        if (numNakl != null) {
-          await SessionService.putTermData(
-            numNakl,
-            res.buildParamsPayCard(ssum: cardAmount, codeKsTerm: term.kodterm),
-            res.receipt,
-          );
-          if (!mounted) return false;
-        }
+        await SessionService.putTermData(
+          numNakl,
+          res.buildParamsPayCard(ssum: cardAmount, codeKsTerm: term.kodterm),
+          res.receipt,
+        );
+        if (!mounted) return false;
       } else {
         FiscalLog.log('Картка: термінал "${term?.displayName ?? "не обрано"}" '
             'без ECR-проведення (${term?.protocol.name ?? "null"}) — '
@@ -790,9 +819,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
           '(loyalty=${loyalty == null ? "null" : "phone=${loyalty.phone} "
               "cardNo=порожній"}) — чек без бонусів');
     }
-    if (loyalty?.cardNo != null &&
-        loyalty!.cardNo!.isNotEmpty &&
-        numNakl != null) {
+    if (loyalty?.cardNo != null && loyalty!.cardNo!.isNotEmpty) {
       loyaltyCard = loyalty.cardNo;
       final splParams = await SplParamsService.fetch();
       final spl = await SessionService.getDataSPL(numNakl);
@@ -846,8 +873,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
     // Основний шлях: готові products/payments з GetDataRRO (Caché проставляє
     // tax_prc/letters і вже округлює payments.sum). Fallback — клієнтська збірка.
-    final rro =
-        numNakl != null ? await SessionService.getDataRRO(numNakl) : null;
+    final rro = await SessionService.getDataRRO(numNakl);
     if (!mounted) return false;
     final isRaw = rro != null;
 
@@ -877,7 +903,6 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       roundSum = fb.roundSum;
       FiscalLog.log('SALE fallback клієнтська збірка (GetDataRRO недоступний): '
           'total=$saleTotal round=$roundSum nakl=$localNumber '
-          'numNakl=${numNakl ?? "NULL"} '
           '${isCard ? "картка" : "готівка"} позиції: '
           '${fbProducts.map((p) => '${p.code ?? "?"}=${p.cost}').join('; ')}');
     }
@@ -932,15 +957,18 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     if (result.success) {
       final fiscN = result.orderNum ?? '';
       final urlN = result.link ?? '';
+      // A3: гроші взято — стадія на диск ДО PutKasa. Якщо застосунок упаде
+      // саме тут, старт добʼє фіксацію за цим записом.
+      await SaleJournal.markFiscalized(numNakl, orderNum: fiscN, link: urlN);
       // PutKasa — фіксація чека ПРРО в касі/накладній для БУДЬ-ЯКОГО чека
       // (готівка/картка, Лайк/не-Лайк). Без цього чек проходить по ПРРО, але
       // НЕ відмічається пробитим по касі (Задача 31, пост-фіскалізація A3).
-      if (numNakl != null) {
-        await SessionService.putKasa(numNakl, fiscN, '0', urlN);
+      if (await SessionService.putKasa(numNakl, fiscN, '0', urlN)) {
+        await SaleJournal.markFixed(numNakl);
       }
       // ── ЛАЙК: завершення ланцюга (лише коли order pending пройшов) ──
       // orderModify(+лінк ФН) → orderStatusChange(D) → PutKasaSPL(1).
-      if (sparta != null && orderNo != null && numNakl != null) {
+      if (sparta != null && orderNo != null) {
         await sparta.orderModify(
           no: numNakl,
           orderNo: orderNo,
@@ -959,6 +987,8 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         FiscalLog.log('SPL завершено: orderModify + D, '
             'PutKasaSPL(1)=${prId == null ? "пропущено (prId null)" : splFixed}');
       }
+      // Продаж пройшов усі стадії — знімаємо з журналу незавершених.
+      await SaleJournal.finish(numNakl);
       // Зберегти PDF чека в архів (папка receipts) — той самий контент, що у
       // вікні. Best-effort, у фоні, не блокує показ.
       unawaited(ReceiptArchive.savePdf(result));
@@ -1002,6 +1032,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
           error: result.error,
         );
       }
+      // A3: продаж лишається незавершеним у журналі — чек ще не існує. Коли
+      // черга його проведе, відновлення на старті добʼє PutKasa за NumNakl.
+      await SaleJournal.markNote(numNakl, 'чек у черзі ПРРО');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1018,6 +1051,8 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       return mounted;
     }
 
+    // Логічна відмова ПРРО — чека немає, добивати нічого.
+    await SaleJournal.abort(numNakl, 'ПРРО відхилив чек: ${result.error}');
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

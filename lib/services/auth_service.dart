@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import 'api_config.dart';
 import 'cache_api_client.dart';
+import 'sale_journal.dart';
 
 /// Інформація про фармацевта.
 class PharmacistInfo {
@@ -74,6 +77,11 @@ class AuthService {
         _api.sessionId = id;
         lastLoginError = null;
         debugPrint('LoginRlz OK: sessionId=$id${force ? ' (force)' : ''}');
+        // A3: добити продажі, обірвані посеред конвеєра. САМЕ ТУТ, а не на
+        // старті застосунку: `PutKasa` вимагає авторизованої сесії Caché, і в
+        // main() вона ще не встановлена — відновлення там гарантовано падало з
+        // «Не авторизована сесія» (спіймано на касі 1334, 2026-08-26).
+        unawaited(SaleJournal.recover());
         return true;
       }
     }

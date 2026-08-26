@@ -36,6 +36,9 @@ void main() {
     await PrroService.loadCachedToken();
     await PrroQueue.load();
     if (PrroQueue.count > 0) await PrroQueue.flush();
+    // A3 (відновлення обірваних продажів) свідомо НЕ тут: `PutKasa` вимагає
+    // авторизованої сесії Caché, якої на цьому етапі ще немає. Викликається
+    // після успішного LoginRlz — див. `AuthService.login`.
     // Відновити стан зміни з РРО (щоб рестарт посеред дня не робив авто-Z і
     // пропонував Z при виході). Дедуплікується з викликом у pos_screen.
     await ShiftService.ensureRestored();

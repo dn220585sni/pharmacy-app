@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import '../utils/json_num.dart';
 import 'fiscal_log.dart';
 
 /// Середовище ПРРО.
@@ -346,29 +347,13 @@ class PrroPayment {
   };
 }
 
-/// Терпимий парсер чисел з відповідей ПРРО: `0.5`, `"0.5"`, `"0,5"`, `null`.
-///
-/// ⚠️ Каса віддає `local_number` у `checks_list` РЯДКОМ (`"2900661785"`), хоч
-/// `sum` там числом. Жорсткий каст `as num?` кидав
+/// ⚠️ Числа з ПРРО читаються ТІЛЬКИ через `flexDouble`/`flexInt`
+/// (`utils/json_num.dart`): каса віддає `local_number` у `checks_list` РЯДКОМ
+/// (`"2900661785"`), хоч `sum` там числом. Жорсткий каст `as num?` кидав
 /// `type 'String' is not a subtype of type 'num?'` і валив розбір УСЬОГО
 /// X-звіту — разом зі звіркою дублікатів A1, яка через це мовчки не працювала
-/// (спіймано на касі 1334, 2026-08-26). Тому числа тут читаємо терпимо
-/// незалежно від того, яким типом вони прийшли цього разу.
-double? _flexDouble(dynamic v) {
-  if (v is num) return v.toDouble();
-  if (v is String) return double.tryParse(v.trim().replaceAll(',', '.'));
-  return null;
-}
-
-/// Те саме для цілих: `597`, `"597"`, `"597.0"`.
-int? _flexIntOf(dynamic v) {
-  if (v is num) return v.toInt();
-  if (v is String) {
-    return int.tryParse(v.trim()) ?? _flexDouble(v)?.toInt();
-  }
-  return null;
-}
-
+/// (спіймано на касі 1334, 2026-08-26).
+///
 /// Чек у списку зміни (елемент `checks_list` з X-звіту).
 class PrroShiftCheck {
   final String type;          // "Z_SALE", "Z_RETURN" тощо
@@ -389,8 +374,8 @@ class PrroShiftCheck {
         type: json['type']?.toString() ?? '',
         orderNum: json['order_num']?.toString() ?? '',
         datetime: json['datetime']?.toString(),
-        localNumber: _flexIntOf(json['local_number']),
-        sum: _flexDouble(json['sum']) ?? 0,
+        localNumber: flexInt(json['local_number']),
+        sum: flexDouble(json['sum']) ?? 0,
       );
 }
 
@@ -436,13 +421,6 @@ class PrroXReport {
       v == 1 ||
       (v is String && (v == '1' || v.toLowerCase() == 'true'));
 
-  /// num або рядок → int (напр. `shift_duration` може прийти рядком).
-  static int? _flexInt(dynamic v) {
-    if (v is num) return v.toInt();
-    if (v is String) return int.tryParse(v.trim());
-    return null;
-  }
-
   /// Терпимий парсер дати: ISO або `DD.MM.YYYY[ HH:MM[:SS]]`. null якщо не вийшло.
   static DateTime? parseDate(dynamic v) {
     final s = v?.toString().trim() ?? '';
@@ -466,16 +444,16 @@ class PrroXReport {
     return PrroXReport(
       shiftOpen: _truthy(json['shift_state']),
       // Числа — через терпимі парсери: каса подекуди віддає їх рядками, а один
-      // жорсткий каст валить розбір усієї відповіді (див. [_flexDouble]).
-      cashInBox: _flexDouble(json['cash_in_box']) ?? 0,
-      cashInBoxStart: _flexDouble(json['cash_in_box_start']) ?? 0,
-      serviceInput: _flexDouble(json['service_input']) ?? 0,
-      shiftDurationMinutes: _flexInt(json['shift_duration']),
+      // жорсткий каст валить розбір усієї відповіді (див. utils/json_num.dart).
+      cashInBox: flexDouble(json['cash_in_box']) ?? 0,
+      cashInBoxStart: flexDouble(json['cash_in_box_start']) ?? 0,
+      serviceInput: flexDouble(json['service_input']) ?? 0,
+      shiftDurationMinutes: flexInt(json['shift_duration']),
       // Час відкриття: SmartConnect (прод) віддає його в OPEN_SESSION_TIME
       // (from_date порожній, shift_duration відсутній); cloud-test — у from_date.
       openedAt: parseDate(json['OPEN_SESSION_TIME']) ?? parseDate(json['from_date']),
-      ordersCount: _flexIntOf(real['orders_count']) ?? 0,
-      ordersSum: _flexDouble(real['sum']) ?? 0,
+      ordersCount: flexInt(real['orders_count']) ?? 0,
+      ordersSum: flexDouble(real['sum']) ?? 0,
       checks: list
           .whereType<Map<String, dynamic>>()
           .map(PrroShiftCheck.fromJson)

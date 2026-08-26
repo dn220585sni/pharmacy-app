@@ -781,6 +781,10 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       final spl = await SessionService.getDataSPL(numNakl);
       if (splParams != null && splParams.isUsable && spl != null) {
         orderNo = splParams.orderNoFor(numNakl);
+        // Діагностика середовища: у яку Спарту реально шлемо (прод чи демо
+        // TestAnc2) — щоб не шукати живі чеки не в тому бекофісі.
+        FiscalLog.log('SPL середовище: baseUrl=${splParams.baseUrl} '
+            'placeCode=${splParams.placeCode}');
         splBasket = spl.basket;
         splMops = spl.mops;
         splParamsList = spl.params;

@@ -865,7 +865,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
           '${fbProducts.map((p) => '${p.code ?? "?"}=${p.cost}').join('; ')}');
     }
 
-    final result = isRaw
+    var result = isRaw
         ? await PrroService.createSaleReceiptRaw(
             products: rawProducts,
             payments: rawPayments,
@@ -880,10 +880,35 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
             roundSum: roundSum,
             localNumber: localNumber,
           );
-
     if (!mounted) return false;
+
+    // Страховка: raw-чек від GetDataRRO відхилено ЛОГІЧНО (напр. невірний
+    // tax_prc/letters у даних Caché — «БЕЗ ПДВ має бути 0%») → повторюємо
+    // клієнтською збіркою, щоб каса не ставала. ⚠️ Маскує серверний баг
+    // GetDataRRO — причина лишається в лозі; Лайк-коментар у fallback не йде.
+    var usedRaw = isRaw;
+    if (isRaw && !result.success && result.errorKind == PrroErrorKind.logical) {
+      FiscalLog.log('SALE raw ВІДХИЛЕНО логічно: ${result.error} → '
+          'повтор клієнтською збіркою (nakl=$localNumber)');
+      final fb = _buildFallbackReceipt(isCard);
+      fbProducts = fb.products;
+      fbPayments = fb.payments;
+      saleTotal = fb.totalSum;
+      roundSum = fb.roundSum;
+      result = await PrroService.createSaleReceipt(
+        products: fbProducts,
+        payments: fbPayments,
+        totalSum: saleTotal,
+        roundSum: roundSum,
+        localNumber: localNumber,
+      );
+      if (!mounted) return false;
+      usedRaw = false;
+    }
+
     FiscalLog.log(result.success
-        ? 'SALE OK: №${result.orderNum} (nakl=$localNumber)'
+        ? 'SALE OK: №${result.orderNum} (nakl=$localNumber'
+            '${usedRaw ? "" : ", fallback"})'
         : 'SALE FAIL: ${result.error} (nakl=$localNumber)');
 
     if (result.success) {
@@ -924,7 +949,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     }
 
     if (result.errorKind == PrroErrorKind.connection) {
-      if (isRaw) {
+      if (usedRaw) {
         await PrroQueue.enqueueSaleRaw(
           products: rawProducts,
           payments: rawPayments,

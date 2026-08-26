@@ -2745,9 +2745,16 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   // ── Server pricing (GetSumSkid) ─────────────────────────────────────────
 
-  /// Сума до показу в UI: серверна якщо є валідний `_serverPricing`,
-  /// інакше fallback на локальну `_cartTotal`.
-  double get _displayCartTotal => _serverPricing?.total ?? _cartTotal;
+  /// Сума до показу в UI (кнопка над таблицею): ПОВНА сума без готівкового
+  /// округлення — узгоджено з «До сплати» у чекауті (дефолт картка). Округлення
+  /// (НБУ 10 коп) застосовується лише при свідомому виборі готівки, тож у
+  /// загальному індикаторі показуємо неокруглену суму (`SumCheck` + повернута
+  /// знижка округлення), інакше fallback на локальну `_cartTotal`.
+  double get _displayCartTotal {
+    final sp = _serverPricing;
+    if (sp == null) return _cartTotal;
+    return sp.total + sp.roundingDiscount;
+  }
 
   /// Snapshot тих параметрів, що впливають на калькуляцію цін на сервері.
   String _pricingKey() {

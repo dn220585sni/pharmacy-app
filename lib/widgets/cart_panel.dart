@@ -704,11 +704,17 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       final given = Money.tryParse(cashCtr.text);
       if (given != null) {
         sumClient = given;
-        final chg = given - Money.fromHryvnia(finalTotal);
-        sumChange = chg.isNegative ? Money.zero : chg;
+        final totalChg = given - Money.fromHryvnia(finalTotal);
+        var cashChg = totalChg.isNegative ? Money.zero : totalChg;
+        // Клієнт може покласти ЧАСТИНУ решти на Лайк (Катя): SumSdachi — чиста
+        // решта готівкою (зменшена на цю частину), SumSdachiSPL — частина на Лайк.
         if (transferChangeToBonus) {
-          sumChangeSpl = Money.tryParse(bonusTransferCtr.text) ?? Money.zero;
+          final toLike = Money.tryParse(bonusTransferCtr.text) ?? Money.zero;
+          sumChangeSpl = toLike;
+          final rest = cashChg - toLike;
+          cashChg = rest.isNegative ? Money.zero : rest;
         }
+        sumChange = cashChg;
       }
     }
 

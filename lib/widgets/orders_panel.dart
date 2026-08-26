@@ -845,9 +845,33 @@ class OrdersPanelState extends State<OrdersPanel>
     resetCheckout();
   }
 
+  /// A8: чи можна проводити оплату інтернет-замовлення.
+  ///
+  /// `false` на живому сервері: цей шлях ставить `UpdateOrderStatus('apteka
+  /// pay')` БЕЗ фіскального чека — гроші беруться, чек не пробивається. Кошик
+  /// (`cart_panel`) має повний конвеєр (накладна → ПРРО → PutKasa), а
+  /// OrdersPanel до нього ще не підключений (задача D1 — спільний SaleService).
+  /// У mock-режимі лишаємо робочим: там немає ні грошей, ні ПРРО.
+  static bool get _orderPaymentAllowed => ApiConfig.useMock;
+
   void _processOrderPayment() {
     final order = _selectedOrder;
     if (order == null) return;
+
+    if (!_orderPaymentAllowed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Оплата інтернет-замовлення тимчасово недоступна: фіскальний чек '
+            'для цього шляху ще не підключено. Проведіть продаж через кошик.',
+          ),
+          duration: Duration(seconds: 5),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Color(0xFFB45309),
+        ),
+      );
+      return;
+    }
 
     // Оновлюємо статус на сервері
     OrderService.updateOrderStatus(
@@ -2578,33 +2602,39 @@ class OrdersPanelState extends State<OrdersPanel>
         ),
       );
 
-  Widget _orderPayButtonWidget() => GestureDetector(
-        key: const ValueKey('order_pay_btn'),
-        onTap: _processOrderPayment,
-        child: Container(
-          width: double.infinity,
-          height: 46,
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E7DC8),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.payment_rounded, color: Colors.white, size: 18),
-              SizedBox(width: 7),
-              Text(
-                'Провести оплату',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
+  Widget _orderPayButtonWidget() {
+    // A8: поки фіскального конвеєра для замовлень немає, кнопка неактивна на
+    // вигляд, а натискання пояснює причину (нічого не «клацає» мовчки).
+    final enabled = _orderPaymentAllowed;
+    return GestureDetector(
+      key: const ValueKey('order_pay_btn'),
+      onTap: _processOrderPayment,
+      child: Container(
+        width: double.infinity,
+        height: 46,
+        decoration: BoxDecoration(
+          color: enabled ? const Color(0xFF1E7DC8) : const Color(0xFF94A3B8),
+          borderRadius: BorderRadius.circular(10),
         ),
-      );
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(enabled ? Icons.payment_rounded : Icons.lock_outline_rounded,
+                color: Colors.white, size: 18),
+            const SizedBox(width: 7),
+            Text(
+              enabled ? 'Провести оплату' : 'Оплата недоступна',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

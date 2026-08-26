@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:win32_registry/win32_registry.dart';
 import 'api_config.dart';
+import 'fiscal_log.dart';
 import 'prro_service.dart';
 
 /// Per-аптека конфіг із Windows-реєстру `HKEY_CURRENT_USER\Software\ZSMU\Farm`
@@ -34,6 +35,11 @@ class RegistryConfig {
   /// Завантажити конфіг із реєстру (виклик на старті, до runApp).
   /// Якщо ключів/реєстру немає — лишаються значення за замовчуванням з ApiConfig.
   static void load() {
+    _loadFromRegistry();
+    _logFiscalTrust();
+  }
+
+  static void _loadFromRegistry() {
     if (!Platform.isWindows) return;
     RegistryKey key;
     try {
@@ -64,6 +70,21 @@ class RegistryConfig {
       _loadPrro(key);
     } finally {
       key.close();
+    }
+  }
+
+  /// A5: гучний слід у журналі ще на старті, а не в момент першого продажу.
+  /// Якщо ФН не з реєстру — у release фіскальні операції будуть заблоковані
+  /// (див. `PrroService._guardFiscalNumber`), і касир має дізнатись про це не
+  /// посеред чека. Викликається і тоді, коли реєстр узагалі не відкрився.
+  static void _logFiscalTrust() {
+    if (!PrroConfig.fiscalTrusted) {
+      FiscalLog.log('⚠️ A5: ФН не отримано з реєстру (ekkPort) — фіскальні '
+          'операції ЗАБЛОКОВАНО, щоб чеки не пішли на тестовий '
+          '${PrroConfig.numFiscal}. Налаштуйте ZSMU\\Farm → ekkPort.');
+    } else if (!PrroConfig.fiscalFromRegistry) {
+      FiscalLog.log('⚠️ A5: ФН ${PrroConfig.numFiscal} — compile-time дефолт '
+          '(debug/PRRO_ALLOW_DEFAULT_FISCAL). На бойовій касі так не можна.');
     }
   }
 

@@ -66,6 +66,34 @@ class PrroConfig {
   /// на тестовий ФН (критерій A5).
   static bool fiscalFromRegistry = false;
 
+  /// A5: дозволити фіскалізацію з compile-time дефолтом ФН у release.
+  /// `--dart-define=PRRO_ALLOW_DEFAULT_FISCAL=true` — аварійний вимикач, якщо
+  /// каса має працювати до налагодження реєстру. За замовчуванням вимкнено.
+  static const allowDefaultFiscal =
+      bool.fromEnvironment('PRRO_ALLOW_DEFAULT_FISCAL');
+
+  /// A5: чи можна взагалі фіскалізувати цим ФН.
+  ///
+  /// `true` лише коли номер прийшов з реєстру каси (`ZSMU\Farm → ekkPort`).
+  /// Інакше в бінарнику лишається дефолт [numFiscal] = ТЕСТОВИЙ ФН, і чеки
+  /// бойової каси пішли б на нього — мовчки, з коректним «SALE OK» у лозі.
+  /// Debug-збірка (розробка на cloud test) і явний [allowDefaultFiscal]
+  /// дозволені.
+  static bool get fiscalTrusted => fiscalTrustedWhen(
+        fromRegistry: fiscalFromRegistry,
+        allowDefault: allowDefaultFiscal,
+        isDebugBuild: kDebugMode,
+      );
+
+  /// Правило [fiscalTrusted] у чистому вигляді — щоб таблицю рішень можна було
+  /// покрити тестами (у `flutter test` `kDebugMode` завжди true).
+  static bool fiscalTrustedWhen({
+    required bool fromRegistry,
+    required bool allowDefault,
+    required bool isDebugBuild,
+  }) =>
+      fromRegistry || allowDefault || isDebugBuild;
+
   /// Готовий Bearer-токен з реєстру (`bearer`, з ОК ПРРО, живе ~365 днів).
   /// Використовується поки не прострочений; після ре-авторизації новий
   /// пишеться назад у реєстр через [persistBearerToRegistry].
@@ -473,6 +501,27 @@ class PrroService {
   /// збігалось випадково, тому баг був невидимий.
   static int get activeFiscalNumber => PrroConfig.numFiscal;
 
+  /// A5-гард: не дати створити фіскальний документ, коли ФН не з реєстру.
+  ///
+  /// Повертає `null`, якщо все гаразд; інакше — готову відмову. Тип помилки
+  /// СВІДОМО `logical`, а не `connection`: чек має заблокувати продаж, а не
+  /// лягти в offline-чергу й піти на тестовий ФН пізніше.
+  ///
+  /// Z-звіт навмисно НЕ гардимо: якщо зміна вже відкрита, її треба мати чим
+  /// закрити, а Z нових грошових документів не створює.
+  static PrroResult? _guardFiscalNumber(String operation) {
+    if (PrroConfig.fiscalTrusted) return null;
+    const msg = 'Фіскальний номер не налаштований у реєстрі каси '
+        '(ZSMU\\Farm → ekkPort). Операцію заблоковано, щоб чек не пішов на '
+        'тестовий ФН. Зверніться до адміністратора.';
+    FiscalLog.log('A5 БЛОКУВАННЯ [$operation]: ФН не з реєстру, '
+        'у бінарнику дефолт ${PrroConfig.numFiscal} — операцію відхилено');
+    return const PrroResult.failure(
+      error: msg,
+      errorKind: PrroErrorKind.logical,
+    );
+  }
+
   static Map<String, String> get _headers => {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
@@ -684,6 +733,9 @@ class PrroService {
       );
     }
 
+    final blocked = _guardFiscalNumber('SALE');
+    if (blocked != null) return blocked;
+
     if (!await _ensureAuth()) {
       return const PrroResult.failure(
         error: 'Помилка авторизації ПРРО',
@@ -794,6 +846,9 @@ class PrroService {
     bool isReturn = false,
     String? comment,
   }) async {
+    final blocked = _guardFiscalNumber(isReturn ? 'RETURN(raw)' : 'SALE(raw)');
+    if (blocked != null) return blocked;
+
     if (!await _ensureAuth()) {
       return const PrroResult.failure(
         error: 'Помилка авторизації ПРРО',
@@ -910,6 +965,9 @@ class PrroService {
         isReturn: true,
       );
     }
+
+    final blocked = _guardFiscalNumber('RETURN');
+    if (blocked != null) return blocked;
 
     if (!await _ensureAuth()) {
       return const PrroResult.failure(
@@ -1153,6 +1211,11 @@ class PrroService {
 
   /// Відкрити робочу зміну. Endpoint `POST /shift` з `action_type: OPEN_SHIFT`.
   static Future<PrroResult> openShift() async {
+    // Зміну на чужому (тестовому) ФН відкривати не можна — з неї потім піде
+    // весь день продажів.
+    final blocked = _guardFiscalNumber('OPEN_SHIFT');
+    if (blocked != null) return blocked;
+
     if (!await _ensureAuth()) {
       FiscalLog.log('OPEN_SHIFT: авторизація ПРРО не пройшла '
           '(ФН=$activeFiscalNumber, ${PrroConfig.baseUrl})');
@@ -1224,6 +1287,10 @@ class PrroService {
     required bool isInput,
     required double sum,
   }) async {
+    final blocked =
+        _guardFiscalNumber(isInput ? 'SERVICE_INPUT' : 'SERVICE_OUTPUT');
+    if (blocked != null) return blocked;
+
     if (!await _ensureAuth()) {
       return const PrroResult.failure(
         error: 'Помилка авторизації ПРРО',

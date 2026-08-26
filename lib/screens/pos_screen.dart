@@ -10,6 +10,7 @@ import '../models/stop_price_action.dart';
 import '../services/auth_service.dart';
 import '../services/cart_price_service.dart';
 import '../services/drug_service.dart';
+import '../services/fiscal_log.dart';
 import '../services/pakunok_service.dart';
 import '../services/social_projects_service.dart';
 import '../services/stop_price_service.dart';
@@ -627,6 +628,44 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
   }
 
+  /// Знайти партію (s-код) товару-заміни ЄДК за його u-кодом.
+  ///
+  /// `SearchByNameSKU` шукає за назвою і віддає рядки з обома кодами, тож
+  /// шукаємо за назвою заміни й вибираємо рядок ТОЧНО за `ukod` — назва може
+  /// збігатись у різних виробників/фасувань. Серед кількох партій одного
+  /// товару беремо першу з наявним залишком (сервер віддає їх у порядку FEFO).
+  /// Фолбек за назвою свідомо НЕ робимо: краще заблокувати додавання, ніж
+  /// продати не той товар.
+  static Future<DrugSearchItem?> _resolveEdkBatch(
+      String ukod, String name) async {
+    if (ukod.isEmpty || name.isEmpty) return null;
+    try {
+      var lastRows = <DrugSearchItem>[];
+      var lastQuery = '';
+      for (final query in EdkOffer.searchQueriesFor(name)) {
+        lastQuery = query;
+        lastRows = await DrugService.searchByName(query);
+        final sameProduct = lastRows.where((r) => r.ukod == ukod).toList();
+        if (sameProduct.isEmpty) continue;
+        // Кілька партій одного товару → перша з наявним залишком
+        // (сервер віддає їх у порядку FEFO).
+        return sameProduct.firstWhere(
+          (r) => r.qty > 0,
+          orElse: () => sameProduct.first,
+        );
+      }
+      // Діагностика в release-лог: видно, чи пошук нічого не знайшов, чи
+      // знайшов, але з іншими u-кодами.
+      FiscalLog.log('ЄДК ДІАГНОСТИКА: останній запит "$lastQuery" → '
+          '${lastRows.length} рядків, шукали ukod=$ukod; перші: '
+          '${lastRows.take(3).map((r) => "${r.name}|ids=${r.ids}|ukod=${r.ukod}").join(" ;; ")}');
+      return null;
+    } catch (e) {
+      debugPrint('ЄДК: пошук партії для $ukod впав: $e');
+      return null;
+    }
+  }
+
   /// Fetch EDK offers for a specific drug from Caché GetEdkOffers.
   ///
   /// [drug] — товар-донор
@@ -666,18 +705,59 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
       if (!mounted) return;
 
+      // ⚠️ КРИТИЧНО: заміні потрібен s-код (код приходу), а `replacementId` —
+      // це u-код (`762*1*51*10****`). Без s-коду позиція не резервується
+      // (sgVRoznSetLock приймає лише s-код), а серверний кошик = набір
+      // резервувань → GetSumSkid рахує суму БЕЗ неї, і в накладну/чек вона теж
+      // не потрапляє.
+      //
+      // Резолвимо партію через `SearchByNameSKU` — той самий сервіс, що
+      // наповнює таблицю пошуку: він єдиний віддає ОБА коди (`ids` = s-код і
+      // `ukod`), тож рядок можна вибрати точно за u-кодом заміни.
+      // ⚠️ НЕ через `GetSKUprice`: він u-коди не приймає взагалі — сервер падає
+      // з `<UNDEFINED>Price+345^KabService3` (перевірено 2026-08-26).
+      final batch = await _resolveEdkBatch(offer.replacementId, offer.replacementName);
+      if (!mounted) return;
+      final skod = batch?.ids ?? '';
+      // Слід у release-лозі: без нього не видно, чи заміна взагалі резолвиться
+      // в партію на реальній касі.
+      FiscalLog.log(skod.isEmpty
+          ? 'ЄДК: ${offer.replacementName} — s-код НЕ резолвиться '
+              '(u-код ${offer.replacementId}) → пропозицію показуємо, '
+              'додавання в кошик заблоковано'
+          : 'ЄДК: ${offer.replacementName} → s-код $skod, '
+              'залишок ${batch!.qty}, ціна ${batch.price}');
+
       final replacementDrug = Drug(
-        id: 'edk_${offer.replacementId}',
+        // srv_<s-код> — той самий формат, що й у звичайних товарів: на нього
+        // зав'язані резервування і матчинг цін GetSumSkid. Без s-коду лишаємо
+        // префікс `edk_`, який блокує додавання в кошик.
+        id: skod.isNotEmpty ? 'srv_$skod' : 'edk_${offer.replacementId}',
         name: offer.replacementName,
-        manufacturer: replacementDetail?.manufacturer ?? '',
-        category: replacementDetail?.category ?? '',
-        price: offer.replacementPrice,
-        stock: 1,
+        nameUkr: batch?.nameUkr,
+        manufacturer:
+            replacementDetail?.manufacturer ?? batch?.manufacturer ?? '',
+        category: replacementDetail?.category ?? batch?.category ?? '',
+        // Ціна з таблиці авторитетна (та сама, що бачить касир у пошуку);
+        // ціна з пропозиції — фолбек.
+        price: (batch?.price ?? 0) > 0 ? batch!.price : offer.replacementPrice,
+        stock: batch?.qty ?? 0,
+        stockRaw: batch?.qtyRaw,
         unit: 'шт',
-        skuCode: offer.replacementId,
+        ukod: offer.replacementId,
+        skuCode: skod.isNotEmpty ? skod : null,
+        expiryDate: batch?.expiryDate,
+        barcode: replacementDetail?.barcode,
+        unitsPerPackage:
+            replacementDetail?.unitsPerPackage ?? batch?.unitsPerPackage,
+        locationCode: batch?.shelf,
         imageUrl: imageUrl ?? replacementDetail?.imageUrl,
-        pharmacistBonus: replacementDetail?.pharmacistBonus,
+        pharmacistBonus: replacementDetail?.pharmacistBonus ?? batch?.bonus,
       );
+      if (batch != null && batch.price != offer.replacementPrice) {
+        debugPrint('ЄДК: ціна пропозиції ${offer.replacementPrice} ≠ '
+            'ціна таблиці ${batch.price} (${offer.replacementName}) — беремо з таблиці');
+      }
 
       String? promo;
       if (offer.replacementBonus > 0) {
@@ -2551,23 +2631,44 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
   }
 
+  /// Заміну без s-коду продати НЕМОЖЛИВО: вона не резервується, не потрапляє
+  /// в серверний кошик, а отже ні в суму `GetSumSkid`, ні в накладну, ні в чек.
+  /// Раніше така позиція мовчки лягала в кошик і занижувала суму — краще
+  /// відмовити касиру, ніж продати товар повз чек.
+  bool _ensureEdkSellable(Drug replacement) {
+    if (!replacement.id.startsWith('edk_')) return true; // EdkOffer.isSellable
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${replacement.name}: не вдалося визначити партію товару '
+            '(s-код). Додайте препарат через пошук.'),
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFFB45309),
+      ),
+    );
+    debugPrint('ЄДК: додавання заблоковано — ${replacement.id} без s-коду');
+    return false;
+  }
+
+  /// Чи є позиція кошика донором активної ЄДК-пропозиції.
+  /// Правило (і чому саме таке) — у [EdkOffer.isDonor].
+  bool _isEdkDonor(CartItem item, String donorId) =>
+      item.drug.id == donorId || item.drug.ukod == donorId;
+
   /// Accept EDK: add 1 package of replacement, remove donor from cart.
   void _addEdkToCart() {
     if (activeEdkOffer == null) return;
     final replacement = activeEdkOffer!.drug;
+    if (!_ensureEdkSellable(replacement)) return;
     final donorId = activeEdkOffer!.donorDrugId;
     // Unlock donor drugs being removed
     for (final item in _cart) {
-      final match = ApiConfig.useMock
-          ? item.drug.id == donorId
-          : item.drug.ukod == donorId;
-      if (match) _lockStock(item.drug, 0.0);
+      if (_isEdkDonor(item, donorId)) _lockStock(item.drug, 0.0);
     }
     setState(() {
       dismissedEdkIds.add(donorId);
       activeEdkOffer = null;
-      _cart.removeWhere((i) =>
-          ApiConfig.useMock ? i.drug.id == donorId : i.drug.ukod == donorId);
+      _cart.removeWhere((i) => _isEdkDonor(i, donorId));
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
         if (_cart[idx].quantity < replacement.stock) _cart[idx].quantity++;
@@ -2587,20 +2688,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void _addEdkBlisterToCart() {
     if (activeEdkOffer == null) return;
     final replacement = activeEdkOffer!.drug;
+    if (!_ensureEdkSellable(replacement)) return;
     final donorId = activeEdkOffer!.donorDrugId;
     if (!replacement.canSplitByBlister) return;
     // Unlock donor
     for (final item in _cart) {
-      final match = ApiConfig.useMock
-          ? item.drug.id == donorId
-          : item.drug.ukod == donorId;
-      if (match) _lockStock(item.drug, 0.0);
+      if (_isEdkDonor(item, donorId)) _lockStock(item.drug, 0.0);
     }
     setState(() {
       dismissedEdkIds.add(donorId);
       activeEdkOffer = null;
-      _cart.removeWhere((i) =>
-          ApiConfig.useMock ? i.drug.id == donorId : i.drug.ukod == donorId);
+      _cart.removeWhere((i) => _isEdkDonor(i, donorId));
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
         final current = _cart[idx].fractionalQty ?? 0;
@@ -2627,6 +2725,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final offer = _edkOffers[_edkKey(oosDrug)];
     if (offer == null) return;
     final replacement = offer.drug;
+    if (!_ensureEdkSellable(replacement)) return;
     setState(() {
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
@@ -2647,6 +2746,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final offer = _edkOffers[_edkKey(oosDrug)];
     if (offer == null) return;
     final replacement = offer.drug;
+    if (!_ensureEdkSellable(replacement)) return;
     if (!replacement.canSplitByBlister) return;
     setState(() {
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);

@@ -671,7 +671,7 @@ class PrroService {
         'round_sum': roundSum,
         'products': products.map((p) => p.toJson()).toList(),
         'payments': payments.map((p) => p.toJson()).toList(),
-        'no_pdf': true,
+        'no_pdf': false, // PDF чека для архіву receipts/
         'no_qr': false,
         'no_text_print': false,
         // ignore: use_null_aware_elements
@@ -766,7 +766,7 @@ class PrroService {
         'total_sum': totalSum,
         'products': products,
         'payments': payments,
-        'no_pdf': true,
+        'no_pdf': false, // PDF чека для архіву receipts/
         'no_qr': false,
         'no_text_print': false,
         // Коментар (блок «ПРОГРАМА ЛОЯЛЬНОСТI») друкується в чеку. ⚠️ Назва
@@ -875,7 +875,7 @@ class PrroService {
         'total_sum': totalSum,
         'products': products.map((p) => p.toJson()).toList(),
         'payments': payments.map((p) => p.toJson()).toList(),
-        'no_pdf': true,
+        'no_pdf': false, // PDF чека для архіву receipts/
         'no_qr': false,
         'no_text_print': false,
         // ignore: use_null_aware_elements
@@ -1065,7 +1065,7 @@ class PrroService {
         'type': 0,
         'name': 'ГОТІВКА',
         'sum': sum,
-        'no_pdf': true,
+        'no_pdf': false, // PDF чека для архіву receipts/
       };
       final response = await _client
           .post(

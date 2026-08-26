@@ -19,6 +19,7 @@ import '../services/fiscal_log.dart';
 import '../services/terminal_service.dart';
 import '../services/prro_queue.dart';
 import '../services/prro_service.dart';
+import '../services/receipt_archive.dart';
 import '../services/session_service.dart';
 import '../services/sparta_service.dart';
 import '../services/spl_params_service.dart';
@@ -947,6 +948,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         FiscalLog.log('SPL завершено: orderModify + D, '
             'PutKasaSPL(1)=${prId == null ? "пропущено (prId null)" : splFixed}');
       }
+      // Зберегти PDF чека в архів (папка receipts) — той самий контент, що у
+      // вікні. Best-effort, у фоні, не блокує показ.
+      unawaited(ReceiptArchive.savePdf(result));
       if (!mounted) return true;
       await PrroReceiptDialog.show(context, result);
       // Спробувати скинути попередньо відкладені чеки у фоні.

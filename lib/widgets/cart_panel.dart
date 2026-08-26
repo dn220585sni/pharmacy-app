@@ -854,7 +854,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     double saleTotal;
     double roundSum = 0;
     if (isRaw) {
-      rawProducts = rro.products;
+      rawProducts = _normalizeTaxLetters(rro.products);
       rawPayments = rro.payments;
       saleTotal = rawPayments
           .fold(
@@ -1010,6 +1010,32 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       );
     }
     return false;
+  }
+
+  /// Нормалізувати символ податку в raw-товарах: ПРРО чекає КИРИЛИЧНІ літери
+  /// (А/В/С…), а GetDataRRO інколи віддає латинські двійники (напр. "A" для
+  /// 20% → «Невірний символ податку "A"»). Мапимо латинські лукалайки на
+  /// кирилицю. Безпечно: чіпає лише символ у полі `letters`.
+  List<Map<String, dynamic>> _normalizeTaxLetters(
+      List<Map<String, dynamic>> products) {
+    const map = {
+      'A': 'А', 'B': 'В', 'C': 'С', 'E': 'Е', 'H': 'Н',
+      'I': 'І', 'K': 'К', 'M': 'М', 'O': 'О', 'P': 'Р',
+      'T': 'Т', 'X': 'Х',
+    };
+    var changed = false;
+    final out = products.map((p) {
+      final l = p['letters']?.toString() ?? '';
+      if (l.isEmpty) return p;
+      final fixed = l.split('').map((c) => map[c] ?? c).join();
+      if (fixed == l) return p;
+      changed = true;
+      return {...p, 'letters': fixed};
+    }).toList();
+    if (changed) {
+      FiscalLog.log('ПРРО: нормалізовано латинські символи податку → кирилиця');
+    }
+    return out;
   }
 
   /// АВАРІЙНА клієнтська збірка чека (коли GetDataRRO недоступний): будує

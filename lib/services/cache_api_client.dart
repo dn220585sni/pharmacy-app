@@ -230,6 +230,13 @@ class CacheApiClient {
         fixedBody = fixedBody.replaceAllMapped(
             RegExp(r'"code":","(\w+)":'), (m) => '"code":"","${m[1]}":');
 
+        // Fix Caché JSON: число без нуля перед крапкою — `"amount":.5` → `0.5`
+        // (значення після `:`/`,`/`[`). GetDataSPL/mops інколи так віддає →
+        // парсер падав FormatException, і Лайк не реєструвався. Обмежуємось
+        // структурними позиціями JSON, щоб не чіпати крапку всередині рядків.
+        fixedBody = fixedBody.replaceAllMapped(
+            RegExp(r'([:,\[])\.(\d)'), (m) => '${m[1]}0.${m[2]}');
+
         // Fix Caché JSON: відсутній ]} в кінці (масив + об'єкт не закриті)
         final trimmed = fixedBody.trimRight();
         if (trimmed.isNotEmpty && !trimmed.endsWith(']}') && !trimmed.endsWith('}}')) {

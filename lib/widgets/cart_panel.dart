@@ -146,15 +146,15 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     // Якщо є відповідь з сервера — пріоритет. Cash withdrawal накладаємо
     // зверху бо це окрема операція (видача готівки), не частина чеку.
     //
-    // Знижку округлення (skidka_sumcheck, НБУ 10 коп) застосовуємо ЛИШЕ коли
-    // касир СВІДОМО обрав готівку — тобто вже ввів суму від клієнта. До того
-    // (і завжди для картки) показуємо ПОВНУ суму: інакше називали б клієнту
-    // менше, ніж він заплатить карткою, і виникав би конфлікт при зміні способу.
+    // Знижка округлення (skidka_sumcheck, НБУ 10 коп) діє ЛИШЕ на готівку.
+    // За замовчуванням спосіб оплати — КАРТКА (повна сума), тож клієнту одразу
+    // називаємо повну суму; округлення застосовується лише коли касир свідомо
+    // натиснув «Готівкою». Так уникаємо конфлікту «назвали менше, ніж карткою».
     final sp = widget.serverPricing;
-    final cashCommitted = paymentMethod == PaymentMethod.cash &&
-        cashCtr.text.trim().isNotEmpty;
     final base = sp != null
-        ? (cashCommitted ? sp.total : sp.total + sp.roundingDiscount)
+        ? (paymentMethod == PaymentMethod.card
+            ? sp.total + sp.roundingDiscount
+            : sp.total)
         : (baseTotal - discountAmount - effectiveBonusAmount);
     final raw = base + _cashWithdrawalAmount;
     return raw < 0 ? 0 : raw;
@@ -264,8 +264,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _redemptionCodeFocus.requestFocus();
       });
-    } else {
-      // Default is cash → auto-focus the cash amount field
+    } else if (paymentMethod == PaymentMethod.cash) {
+      // Лише в режимі готівки є поле суми — фокусуємо його. Дефолт тепер картка,
+      // тож на вході авто-фокуса немає (з'явиться при натисканні «Готівкою»).
       WidgetsBinding.instance.addPostFrameCallback((_) {
         cashFocus.requestFocus();
       });

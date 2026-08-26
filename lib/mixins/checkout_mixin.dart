@@ -28,7 +28,10 @@ mixin CheckoutMixin<T extends StatefulWidget> on State<T> {
   double? availableDiscount;
   bool isLoadingDiscount = false;
 
-  PaymentMethod paymentMethod = PaymentMethod.cash;
+  // Дефолт — КАРТКА: клієнту одразу називаємо повну суму (без готівкового
+  // округлення). Округлення застосовується лише коли касир свідомо тисне
+  // «Готівкою». Так уникаємо конфлікту «назвали менше, ніж треба карткою».
+  PaymentMethod paymentMethod = PaymentMethod.card;
 
   final TextEditingController cashCtr = TextEditingController();
   final FocusNode cashFocus = FocusNode();
@@ -61,7 +64,7 @@ mixin CheckoutMixin<T extends StatefulWidget> on State<T> {
   // ── Methods ────────────────────────────────────────────────────────────
 
   void resetCheckout() {
-    paymentMethod = PaymentMethod.cash;
+    paymentMethod = PaymentMethod.card;
     useBonuses = false;
     bonusCtr.clear();
     personalDiscount = null;

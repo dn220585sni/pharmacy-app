@@ -145,13 +145,16 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   double get finalTotal {
     // Якщо є відповідь з сервера — пріоритет. Cash withdrawal накладаємо
     // зверху бо це окрема операція (видача готівки), не частина чеку.
-    // Знижка округлення (skidka_sumcheck) діє ЛИШЕ на готівку: карткою
-    // клієнт платить неокруглену суму (SumCheck + повернута знижка).
+    //
+    // Знижку округлення (skidka_sumcheck, НБУ 10 коп) застосовуємо ЛИШЕ коли
+    // касир СВІДОМО обрав готівку — тобто вже ввів суму від клієнта. До того
+    // (і завжди для картки) показуємо ПОВНУ суму: інакше називали б клієнту
+    // менше, ніж він заплатить карткою, і виникав би конфлікт при зміні способу.
     final sp = widget.serverPricing;
+    final cashCommitted = paymentMethod == PaymentMethod.cash &&
+        cashCtr.text.trim().isNotEmpty;
     final base = sp != null
-        ? (paymentMethod == PaymentMethod.card
-            ? sp.total + sp.roundingDiscount
-            : sp.total)
+        ? (cashCommitted ? sp.total : sp.total + sp.roundingDiscount)
         : (baseTotal - discountAmount - effectiveBonusAmount);
     final raw = base + _cashWithdrawalAmount;
     return raw < 0 ? 0 : raw;

@@ -925,7 +925,8 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
     FiscalLog.log(result.success
         ? 'SALE OK: №${result.orderNum} (nakl=$localNumber'
-            '${usedRaw ? "" : ", fallback"})'
+            '${usedRaw ? "" : ", fallback"}'
+            '${result.recovered ? ", уже був зареєстрований" : ""})'
         : 'SALE FAIL: ${result.error} (nakl=$localNumber)');
 
     if (result.success) {
@@ -962,7 +963,21 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       // вікні. Best-effort, у фоні, не блокує показ.
       unawaited(ReceiptArchive.savePdf(result));
       if (!mounted) return true;
-      await PrroReceiptDialog.show(context, result);
+      if (result.recovered) {
+        // A1: чек знайдено в зміні після обриву — вікна з QR/PDF немає (X-звіт
+        // їх не віддає), тому просто називаємо номер. Продаж НЕ повторюємо.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Чек уже було зареєстровано (№${result.orderNum}) — '
+                'повторно не проводимо'),
+            duration: const Duration(seconds: 5),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: const Color(0xFFB45309),
+          ),
+        );
+      } else {
+        await PrroReceiptDialog.show(context, result);
+      }
       // Спробувати скинути попередньо відкладені чеки у фоні.
       unawaited(PrroQueue.flush());
       return mounted;

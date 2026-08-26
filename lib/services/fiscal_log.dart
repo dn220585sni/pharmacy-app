@@ -20,9 +20,24 @@ class FiscalLog {
     return _file;
   }
 
+  /// Черга записів: append-и виконуються СТРОГО по черзі.
+  ///
+  /// ⚠️ Без цього два одночасні `writeAsString(append, flush)` б'ються за файл:
+  /// на Windows один з них кидає виняток (його ковтав `catch`) або рядки
+  /// перемішуються посеред тексту. Так безслідно зник рядок «A1 ДУБЛЬ
+  /// ВІДСІЧЕНО», що писався одразу за діагностикою X-звіту (2026-08-26), і так
+  /// само калічились давніші рядки на кшталт «віді: FormatException».
+  /// Викликати можна без await — порядок і цілісність гарантує цей ланцюжок.
+  static Future<void> _tail = Future<void>.value();
+
   /// Дописати рядок (best-effort; збій логу не впливає на продаж).
-  static Future<void> log(String line) async {
+  static Future<void> log(String line) {
     debugPrint('FISCAL: $line');
+    _tail = _tail.then((_) => _append(line));
+    return _tail;
+  }
+
+  static Future<void> _append(String line) async {
     try {
       final f = await _target();
       if (f == null) return;

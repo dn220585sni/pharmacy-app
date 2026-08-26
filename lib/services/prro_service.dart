@@ -144,6 +144,11 @@ class PrroResult {
   final String? error;
   final PrroErrorKind? errorKind;
 
+  /// Чек НЕ створювався цим викликом, а знайдений у зміні за `local_number`
+  /// після обриву зв'язку (A1, ідемпотентність). Успіх, але без QR/PDF/лінка —
+  /// X-звіт віддає лише номер, час і суму.
+  final bool recovered;
+
   const PrroResult({
     required this.success,
     this.checkId,
@@ -159,6 +164,7 @@ class PrroResult {
     this.cashInBox,
     this.error,
     this.errorKind,
+    this.recovered = false,
   });
 
   const PrroResult.failure({
@@ -175,7 +181,8 @@ class PrroResult {
         pdfBase64 = null,
         link = null,
         isOffline = false,
-        cashInBox = null;
+        cashInBox = null,
+        recovered = false;
 }
 
 /// Товар для фіскального чеку.
@@ -311,6 +318,29 @@ class PrroPayment {
   };
 }
 
+/// Терпимий парсер чисел з відповідей ПРРО: `0.5`, `"0.5"`, `"0,5"`, `null`.
+///
+/// ⚠️ Каса віддає `local_number` у `checks_list` РЯДКОМ (`"2900661785"`), хоч
+/// `sum` там числом. Жорсткий каст `as num?` кидав
+/// `type 'String' is not a subtype of type 'num?'` і валив розбір УСЬОГО
+/// X-звіту — разом зі звіркою дублікатів A1, яка через це мовчки не працювала
+/// (спіймано на касі 1334, 2026-08-26). Тому числа тут читаємо терпимо
+/// незалежно від того, яким типом вони прийшли цього разу.
+double? _flexDouble(dynamic v) {
+  if (v is num) return v.toDouble();
+  if (v is String) return double.tryParse(v.trim().replaceAll(',', '.'));
+  return null;
+}
+
+/// Те саме для цілих: `597`, `"597"`, `"597.0"`.
+int? _flexIntOf(dynamic v) {
+  if (v is num) return v.toInt();
+  if (v is String) {
+    return int.tryParse(v.trim()) ?? _flexDouble(v)?.toInt();
+  }
+  return null;
+}
+
 /// Чек у списку зміни (елемент `checks_list` з X-звіту).
 class PrroShiftCheck {
   final String type;          // "Z_SALE", "Z_RETURN" тощо
@@ -331,8 +361,8 @@ class PrroShiftCheck {
         type: json['type']?.toString() ?? '',
         orderNum: json['order_num']?.toString() ?? '',
         datetime: json['datetime']?.toString(),
-        localNumber: (json['local_number'] as num?)?.toInt(),
-        sum: (json['sum'] as num?)?.toDouble() ?? 0,
+        localNumber: _flexIntOf(json['local_number']),
+        sum: _flexDouble(json['sum']) ?? 0,
       );
 }
 
@@ -407,15 +437,17 @@ class PrroXReport {
     final list = (json['checks_list'] as List?) ?? const [];
     return PrroXReport(
       shiftOpen: _truthy(json['shift_state']),
-      cashInBox: (json['cash_in_box'] as num?)?.toDouble() ?? 0,
-      cashInBoxStart: (json['cash_in_box_start'] as num?)?.toDouble() ?? 0,
-      serviceInput: (json['service_input'] as num?)?.toDouble() ?? 0,
+      // Числа — через терпимі парсери: каса подекуди віддає їх рядками, а один
+      // жорсткий каст валить розбір усієї відповіді (див. [_flexDouble]).
+      cashInBox: _flexDouble(json['cash_in_box']) ?? 0,
+      cashInBoxStart: _flexDouble(json['cash_in_box_start']) ?? 0,
+      serviceInput: _flexDouble(json['service_input']) ?? 0,
       shiftDurationMinutes: _flexInt(json['shift_duration']),
       // Час відкриття: SmartConnect (прод) віддає його в OPEN_SESSION_TIME
       // (from_date порожній, shift_duration відсутній); cloud-test — у from_date.
       openedAt: parseDate(json['OPEN_SESSION_TIME']) ?? parseDate(json['from_date']),
-      ordersCount: (real['orders_count'] as num?)?.toInt() ?? 0,
-      ordersSum: (real['sum'] as num?)?.toDouble() ?? 0,
+      ordersCount: _flexIntOf(real['orders_count']) ?? 0,
+      ordersSum: _flexDouble(real['sum']) ?? 0,
       checks: list
           .whereType<Map<String, dynamic>>()
           .map(PrroShiftCheck.fromJson)
@@ -722,15 +754,24 @@ class PrroService {
       }
     } on TimeoutException {
       debugPrint('PRRO sale TIMEOUT');
-      return const PrroResult.failure(
-        error: 'Таймаут з\'єднання з ПРРО',
-        errorKind: PrroErrorKind.connection,
+      // A1: таймаут ≠ «чек не створено» — спершу перевіряємо зміну.
+      return _recoverFromConnectionError(
+        localNumber: localNumber,
+        isReturn: false,
+        failure: const PrroResult.failure(
+          error: 'Таймаут з\'єднання з ПРРО',
+          errorKind: PrroErrorKind.connection,
+        ),
       );
     } on SocketException catch (e) {
       debugPrint('PRRO sale SOCKET: $e');
-      return const PrroResult.failure(
-        error: 'Немає з\'єднання з ПРРО',
-        errorKind: PrroErrorKind.connection,
+      return _recoverFromConnectionError(
+        localNumber: localNumber,
+        isReturn: false,
+        failure: const PrroResult.failure(
+          error: 'Немає з\'єднання з ПРРО',
+          errorKind: PrroErrorKind.connection,
+        ),
       );
     } catch (e) {
       debugPrint('PRRO sale ERROR: $e');
@@ -822,14 +863,23 @@ class PrroService {
             : PrroErrorKind.logical,
       );
     } on TimeoutException {
-      return const PrroResult.failure(
-        error: 'Таймаут з\'єднання з ПРРО',
-        errorKind: PrroErrorKind.connection,
+      // A1: чек міг зареєструватись уже після нашого таймауту.
+      return _recoverFromConnectionError(
+        localNumber: localNumber,
+        isReturn: isReturn,
+        failure: const PrroResult.failure(
+          error: 'Таймаут з\'єднання з ПРРО',
+          errorKind: PrroErrorKind.connection,
+        ),
       );
     } on SocketException {
-      return const PrroResult.failure(
-        error: 'Немає з\'єднання з ПРРО',
-        errorKind: PrroErrorKind.connection,
+      return _recoverFromConnectionError(
+        localNumber: localNumber,
+        isReturn: isReturn,
+        failure: const PrroResult.failure(
+          error: 'Немає з\'єднання з ПРРО',
+          errorKind: PrroErrorKind.connection,
+        ),
       );
     } catch (e) {
       debugPrint('PRRO sale(raw) ERROR: $e');
@@ -905,14 +955,23 @@ class PrroService {
         );
       }
     } on TimeoutException {
-      return const PrroResult.failure(
-        error: 'Таймаут з\'єднання з ПРРО',
-        errorKind: PrroErrorKind.connection,
+      // A1: повернення теж не можна проводити двічі.
+      return _recoverFromConnectionError(
+        localNumber: localNumber,
+        isReturn: true,
+        failure: const PrroResult.failure(
+          error: 'Таймаут з\'єднання з ПРРО',
+          errorKind: PrroErrorKind.connection,
+        ),
       );
     } on SocketException {
-      return const PrroResult.failure(
-        error: 'Немає з\'єднання з ПРРО',
-        errorKind: PrroErrorKind.connection,
+      return _recoverFromConnectionError(
+        localNumber: localNumber,
+        isReturn: true,
+        failure: const PrroResult.failure(
+          error: 'Немає з\'єднання з ПРРО',
+          errorKind: PrroErrorKind.connection,
+        ),
       );
     } catch (e) {
       debugPrint('PRRO return ERROR: $e');
@@ -929,9 +988,12 @@ class PrroService {
 
   /// X-звіт: поточний стан зміни без закриття.
   /// [includeChecks] — включати список чеків зміни.
+  /// [timeout] — 30 с як у cash_uft.dll; коротший беруть перевірки дублікатів
+  /// (A1), де касир уже й так відчекав таймаут продажу.
   static Future<PrroXReport?> xReport({
     bool includeChecks = true,
     int? printWidth,
+    Duration timeout = const Duration(seconds: 30),
   }) async {
     if (!await _ensureAuth()) return null;
 
@@ -953,7 +1015,7 @@ class PrroService {
         Uri.parse('${PrroConfig.baseUrl}/shift/xReport'),
         headers: _headers,
         body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 30));
+      ).timeout(timeout);
 
       if (response.statusCode != 200 && response.statusCode != 201) {
         FiscalLog.log('xReport FAIL: HTTP ${response.statusCode} '
@@ -965,6 +1027,17 @@ class PrroService {
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
       if (decoded is! Map<String, dynamic>) return null;
       final report = PrroXReport.fromJson(decoded);
+      // Діагностика A1: скільки чеків зміни несуть `local_number` — саме за ним
+      // відсікаються дублікати. Спрацьовує лише на шляхах A1 (перевірка після
+      // обриву / flush черги), тому лог не засмічує. ✅ Підтверджено на касі
+      // 1334 (2026-08-26): для Z_SALE каса повертає САМЕ наш номер (= NumNakl);
+      // службові операції несуть власний лічильник каси (ми там номер не шлемо).
+      if (includeChecks) {
+        final withLocal =
+            report.checks.where((c) => c.localNumber != null).length;
+        FiscalLog.log('A1 діагностика: чеків у зміні=${report.checks.length}, '
+            'з них з local_number=$withLocal');
+      }
       debugPrint('PRRO xReport: shiftOpen=${report.shiftOpen} '
           'cashInBox=${report.cashInBox} cashInBoxStart=${report.cashInBoxStart} '
           'serviceInput=${report.serviceInput} openedAt=${report.openedAt}');
@@ -973,6 +1046,105 @@ class PrroService {
       FiscalLog.log('xReport ERROR: $e');
       return null;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // A1. Ідемпотентність: чи чек уже зареєстрований
+  // ---------------------------------------------------------------------------
+
+  /// Знайти в списку чеків зміни наш чек за `local_number`.
+  ///
+  /// Чистий матчер (без мережі) — винесений окремо, щоб покривався тестами.
+  /// [isReturn] відсікає протилежний тип: продаж і повернення можуть нести той
+  /// самий `local_number` накладної.
+  static PrroShiftCheck? matchCheck(
+    List<PrroShiftCheck> checks, {
+    required int localNumber,
+    bool isReturn = false,
+  }) {
+    for (final c in checks) {
+      if (c.localNumber != localNumber) continue;
+      if (c.type.toUpperCase().contains('RETURN') != isReturn) continue;
+      return c;
+    }
+    return null;
+  }
+
+  /// Чи зареєстрований уже чек із таким [localNumber] у ПОТОЧНІЙ зміні.
+  ///
+  /// A1: таймаут ≠ «чек не створено» — SmartConnect міг прийняти його вже після
+  /// того, як ми відвалились. Перед будь-якою повторною відправкою звіряємо
+  /// `checks_list` X-звіту за нашим `local_number` (= NumNakl накладної).
+  ///
+  /// `null` = «не знайдено АБО не змогли перевірити» — свідомо не розрізняємо:
+  /// обидва випадки ведуть до звичайного шляху (черга / повтор). Знайдений чек
+  /// означає, що повтор робити НЕ можна.
+  ///
+  /// [attempts] > 1 має сенс одразу після таймауту: чек міг ще дореєстровуватись.
+  /// ⚠️ Бачить лише поточну зміну: якщо між обривом і перевіркою пройшов Z-звіт,
+  /// чек уже не в списку.
+  static Future<PrroShiftCheck?> findRegisteredCheck({
+    required int localNumber,
+    bool isReturn = false,
+    int attempts = 2,
+    Duration retryDelay = const Duration(seconds: 3),
+  }) async {
+    for (var i = 0; i < attempts; i++) {
+      if (i > 0) await Future.delayed(retryDelay);
+      final report = await xReport(
+        includeChecks: true,
+        timeout: const Duration(seconds: 15),
+      );
+      // Зв'язку немає — нічого не стверджуємо, пробуємо ще раз.
+      if (report == null) continue;
+
+      final hit = matchCheck(report.checks,
+          localNumber: localNumber, isReturn: isReturn);
+      if (hit != null) return hit;
+
+      // Каса взагалі не віддає local_number → звірка неможлива в принципі,
+      // повторний запит нічого не змінить. Сигнал у лог, щоб побачити це на
+      // касі, а не гадати, чому дублікати не відсікаються.
+      if (report.checks.isNotEmpty &&
+          report.checks.every((c) => c.localNumber == null)) {
+        FiscalLog.log('⚠️ A1: xReport не віддає local_number '
+            '(${report.checks.length} чеків у зміні) — перевірка дублікатів '
+            'НЕМОЖЛИВА, чек піде звичайним шляхом');
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /// Обробити обрив зв'язку: спершу перевірити, чи чек усе-таки зареєстровано.
+  ///
+  /// Знайшли → віддаємо УСПІХ із номером чека (`recovered: true`, без QR/PDF —
+  /// X-звіт їх не містить). Не знайшли → вихідна помилка, далі як раніше
+  /// (черга ПРРО).
+  static Future<PrroResult> _recoverFromConnectionError({
+    required int? localNumber,
+    required bool isReturn,
+    required PrroResult failure,
+  }) async {
+    if (localNumber == null) return failure;
+    final hit = await findRegisteredCheck(
+      localNumber: localNumber,
+      isReturn: isReturn,
+    );
+    if (hit == null) return failure;
+
+    FiscalLog.log('A1 ДУБЛЬ ВІДСІЧЕНО: чек local_number=$localNumber уже '
+        'зареєстрований (№${hit.orderNum}, ${hit.datetime ?? "час невідомий"}, '
+        'сума ${hit.sum}) — повторна фіскалізація НЕ виконується');
+
+    final parts = (hit.datetime ?? '').split(' ');
+    return PrroResult(
+      success: true,
+      orderNum: hit.orderNum,
+      orderDate: parts.first.isNotEmpty ? parts.first : null,
+      orderTime: parts.length > 1 ? parts[1] : null,
+      recovered: true,
+    );
   }
 
   // ---------------------------------------------------------------------------

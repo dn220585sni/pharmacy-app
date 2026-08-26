@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'fiscal_log.dart';
 import 'prro_service.dart';
 
 /// Тип відкладеного чеку.
@@ -187,7 +188,38 @@ class PrroQueue {
     try {
       // Копія, щоб ітерувати і одночасно модифікувати _items.
       final snapshot = List<PrroQueuedReceipt>.from(_items);
+
+      // A1: чек міг зареєструватись ще першою спробою (таймаут ≠ відмова) або
+      // застосунок упав одразу після постановки в чергу. Перед повторами
+      // забираємо чеки зміни ОДИН раз на весь прохід і звіряємось локально —
+      // окремий X-звіт на кожну позицію стопорив би старт застосунку, коли
+      // ПРРО недоступний. Порожній список / немає зв'язку → просто шлемо як
+      // раніше (наступний flush перевірить ще раз).
+      final report = snapshot.any((e) => e.localNumber != null)
+          ? await PrroService.xReport(
+              includeChecks: true,
+              timeout: const Duration(seconds: 15),
+            )
+          : null;
+      final registered = report?.checks ?? const <PrroShiftCheck>[];
+
       for (final item in snapshot) {
+        if (item.localNumber != null) {
+          final existing = PrroService.matchCheck(
+            registered,
+            localNumber: item.localNumber!,
+            isReturn: item.type == PrroQueueType.returnSale,
+          );
+          if (existing != null) {
+            _items.removeWhere((e) => e.id == item.id);
+            sent++;
+            FiscalLog.log('A1 ДУБЛЬ ВІДСІЧЕНО (черга): ${item.id} уже '
+                'зареєстрований (№${existing.orderNum}, '
+                'nakl=${item.localNumber}) — знято з черги без повтору');
+            continue;
+          }
+        }
+
         final PrroResult result;
         if (item.raw) {
           // Готові products/payments з GetDataRRO — сирий проброс.

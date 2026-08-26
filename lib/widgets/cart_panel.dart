@@ -780,6 +780,12 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         splParamsList = const [],
         splCoupons = const [];
     final loyalty = widget.loyalty;
+    // Діагностика: чому Лайк не активувався (щоб не гадати за журналом).
+    if (loyalty?.cardNo == null || loyalty!.cardNo!.isEmpty) {
+      FiscalLog.log('Лайк пропущено: клієнт не прив\'язаний '
+          '(loyalty=${loyalty == null ? "null" : "phone=${loyalty.phone} "
+              "cardNo=порожній"}) — чек без бонусів');
+    }
     if (loyalty?.cardNo != null &&
         loyalty!.cardNo!.isNotEmpty &&
         numNakl != null) {

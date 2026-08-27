@@ -248,7 +248,16 @@ class AnalogItem {
 
 /// ЄДК-пропозиція заміни від Caché (з GetEdkOffers).
 class EdkApiOffer {
-  final String replacementId;      // с-код заміни
+  /// U-код заміни (товар у цілому), напр. `762*1*51*10****`.
+  /// ⚠️ НЕ s-код, попри історичну назву поля.
+  final String replacementId;
+
+  /// S-код (код приходу) заміни — `replacementSKod`, доданий Катериною
+  /// 27.08.2026 на наш запит. Саме він потрібен для продажу: на ньому
+  /// тримаються `sgVRoznSetLock`, `GetSumSkid`, накладна і чек.
+  /// Порожній — якщо сервіс ще не оновлено; тоді резолвимо партію пошуком.
+  final String replacementSKod;
+
   final String replacementName;    // назва заміни
   final double replacementPrice;   // роздрібна ціна заміни
   final int replacementBonus;      // бонус за ЄДК-зв'язку
@@ -264,11 +273,15 @@ class EdkApiOffer {
     required this.pharmacistBonus,
     required this.script,
     required this.reason,
+    this.replacementSKod = '',
   });
 
   factory EdkApiOffer.fromJson(Map<String, dynamic> json) {
     return EdkApiOffer(
       replacementId: json['replacementId']?.toString() ?? '',
+      replacementSKod: json['replacementSKod']?.toString() ??
+          json['replacementSkod']?.toString() ??
+          '',
       replacementName: json['replacementName']?.toString() ?? '',
       replacementPrice: double.tryParse(
             json['replacementPrice']?.toString().replaceAll(',', '.') ?? '0',

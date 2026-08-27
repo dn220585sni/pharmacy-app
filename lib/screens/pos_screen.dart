@@ -636,8 +636,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// товару беремо першу з наявним залишком (сервер віддає їх у порядку FEFO).
   /// Фолбек за назвою свідомо НЕ робимо: краще заблокувати додавання, ніж
   /// продати не той товар.
+  /// [skodFromServer] — `replacementSKod` з `GetEdkOffers` (якщо сервіс уже
+  /// оновлено). Коли він відомий, рядок вибираємо ТОЧНО за ним; пошук потрібен
+  /// лише щоб узяти залишок/ціну/термін — те саме, що бачить касир у таблиці.
   static Future<DrugSearchItem?> _resolveEdkBatch(
-      String ukod, String name) async {
+    String ukod,
+    String name, {
+    String skodFromServer = '',
+  }) async {
     if (ukod.isEmpty || name.isEmpty) return null;
     try {
       var lastRows = <DrugSearchItem>[];
@@ -645,19 +651,29 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       for (final query in EdkOffer.searchQueriesFor(name)) {
         lastQuery = query;
         lastRows = await DrugService.searchByName(query);
+
+        // 1) Точний збіг за s-кодом від сервера — найнадійніше.
+        if (skodFromServer.isNotEmpty) {
+          for (final r in lastRows) {
+            if (r.ids == skodFromServer) return r;
+          }
+        }
+
+        // 2) Інакше — за u-кодом; серед партій беремо першу з залишком
+        // (сервер віддає їх у порядку FEFO).
         final sameProduct = lastRows.where((r) => r.ukod == ukod).toList();
         if (sameProduct.isEmpty) continue;
-        // Кілька партій одного товару → перша з наявним залишком
-        // (сервер віддає їх у порядку FEFO).
         return sameProduct.firstWhere(
           (r) => r.qty > 0,
           orElse: () => sameProduct.first,
         );
       }
       // Діагностика в release-лог: видно, чи пошук нічого не знайшов, чи
-      // знайшов, але з іншими u-кодами.
+      // знайшов, але з іншими кодами. Із `replacementSKod` продаж можливий і
+      // без цього рядка — тоді бракуватиме лише залишку/ціни з таблиці.
       FiscalLog.log('ЄДК ДІАГНОСТИКА: останній запит "$lastQuery" → '
-          '${lastRows.length} рядків, шукали ukod=$ukod; перші: '
+          '${lastRows.length} рядків, шукали ukod=$ukod '
+          'skod=${skodFromServer.isEmpty ? "(немає)" : skodFromServer}; перші: '
           '${lastRows.take(3).map((r) => "${r.name}|ids=${r.ids}|ukod=${r.ukod}").join(" ;; ")}');
       return null;
     } catch (e) {
@@ -711,22 +727,31 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       // резервувань → GetSumSkid рахує суму БЕЗ неї, і в накладну/чек вона теж
       // не потрапляє.
       //
-      // Резолвимо партію через `SearchByNameSKU` — той самий сервіс, що
-      // наповнює таблицю пошуку: він єдиний віддає ОБА коди (`ids` = s-код і
-      // `ukod`), тож рядок можна вибрати точно за u-кодом заміни.
+      // Основний шлях — поле `replacementSKod` (Катерина додала 27.08 на наш
+      // запит). Партію все одно тягнемо з `SearchByNameSKU`: звідти беруться
+      // залишок, ціна, термін, полиця — те саме, що бачить касир у таблиці.
+      // Наявність s-коду від сервера робить вибір рядка ТОЧНИМ і рятує, коли
+      // пошук за назвою нічого не дає.
       // ⚠️ НЕ через `GetSKUprice`: він u-коди не приймає взагалі — сервер падає
       // з `<UNDEFINED>Price+345^KabService3` (перевірено 2026-08-26).
-      final batch = await _resolveEdkBatch(offer.replacementId, offer.replacementName);
+      final batch = await _resolveEdkBatch(
+        offer.replacementId,
+        offer.replacementName,
+        skodFromServer: offer.replacementSKod,
+      );
       if (!mounted) return;
-      final skod = batch?.ids ?? '';
+      // S-код від сервера авторитетний навіть тоді, коли рядка в пошуку немає.
+      final skod =
+          offer.replacementSKod.isNotEmpty ? offer.replacementSKod : (batch?.ids ?? '');
       // Слід у release-лозі: без нього не видно, чи заміна взагалі резолвиться
       // в партію на реальній касі.
       FiscalLog.log(skod.isEmpty
           ? 'ЄДК: ${offer.replacementName} — s-код НЕ резолвиться '
               '(u-код ${offer.replacementId}) → пропозицію показуємо, '
               'додавання в кошик заблоковано'
-          : 'ЄДК: ${offer.replacementName} → s-код $skod, '
-              'залишок ${batch!.qty}, ціна ${batch.price}');
+          : 'ЄДК: ${offer.replacementName} → s-код $skod '
+              '(${offer.replacementSKod.isNotEmpty ? "з GetEdkOffers" : "з пошуку"}), '
+              '${batch != null ? "залишок ${batch.qty}, ціна ${batch.price}" : "партії в таблиці не знайшли — ціна з пропозиції"}');
 
       final replacementDrug = Drug(
         // srv_<s-код> — той самий формат, що й у звичайних товарів: на нього
@@ -741,7 +766,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         // Ціна з таблиці авторитетна (та сама, що бачить касир у пошуку);
         // ціна з пропозиції — фолбек.
         price: (batch?.price ?? 0) > 0 ? batch!.price : offer.replacementPrice,
-        stock: batch?.qty ?? 0,
+        // Рядка в таблиці немає (буває лише коли s-код прийшов з GetEdkOffers,
+        // а пошук за назвою нічого не дав) → 1 упаковка. Реальним обмежувачем
+        // усе одно є `sgVRoznSetLock`: сервер не дасть зарезервувати понад
+        // наявне. Хардкод, з якого починався баг, лишився ЛИШЕ тут, у фолбеку.
+        stock: batch?.qty ?? 1,
         stockRaw: batch?.qtyRaw,
         unit: 'шт',
         ukod: offer.replacementId,

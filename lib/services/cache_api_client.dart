@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'api_config.dart';
+import 'fiscal_log.dart';
 
 /// Відповідь від Caché CSP сервера.
 ///
@@ -200,35 +201,53 @@ class CacheApiClient {
           debugPrint('CacheAPI RAW $serviceName (${bodyString.length} chars): ${bodyString.substring(0, bodyString.length > 300 ? 300 : bodyString.length)}');
         }
 
+        // Кожен патч нижче реєструється в [patches], щоб спрацювання було
+        // ВИДНО в fiscal_log. Без цього неможливо відрізнити «сервер уже
+        // виправив» від «наша латка тихо спрацювала» — саме на цьому питанні
+        // ми й спіткнулись (2026-08-27, GetDataSPL).
+        final patches = <String>[];
+
         // Fix Caché JSON: деякі процедури пропускають } між об'єктами
         // в масивах. Наприклад: "ipn":""{"user" → "ipn":""},{"user"
         var fixedBody = bodyString.replaceAll('"{"user"', '"},{"user"');
+        if (fixedBody != bodyString) patches.add('пропущений } перед {"user"');
+        var prev = fixedBody;
 
         // Fix Caché JSON: GetOrders — відсутня кома між об'єктами замовлень
         // "}{"orderId" → "},{"orderId"
         fixedBody = fixedBody.replaceAll('}{"orderId"', '},{"orderId"');
+        if (fixedBody != prev) patches.add('GetOrders: кома між замовленнями');
+        prev = fixedBody;
 
         // Fix Caché JSON: GetStopPriceUKod — для пустого rules вставляє
         // зайву ": "rules":[]" → "rules":[].
         // Кома між полями вже присутня в оригіналі — не дублюємо.
         fixedBody = fixedBody.replaceAll('"rules":[]"', '"rules":[]');
+        if (fixedBody != prev) patches.add('GetStopPriceUKod: зайва лапка rules');
+        prev = fixedBody;
 
         // Fix Caché JSON: GetSPLParam — частина ключів без закривної лапки перед
         // двокрапкою: "EdUrlSPL:"val" замість "EdUrlSPL":"val". Лагодимо лише в
         // позиції ключа (після { або ,), щоб не зачепити значення.
         fixedBody = fixedBody.replaceAllMapped(
             RegExp(r'([,{])"(\w+):"'), (m) => '${m[1]}"${m[2]}":"');
+        if (fixedBody != prev) patches.add('GetSPLParam: лапка ключа');
+        prev = fixedBody;
 
         // Fix Caché JSON: GetDataRRO — порожній bar_code йде як "bar_code":,
         // (після двокрапки одразу , або }) — невалідно. → "bar_code":"".
         // Заповнений bar_code — число без лапок (валідно, не чіпаємо).
         fixedBody = fixedBody.replaceAllMapped(
             RegExp(r'"bar_code":\s*(?=[,}])'), (m) => '"bar_code":""');
+        if (fixedBody != prev) patches.add('GetDataRRO: порожній bar_code');
+        prev = fixedBody;
 
         // Fix Caché JSON: GetDataSPL — порожній `code` у discounts[] іде як
         // "code":","order":1 (пропущена закривна лапка) → "code":"","order":1.
         fixedBody = fixedBody.replaceAllMapped(
             RegExp(r'"code":","(\w+)":'), (m) => '"code":"","${m[1]}":');
+        if (fixedBody != prev) patches.add('GetDataSPL: лапка порожнього code');
+        prev = fixedBody;
 
         // Fix Caché JSON: число без нуля перед крапкою — `"amount":.5` → `0.5`
         // (значення після `:`/`,`/`[`). GetDataSPL/mops інколи так віддає →
@@ -236,6 +255,8 @@ class CacheApiClient {
         // структурними позиціями JSON, щоб не чіпати крапку всередині рядків.
         fixedBody = fixedBody.replaceAllMapped(
             RegExp(r'([:,\[])\.(\d)'), (m) => '${m[1]}0.${m[2]}');
+        if (fixedBody != prev) patches.add('число без нуля перед крапкою (.5)');
+        prev = fixedBody;
 
         // Fix Caché JSON: відсутній ]} в кінці (масив + об'єкт не закриті)
         final trimmed = fixedBody.trimRight();
@@ -251,8 +272,13 @@ class CacheApiClient {
           final suffix = StringBuffer();
           for (var i = 0; i < openBracket; i++) suffix.write(']');
           for (var i = 0; i < openBrace; i++) suffix.write('}');
-          if (suffix.isNotEmpty) fixedBody = '$trimmed$suffix';
+          if (suffix.isNotEmpty) {
+            fixedBody = '$trimmed$suffix';
+            patches.add('незакриті $suffix у кінці');
+          }
         }
+
+        _reportPatches(serviceName, patches);
 
         // Парсимо JSON.
         final json = jsonDecode(fixedBody) as Map<String, dynamic>;
@@ -275,6 +301,28 @@ class CacheApiClient {
     }
     return CacheResponse.error('Сервер недоступний після $_maxRetries спроб');
   }
+
+  /// Уже повідомлені пари «сервіс + патч» — щоб не засмічувати журнал
+  /// однаковим рядком на кожен виклик.
+  static final _reportedPatches = <String>{};
+
+  /// Записати в журнал, що відповідь довелося лагодити.
+  ///
+  /// Патчі — тимчасові: після виправлення на боці Caché (D6) вони мають
+  /// перестати спрацьовувати, і тиша в журналі буде тому доказом. Кожна пара
+  /// «сервіс + дефект» пишеться ОДИН раз за запуск застосунку.
+  static void _reportPatches(String serviceName, List<String> patches) {
+    for (final p in patches) {
+      if (_reportedPatches.add('$serviceName|$p')) {
+        FiscalLog.log('JSON-патч [$serviceName]: $p — відповідь сервера '
+            'невалідна, полагоджено на клієнті');
+      }
+    }
+  }
+
+  /// Лише для тестів: забути, про що вже повідомляли.
+  @visibleForTesting
+  static void resetPatchReportsForTest() => _reportedPatches.clear();
 
   /// Витягує CSPSESSIONID та CSPWSERVERID з SET-COOKIE заголовків
   /// і зберігає їх для передачі в наступних запитах.

@@ -86,16 +86,11 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
       return;
     }
 
-    if (pin != p.password) {
-      setState(() => _pinError = 'Невірний пароль');
-      _pinController.clear();
-      _pinFocusNode.requestFocus();
-      return;
-    }
-
-    // PIN correct — call LoginRlz
+    // A6: пароль перевіряє ВИКЛЮЧНО сервер (`LoginRlz`). Локального
+    // порівняння більше немає — `GetUsersRlz` не віддає `pswd`, і саме тому
+    // раніше вхід перестав пускати: клієнт звіряв уведене з порожнім рядком.
     setState(() => _isLoggingIn = true);
-    final ok = await AuthService.login(p.user, p.password);
+    final ok = await AuthService.login(p.user, pin);
     if (!mounted) return;
 
     if (ok) {
@@ -104,9 +99,17 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
       setState(() {
         _isLoggingIn = false;
         _showForceLogout = AuthService.isUserBusy;
+        // Показуємо відповідь сервера як є (напр. «Невірний пароль») — він
+        // тепер єдиний, хто знає причину відмови.
         _pinError = AuthService.isUserBusy
             ? 'Сесія вже активна на іншому пристрої'
-            : 'Помилка авторизації на сервері';
+            : (AuthService.lastLoginError?.trim().isNotEmpty == true
+                ? AuthService.lastLoginError!
+                : 'Помилка авторизації на сервері');
+        if (!AuthService.isUserBusy) {
+          _pinController.clear();
+          _pinFocusNode.requestFocus();
+        }
       });
     }
   }
@@ -117,13 +120,22 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
     final p = _selectedForPin;
     if (p == null) return;
 
+    // Той самий пароль, що касир щойно ввів (при «сесія вже активна» поле не
+    // очищається) — свого пароля клієнт не має.
+    final pin = _pinController.text.trim();
+    if (pin.isEmpty) {
+      setState(() => _pinError = 'Введіть пароль');
+      _pinFocusNode.requestFocus();
+      return;
+    }
+
     setState(() {
       _isLoggingIn = true;
       _pinError = null;
       _showForceLogout = false;
     });
 
-    final ok = await AuthService.login(p.user, p.password, force: true);
+    final ok = await AuthService.login(p.user, pin, force: true);
     if (!mounted) return;
 
     if (ok) {

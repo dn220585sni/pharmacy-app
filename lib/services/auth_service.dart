@@ -7,9 +7,13 @@ import 'cache_api_client.dart';
 import 'sale_journal.dart';
 
 /// Інформація про фармацевта.
+///
+/// ⚠️ Пароля тут НЕМАЄ і бути не повинно (audit A6). `GetUsersRlz` більше не
+/// віддає `pswd` (виправлено на боці Caché 2026-08-27), а перевірка пароля —
+/// виключно серверна, у `LoginRlz`. Поле навмисно прибране, щоб не було звідки
+/// взяти пароль на клієнті, навіть якщо сервіс колись знову почне його слати.
 class PharmacistInfo {
   final String user;
-  final String password;
   final String ipn;
 
   /// Спецкористувач (`typezuser==1`) — має доступ до адмінки «Налаштування каси».
@@ -17,7 +21,6 @@ class PharmacistInfo {
 
   PharmacistInfo({
     required this.user,
-    required this.password,
     required this.ipn,
     this.isSpecial = false,
   });
@@ -143,8 +146,9 @@ class AuthService {
     return usersJson
         .whereType<Map<String, dynamic>>()
         .map((u) => PharmacistInfo(
+              // `pswd` НЕ читаємо принципово (A6): навіть якщо сервіс його
+              // поверне, пароль не має жити в пам'яті клієнта.
               user: u['user']?.toString() ?? '',
-              password: u['pswd']?.toString() ?? '',
               ipn: u['ipn']?.toString() ?? '',
               isSpecial: u['typezuser']?.toString() == '1',
             ))
@@ -169,8 +173,8 @@ class AuthService {
   static Future<List<PharmacistInfo>> _mockGetUsers() async {
     await Future.delayed(const Duration(milliseconds: 200));
     return [
-      PharmacistInfo(user: 'Микола', password: '1234', ipn: '1234567890'),
-      PharmacistInfo(user: 'Олена', password: '5678', ipn: '0987654321'),
+      PharmacistInfo(user: 'Микола', ipn: '1234567890'),
+      PharmacistInfo(user: 'Олена', ipn: '0987654321'),
     ];
   }
 }

@@ -43,8 +43,15 @@ class SessionService {
         return true;
       }
       debugPrint('SessionService NewClient FAIL: ${r.result}');
+      // Провал видно в release-лозі: NewClient знімає резерви залишків, і його
+      // мовчазна відмова означає завислий резерв до наступного примусового
+      // входу (audit B5).
+      FiscalLog.log('NewClient FAIL: ${r.result} — резерви залишків могли '
+          'не звільнитись');
     } catch (e) {
       debugPrint('SessionService NewClient ERROR: $e');
+      FiscalLog.log('NewClient ERROR: $e — резерви залишків могли '
+          'не звільнитись');
     }
     return false;
   }

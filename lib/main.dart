@@ -7,6 +7,7 @@ import 'services/auth_service.dart';
 import 'services/prro_queue.dart';
 import 'services/prro_service.dart';
 import 'services/registry_config.dart';
+import 'services/session_service.dart';
 import 'services/shift_service.dart';
 import 'widgets/shift_end_dialog.dart';
 
@@ -66,6 +67,19 @@ class _AppCloseObserver extends WidgetsBindingObserver {
         // justExit → вийти без Z-звіту (напр. перезапуск програми).
       }
     }
+    // Звільнити резерви залишків ПЕРЕД виходом (audit B5).
+    //
+    // ⚠️ Саме тут, а не в `PosScreen.dispose()`: там виклик іде fire-and-forget
+    // під час згортання процесу й може не встигнути піти. Цей метод система
+    // ЧЕКАЄ, тож запит устигає.
+    //
+    // Чому це важливо: `sgVRoznSetLock` тримає резерв, поки його не знімуть.
+    // Після краху каси його звільняє примусовий вхід (`LoginRlz&force=1`,
+    // кнопка «Завершити сесію») — підтвердила Катерина 27.08. Але при ШТАТНОМУ
+    // виході з непорожнім кошиком ми робимо чистий LogoutRlz, наступний вхід
+    // буде звичайним, «користувач вже працює» не з'явиться — і резерв завис би
+    // назавжди. `NewClient` скидає серверний сеанс разом із резервами.
+    await SessionService.newClient();
     await AuthService.logout();
     return AppExitResponse.exit;
   }

@@ -99,6 +99,12 @@ class ShiftService {
         final needed = (r.data['ExVnos']?.toString() ?? '0') != '1';
         debugPrint('ShiftService: ProvSumZOtchet ExVnos="${r.data['ExVnos']}" '
             'needed=$needed, розмінна(Z)=${carryover.format()}');
+        // Друга половина прикладу для п.7: що саме віддав сервіс ПІСЛЯ Z.
+        // `SumZZvit` наразі порожній, тому розмінну беремо з `cash_in_box`
+        // Z-звіту ПРРО (збережено локально в closeShift).
+        FiscalLog.log('ProvSumZOtchet: ExVnos="${r.data['ExVnos']}" '
+            'SumZZvit="${r.data['SumZZvit'] ?? "(поля немає)"}" '
+            '→ пропонуємо ${carryover.format()} (з cash_in_box Z-звіту)');
         return ServiceDepositCheck(needed: needed, carryover: carryover);
       }
       debugPrint('ShiftService ProvSumZOtchet FAIL: ${r.result}');
@@ -320,8 +326,17 @@ class ShiftService {
       final r = await CacheApiClient().call('ZRep');
       debugPrint('ShiftService: ZRep '
           '${r.isOk ? "OK (${r.result})" : "FAIL: ${r.result}"}');
+      // Слід у release-лозі: саме за цим записом звіряємо з Катериною, чи
+      // фіксація Z оновила `SumZZvit` (п.7 листа). Без нього ми не могли
+      // навести приклад — результат жив лише в debugPrint.
+      // ⚠️ Викликаємо БЕЗ параметрів; якщо сервіс очікує суму на вхід —
+      // це і є причина порожнього SumZZvit.
+      FiscalLog.log('ZRep (фіксація Z у БД): '
+          '${r.isOk ? "OK" : "FAIL"} result="${r.result}" '
+          'поля=${r.data.keys.where((k) => k != 'Status' && k != 'Result').join(",")}');
     } catch (e) {
       debugPrint('ShiftService: ZRep ERROR: $e');
+      FiscalLog.log('ZRep (фіксація Z у БД) ERROR: $e');
     }
   }
 }

@@ -3,6 +3,7 @@ import '../data/mock_drugs.dart';
 import '../models/drug.dart';
 import 'api_config.dart';
 import 'cache_api_client.dart';
+import 'fiscal_log.dart';
 
 /// Результат резервування залишку (sgVRoznSetLock).
 class StockLockResult {
@@ -537,6 +538,18 @@ class BarCodeAnalysis {
 
   static String _s(dynamic v) => v?.toString() ?? '';
 
+  /// Прочитати застарілий ключ купона CRM із друкарською помилкою і лишити
+  /// слід у журналі — щоб питання «є він чи вже немає» вирішувалось фактом.
+  static dynamic _reportLegacyCouponKey(Map<String, dynamic> j) {
+    final v = j['SouponCRM'];
+    if (v != null) {
+      FiscalLog.log('AnalizBarCode: прийшов ключ `SouponCRM` (друкарська '
+          'помилка замість `CouponCRM`) — значення прочитано, але сервіс варто '
+          'виправити');
+    }
+    return v;
+  }
+
   factory BarCodeAnalysis.fromJson(Map<String, dynamic> j) => BarCodeAnalysis(
         wasScanned: _s(j['wasscanned']),
         skod: _s(j['SKod']),
@@ -548,9 +561,12 @@ class BarCodeAnalysis {
         presentCard: _s(j['PresentCard']),
         cityCard: _s(j['CityCard']),
         couponSpl: _s(j['CouponSPL']),
-        // Сервер (2026-07-07) віддає ключ із друкарською помилкою `SouponCRM`
-        // (S замість C) — читаємо обидва варіанти, поки Катя не виправить.
-        couponCrm: _s(j['CouponCRM'] ?? j['SouponCRM']),
+        // Сервер 07.07.2026 віддавав ключ із друкарською помилкою `SouponCRM`
+        // (S замість C) — читаємо обидва варіанти. Катерина 27.08 повідомила,
+        // що такого ключа в неї немає; лишаємо толерантність як страховку, але
+        // якщо помилковий ключ реально прийде — побачимо це в журналі, а не
+        // здогадуватимемось.
+        couponCrm: _s(j['CouponCRM'] ?? _reportLegacyCouponKey(j)),
       );
 }
 

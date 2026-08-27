@@ -20,6 +20,7 @@ import '../services/product_browser_service.dart';
 import '../services/skarb_service.dart';
 import '../services/session_service.dart';
 import '../services/shift_service.dart';
+import '../widgets/scan_failed_dialog.dart';
 import '../widgets/shift_start_dialog.dart';
 import '../widgets/shift_end_dialog.dart';
 import '../widgets/cash_operation_dialog.dart';
@@ -2119,11 +2120,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final res = await DrugService.analizBarCode(code, form: form);
     if (!mounted) return;
     if (res == null) {
-      _showScanMessage('Помилка сканування — спробуйте ще раз');
+      await _handleScanFailure('Сервер не відповів на запит сканування.');
       return;
     }
     if (res.needsRescan) {
-      _showScanMessage('Скан не розпізнано — пересканійте, будь ласка');
+      await _handleScanFailure(
+          'Код прочитано, але товар за ним не знайдено${res.readBC.isNotEmpty ? " (${res.readBC})" : ""}.');
       return;
     }
     if (res.isSpartaCard) {
@@ -2228,9 +2230,56 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _scrollToIndex(0);
     _fetchSKUDetail(drug);
     _fetchProductBrowserInfo(drug);
+    // Позиція вже в кошику, але НЕ звірена (потрапила з пошуку/ЄДК/аналогів) →
+    // цей скан її ЗВІРЯЄ, а не додає ще одну упаковку. Інакше касир, звіряючи
+    // товар перед оплатою, щоразу подвоював би кількість.
+    final existing = _getCartItem(drug.id);
+    if (existing != null &&
+        existing.quantity > 0 &&
+        !_scannedDrugIds.contains(drug.id)) {
+      setState(() => _scannedDrugIds.add(drug.id));
+      _showScanMessage('${drug.displayName}: звірено');
+      return;
+    }
     // Вибиття: +1 до наявної кількості (або 1, якщо ще не в кошику).
-    final current = _getCartItem(drug.id)?.quantity ?? 0;
+    final current = existing?.quantity ?? 0;
     _setQuantity(drug, current + 1);
+    // Товар щойно просканували — він перед фармацевтом, звіряти вдруге не
+    // потрібно (вимога процесу). Без цього позиція, додана самим сканом при
+    // порожньому кошику, лишалась би незвіреною і блокувала оплату.
+    setState(() => _scannedDrugIds.add(drug.id));
+  }
+
+  /// Незвірені позиції кошика (сканування обовʼязкове для кожного продажу).
+  /// Джерело правди — [_scannedDrugIds], той самий набір, що малює галочки.
+  List<CartItem> get _unscannedItems => _cart
+      .where((i) => !_scannedDrugIds.contains(i.drug.id))
+      .toList(growable: false);
+
+  /// Невдалий скан під час звірки: касир не може просто його проігнорувати —
+  /// потрібне свідоме рішення (пересканувати / ввести вручну / прибрати
+  /// позицію). Кнопку видалення показуємо, лише коли незвірена позиція одна:
+  /// інакше незрозуміло, що саме зникне з кошика.
+  Future<void> _handleScanFailure(String reason) async {
+    final pending = _unscannedItems;
+    final single = pending.length == 1 ? pending.first : null;
+    final action = await showScanFailedDialog(
+      context: context,
+      reason: reason,
+      itemName: single?.drug.displayName,
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case ScanFailedAction.retry:
+        _showScanMessage('Скануйте упаковку ще раз');
+      case ScanFailedAction.manual:
+        await _showManualBarcodeDialog();
+      case ScanFailedAction.removeItem:
+        if (single == null) return;
+        final idx = _cart.indexWhere((i) => i.drug.id == single.drug.id);
+        if (idx >= 0) _removeFromCart(idx);
+        _showScanMessage('${single.drug.displayName} — прибрано з кошика');
+    }
   }
 
   /// Ідентифікація клієнта ЛАЙК за номером картки (скан) — аналог телефонної:

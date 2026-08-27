@@ -177,6 +177,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   bool get _canProcessPayment {
     if (widget.cart.isEmpty) return false;
     if (widget.isLoadingPricing || widget.serverPricing == null) return false;
+    // Сканування обовʼязкове для КОЖНОГО продажу: поки лишилась хоч одна
+    // незвірена позиція, оплата недоступна. Гейт `_allCartScanned` існував
+    // з самого початку, але ніде не використовувався — кнопка була активна
+    // завжди.
+    if (!_allCartScanned) return false;
     // Пакунок Малюка — тільки безготівка через термінал.
     if (widget.isPakunokMode && paymentMethod != PaymentMethod.card) {
       return false;
@@ -230,6 +235,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     if (widget.cart.isEmpty) return false;
     return widget.cart.every((i) => widget.scannedDrugIds.contains(i.drug.id));
   }
+
+  /// Скільки позицій ще не звірено скануванням — для підпису на кнопці оплати.
+  int get _unscannedCount => widget.cart
+      .where((i) => !widget.scannedDrugIds.contains(i.drug.id))
+      .length;
 
   void _scanCartItem(CartItem item) {
     widget.onItemScanned?.call(item.drug.id);
@@ -2814,7 +2824,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                 ),
               ] else ...[
                 Icon(
-                  Icons.payment_rounded,
+                  // Незвірений товар — головна причина, чому кнопка сіра.
+                  // Показуємо це іконкою й текстом, щоб касир не гадав.
+                  _unscannedCount > 0
+                      ? Icons.qr_code_scanner_rounded
+                      : Icons.payment_rounded,
                   color: enabled
                       ? Colors.white
                       : const Color(0xFFB0B7C3),
@@ -2822,7 +2836,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                 ),
                 const SizedBox(width: 7),
                 Text(
-                  'Провести оплату',
+                  _unscannedCount > 0
+                      ? 'Скануйте товар ($_unscannedCount)'
+                      : 'Провести оплату',
                   style: TextStyle(
                     color: enabled
                         ? Colors.white

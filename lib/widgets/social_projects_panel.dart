@@ -188,7 +188,7 @@ class SocialProjectsPanelState extends State<SocialProjectsPanel> {
             Icon(Icons.search_off, size: 32, color: Color(0xFFD1D5DB)),
             SizedBox(height: 8),
             Text('Програму не знайдено',
-                style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+                style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
           ],
         ),
       );

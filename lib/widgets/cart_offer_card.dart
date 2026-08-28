@@ -175,7 +175,7 @@ class CartOfferCard extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                color: Color(0xFF9CA3AF),
+                                color: Color(0xFF6B7280),
                                 fontSize: 11,
                               ),
                             ),
@@ -240,7 +240,7 @@ class CartOfferCard extends StatelessWidget {
                         child: Text(
                           offer.reason,
                           style: const TextStyle(
-                            color: Color(0xFF9CA3AF),
+                            color: Color(0xFF6B7280),
                             fontSize: 11,
                           ),
                         ),

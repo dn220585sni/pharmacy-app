@@ -112,7 +112,7 @@ class RobotPanelState extends State<RobotPanel> {
             child: const Text(
               'Ctrl+B',
               style: TextStyle(
-                color: Color(0xFF9CA3AF),
+                color: Color(0xFF6B7280),
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3,
@@ -260,7 +260,7 @@ class RobotPanelState extends State<RobotPanel> {
                         fontWeight: FontWeight.w600,
                         color: enabled
                             ? const Color(0xFF1C1C2E)
-                            : const Color(0xFF9CA3AF),
+                            : const Color(0xFF6B7280),
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -406,7 +406,7 @@ class RobotPanelState extends State<RobotPanel> {
               child: Text(
                 '...ще ${widget.cart.length - 5} поз.',
                 style: const TextStyle(
-                    fontSize: 10, color: Color(0xFF9CA3AF)),
+                    fontSize: 10, color: Color(0xFF6B7280)),
               ),
             ),
         ],

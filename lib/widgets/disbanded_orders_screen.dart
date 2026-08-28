@@ -329,7 +329,7 @@ class _DisbandedOrdersScreenState extends State<DisbandedOrdersScreen> {
                   Text(
                     '$dateStr  $timeStr',
                     style: const TextStyle(
-                      color: Color(0xFF9CA3AF),
+                      color: Color(0xFF6B7280),
                       fontSize: 11,
                     ),
                   ),
@@ -462,7 +462,7 @@ class _DisbandedOrdersScreenState extends State<DisbandedOrdersScreen> {
               const Text(
                 'Місце не вказано',
                 style: TextStyle(
-                  color: Color(0xFF9CA3AF),
+                  color: Color(0xFF6B7280),
                   fontSize: 11,
                   fontStyle: FontStyle.italic,
                 ),

@@ -155,7 +155,7 @@ class _RefusalDialogState extends State<_RefusalDialog> {
                     decoration: InputDecoration(
                       hintText: 'Опишіть причину...',
                       hintStyle: const TextStyle(
-                          fontSize: 12, color: Color(0xFF9CA3AF)),
+                          fontSize: 12, color: Color(0xFF6B7280)),
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 10),
                       border: OutlineInputBorder(

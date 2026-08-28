@@ -95,7 +95,7 @@ class PaymentMethodToggle extends StatelessWidget {
                     style: TextStyle(
                       color: isActive
                           ? Colors.white
-                          : const Color(0xFF9CA3AF),
+                          : const Color(0xFF6B7280),
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.3,

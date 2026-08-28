@@ -33,7 +33,7 @@ class AnaloguesPanel extends StatelessWidget {
 
   Widget _buildHeader() {
     const labelStyle = TextStyle(
-      color: Color(0xFF9CA3AF),
+      color: Color(0xFF6B7280),
       fontSize: 11.5,
       fontWeight: FontWeight.w500,
       letterSpacing: 0.3,

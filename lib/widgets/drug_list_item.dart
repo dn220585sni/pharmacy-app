@@ -428,7 +428,7 @@ class _DrugListItemState extends State<DrugListItem> {
                             child: const Text(
                               'Рецепт',
                               style: TextStyle(
-                                color: Color(0xFF9CA3AF),
+                                color: Color(0xFF6B7280),
                                 fontSize: 9,
                                 fontWeight: FontWeight.w500,
                                 letterSpacing: 0.2,

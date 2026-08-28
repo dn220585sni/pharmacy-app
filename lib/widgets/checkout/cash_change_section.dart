@@ -103,7 +103,7 @@ class CashChangeSection extends StatelessWidget {
                     decoration: InputDecoration(
                       suffixText: '₴',
                       suffixStyle: const TextStyle(
-                        color: Color(0xFF9CA3AF),
+                        color: Color(0xFF6B7280),
                         fontSize: 13,
                       ),
                       isDense: true,
@@ -312,7 +312,7 @@ class CashChangeSection extends StatelessWidget {
                       decoration: InputDecoration(
                         suffixText: '₴',
                         suffixStyle: const TextStyle(
-                          color: Color(0xFF9CA3AF),
+                          color: Color(0xFF6B7280),
                           fontSize: 11,
                         ),
                         isDense: true,

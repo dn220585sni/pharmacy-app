@@ -178,7 +178,7 @@ class EdkPanel extends StatelessWidget {
                     '${drug.manufacturer} · ${drug.category}',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                      color: Color(0xFF9CA3AF),
+                      color: Color(0xFF6B7280),
                       fontSize: 12,
                     ),
                   ),
@@ -339,7 +339,7 @@ class EdkPanel extends StatelessWidget {
                         Text(
                           'Ні, дякую',
                           style: TextStyle(
-                            color: Color(0xFF9CA3AF),
+                            color: Color(0xFF6B7280),
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                           ),
@@ -356,7 +356,7 @@ class EdkPanel extends StatelessWidget {
                             child: Text(
                               'Esc',
                               style: TextStyle(
-                                color: Color(0xFF9CA3AF),
+                                color: Color(0xFF6B7280),
                                 fontSize: 10,
                                 fontWeight: FontWeight.w700,
                                 letterSpacing: 0.3,

@@ -206,7 +206,7 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
               const Text(
                 'Запропоновано із залишку попереднього дня — звірте з виносом '
                 'останнього Z-звіту.',
-                style: TextStyle(fontSize: 11.5, color: Color(0xFF9CA3AF)),
+                style: TextStyle(fontSize: 11.5, color: Color(0xFF6B7280)),
               ),
               const SizedBox(height: 18),
 

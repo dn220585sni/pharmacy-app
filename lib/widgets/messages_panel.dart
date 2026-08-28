@@ -263,7 +263,7 @@ class MessagesPanelState extends State<MessagesPanel> {
             child: const Text(
               'Ctrl+M',
               style: TextStyle(
-                color: Color(0xFF9CA3AF),
+                color: Color(0xFF6B7280),
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3,
@@ -323,7 +323,7 @@ class MessagesPanelState extends State<MessagesPanel> {
           decoration: InputDecoration(
             hintText: 'Пошук повідомлень...',
             hintStyle:
-                const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
             prefixIcon: const Icon(Icons.search_rounded,
                 size: 18, color: Color(0xFF9CA3AF)),
             prefixIconConstraints:
@@ -371,7 +371,7 @@ class MessagesPanelState extends State<MessagesPanel> {
                       ? 'Немає вхідних повідомлень'
                       : 'Немає надісланих повідомлень',
               style: const TextStyle(
-                  color: Color(0xFF9CA3AF), fontSize: 13),
+                  color: Color(0xFF6B7280), fontSize: 13),
             ),
           ],
         ),
@@ -482,7 +482,7 @@ class MessagesPanelState extends State<MessagesPanel> {
                   decoration: InputDecoration(
                     hintText: 'Написати відповідь...',
                     hintStyle: const TextStyle(
-                        fontSize: 13, color: Color(0xFF9CA3AF)),
+                        fontSize: 13, color: Color(0xFF6B7280)),
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 8),
                     filled: true,
@@ -568,7 +568,7 @@ class MessagesPanelState extends State<MessagesPanel> {
             decoration: InputDecoration(
               hintText: 'Тема',
               hintStyle:
-                  const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                  const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               filled: true,
@@ -603,7 +603,7 @@ class MessagesPanelState extends State<MessagesPanel> {
               decoration: InputDecoration(
                 hintText: 'Текст повідомлення...',
                 hintStyle:
-                    const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                    const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 filled: true,
@@ -818,7 +818,7 @@ class _MessageListTileState extends State<_MessageListTile> {
                           _formatDate(msg.date),
                           style: const TextStyle(
                             fontSize: 11,
-                            color: Color(0xFF9CA3AF),
+                            color: Color(0xFF6B7280),
                           ),
                         ),
                       ],
@@ -851,7 +851,7 @@ class _MessageListTileState extends State<_MessageListTile> {
                             '${msg.replies.length}',
                             style: const TextStyle(
                               fontSize: 11,
-                              color: Color(0xFF9CA3AF),
+                              color: Color(0xFF6B7280),
                             ),
                           ),
                         ],
@@ -867,7 +867,7 @@ class _MessageListTileState extends State<_MessageListTile> {
                             msg.body.replaceAll('\n', ' '),
                             style: const TextStyle(
                               fontSize: 12,
-                              color: Color(0xFF9CA3AF),
+                              color: Color(0xFF6B7280),
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -1043,7 +1043,7 @@ class _MessageBubble extends StatelessWidget {
                         _formatDateTime(date),
                         style: const TextStyle(
                           fontSize: 11,
-                          color: Color(0xFF9CA3AF),
+                          color: Color(0xFF6B7280),
                         ),
                       ),
                     ],

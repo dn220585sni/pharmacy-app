@@ -107,7 +107,7 @@ class PharmacyApp extends StatelessWidget {
         textTheme: const TextTheme(
           bodyLarge: TextStyle(color: Color(0xFF1C1C2E)),
           bodyMedium: TextStyle(color: Color(0xFF6B7280)),
-          bodySmall: TextStyle(color: Color(0xFF9CA3AF)),
+          bodySmall: TextStyle(color: Color(0xFF6B7280)),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,

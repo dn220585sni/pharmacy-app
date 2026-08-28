@@ -84,7 +84,7 @@ class _BarcodeInputDialogState extends State<_BarcodeInputDialog> {
                 decoration: InputDecoration(
                   hintText: 'Штрихкод...',
                   hintStyle: const TextStyle(
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                     fontSize: 14,
                   ),
                   contentPadding: const EdgeInsets.symmetric(

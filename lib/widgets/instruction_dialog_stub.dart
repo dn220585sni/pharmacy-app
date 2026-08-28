@@ -179,7 +179,7 @@ class _InstructionDialogState extends State<_InstructionDialog> {
                           child: Text(
                             _error!,
                             style: const TextStyle(
-                              color: Color(0xFF9CA3AF),
+                              color: Color(0xFF6B7280),
                               fontSize: 14,
                             ),
                           ),

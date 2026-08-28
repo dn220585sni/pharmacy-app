@@ -132,7 +132,7 @@ class _PrescriptionTypeDialogState extends State<PrescriptionTypeDialog> {
                 SizedBox(height: 2),
                 Text('Введіть дані рецепту',
                     style:
-                        TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+                        TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
               ],
             ),
           ),

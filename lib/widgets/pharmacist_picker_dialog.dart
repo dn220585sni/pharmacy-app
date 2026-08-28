@@ -203,7 +203,7 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
                 decoration: InputDecoration(
                   hintText: 'Пошук за прізвищем...',
                   hintStyle: const TextStyle(
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                     fontSize: 13,
                   ),
                   prefixIcon: const Icon(
@@ -232,7 +232,7 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
                   child: Text(
                     'Нікого не знайдено',
                     style:
-                        TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+                        TextStyle(color: Color(0xFF6B7280), fontSize: 13),
                   ),
                 )
               : ListView.builder(
@@ -307,7 +307,7 @@ class _PharmacistPickerDialogState extends State<PharmacistPickerDialog> {
                 '${widget.pharmacists.length} фармацевтів',
                 style: const TextStyle(
                   fontSize: 11,
-                  color: Color(0xFF9CA3AF),
+                  color: Color(0xFF6B7280),
                 ),
               ),
               const Spacer(),

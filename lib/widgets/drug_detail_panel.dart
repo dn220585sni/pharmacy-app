@@ -512,7 +512,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
               child: Text(
                 item.$2,
                 style: const TextStyle(
-                  color: Color(0xFF9CA3AF),
+                  color: Color(0xFF6B7280),
                   fontSize: 11.5,
                   height: 1.2,
                 ),
@@ -593,7 +593,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
               Expanded(
                 child: Text('Назва',
                     style: TextStyle(
-                        color: Color(0xFF9CA3AF),
+                        color: Color(0xFF6B7280),
                         fontSize: 11,
                         fontWeight: FontWeight.w500)),
               ),
@@ -602,7 +602,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
                 child: Text('Зал.',
                     textAlign: TextAlign.right,
                     style: TextStyle(
-                        color: Color(0xFF9CA3AF),
+                        color: Color(0xFF6B7280),
                         fontSize: 11,
                         fontWeight: FontWeight.w500)),
               ),
@@ -611,7 +611,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
                 child: Text('Ціна',
                     textAlign: TextAlign.right,
                     style: TextStyle(
-                        color: Color(0xFF9CA3AF),
+                        color: Color(0xFF6B7280),
                         fontSize: 11,
                         fontWeight: FontWeight.w500)),
               ),
@@ -1017,7 +1017,7 @@ class _StorageSectionState extends State<_StorageSection> {
               Text(
                 '${r.$1}: ',
                 style: const TextStyle(
-                  color: Color(0xFF9CA3AF),
+                  color: Color(0xFF6B7280),
                   fontSize: 11,
                 ),
               ),
@@ -1960,7 +1960,7 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
                       Text(
                         widget.drug.name,
                         style: const TextStyle(
-                          color: Color(0xFF9CA3AF),
+                          color: Color(0xFF6B7280),
                           fontSize: 12,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -2017,7 +2017,7 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
                 ),
                 prefixText: '+380 ',
                 prefixStyle: const TextStyle(
-                  color: Color(0xFF9CA3AF),
+                  color: Color(0xFF6B7280),
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
@@ -2087,7 +2087,7 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
                                 const Text(
                                   'Звичайна ціна',
                                   style: TextStyle(
-                                    color: Color(0xFF9CA3AF),
+                                    color: Color(0xFF6B7280),
                                     fontSize: 10,
                                   ),
                                 ),
@@ -2302,7 +2302,7 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
                               style: TextStyle(
                                 color: _discountPrice != null
                                     ? Colors.white
-                                    : const Color(0xFF9CA3AF),
+                                    : const Color(0xFF6B7280),
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
                               ),

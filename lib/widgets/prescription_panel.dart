@@ -724,7 +724,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
                             style: TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w600,
-                                color: Color(0xFF9CA3AF))),
+                                color: Color(0xFF6B7280))),
                         const SizedBox(height: 4),
                         GestureDetector(
                           onTap: () {
@@ -775,7 +775,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
                           style: TextStyle(
                               fontSize: 10.5,
                               fontWeight: FontWeight.w600,
-                              color: Color(0xFF9CA3AF))),
+                              color: Color(0xFF6B7280))),
                       const SizedBox(height: 4),
                       ...hints.map((n) => Padding(
                             padding: const EdgeInsets.only(bottom: 2),
@@ -1215,7 +1215,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
                 text: 'Кількість',
                 style: TextStyle(
                     fontSize: 10.5,
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                     fontWeight: FontWeight.w500),
                 children: [
                   TextSpan(
@@ -1320,7 +1320,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
                 text: label.replaceAll(' *', ''),
                 style: const TextStyle(
                     fontSize: 10.5,
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                     fontWeight: FontWeight.w500),
                 children: [
                   if (label.contains('*'))
@@ -1353,7 +1353,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
                   suffixStyle: suffix != null
                       ? const TextStyle(
                           fontSize: 11,
-                          color: Color(0xFF9CA3AF),
+                          color: Color(0xFF6B7280),
                           fontWeight: FontWeight.w500)
                       : null,
                   filled: true,
@@ -1397,7 +1397,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
                 text: 'Дата',
                 style: TextStyle(
                     fontSize: 10.5,
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                     fontWeight: FontWeight.w500),
               ),
             ),
@@ -1467,7 +1467,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
             child: Text(label,
                 style: const TextStyle(
                     fontSize: 10.5,
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                     fontWeight: FontWeight.w500)),
           ),
           Expanded(
@@ -1494,7 +1494,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
             child: Text(label,
                 style: const TextStyle(
                     fontSize: 10.5,
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                     fontWeight: FontWeight.w500)),
           ),
           Expanded(
@@ -1580,7 +1580,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
             Icon(Icons.search_off, size: 32, color: Color(0xFFD1D5DB)),
             SizedBox(height: 8),
             Text('Відповідних препаратів не знайдено',
-                style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+                style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
           ],
         ),
       );
@@ -1709,7 +1709,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
                       overflow: TextOverflow.ellipsis),
                   Text(match.prescriptionItem.helsiName,
                       style: const TextStyle(
-                          fontSize: 9.5, color: Color(0xFF9CA3AF)),
+                          fontSize: 9.5, color: Color(0xFF6B7280)),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
                 ],
@@ -1769,7 +1769,7 @@ class PrescriptionPanelState extends State<PrescriptionPanel> {
     if (!match.isSelected) {
       return Text('${match.selectedQuantity}',
           style:
-              const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)));
+              const TextStyle(fontSize: 11, color: Color(0xFF6B7280)));
     }
     return Row(
       mainAxisSize: MainAxisSize.min,

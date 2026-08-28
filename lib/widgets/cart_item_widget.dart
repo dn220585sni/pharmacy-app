@@ -276,7 +276,7 @@ class CartItemWidget extends StatelessWidget {
                     style: TextStyle(
                       color: isScanned
                           ? const Color(0xFF93C5FD)
-                          : const Color(0xFF9CA3AF),
+                          : const Color(0xFF6B7280),
                       fontSize: 11,
                     ),
                   ),

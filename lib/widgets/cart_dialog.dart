@@ -192,7 +192,7 @@ class _CartDialogState extends State<CartDialog> {
             children: [
               const Text('Кількість позицій:',
                   style:
-                      TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+                      TextStyle(color: Color(0xFF6B7280), fontSize: 13)),
               const Spacer(),
               Text('$_cartItemCount шт.',
                   style: const TextStyle(
@@ -204,7 +204,7 @@ class _CartDialogState extends State<CartDialog> {
             children: [
               const Text('Знижка:',
                   style:
-                      TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+                      TextStyle(color: Color(0xFF6B7280), fontSize: 13)),
               const Spacer(),
               const Text('0,00 ₴',
                   style: TextStyle(

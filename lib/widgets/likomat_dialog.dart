@@ -320,7 +320,7 @@ class _LikomatDialogContentState extends State<_LikomatDialogContent> {
                   'Вільних: $_availableCount  •  Зайнятих: $_occupiedCount  •  Всього: ${_cells.length}',
                   style: const TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                   ),
                 ),
               ],
@@ -550,7 +550,7 @@ class _LikomatDialogContentState extends State<_LikomatDialogContent> {
           label,
           style: const TextStyle(
             fontSize: 10,
-            color: Color(0xFF9CA3AF),
+            color: Color(0xFF6B7280),
           ),
         ),
       ],

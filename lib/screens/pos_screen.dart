@@ -931,7 +931,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                 'ІПН: ${_currentPharmacist!.ipn}',
                 style: const TextStyle(
                   fontSize: 11,
-                  color: Color(0xFF9CA3AF),
+                  color: Color(0xFF6B7280),
                 ),
               ),
             ],
@@ -4321,7 +4321,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   Widget _buildTableHeader() {
     const style = TextStyle(
-      color: Color(0xFF9CA3AF),
+      color: Color(0xFF6B7280),
       fontSize: 11.5,
       fontWeight: FontWeight.w500,
       letterSpacing: 0.3,

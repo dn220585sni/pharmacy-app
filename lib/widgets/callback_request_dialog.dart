@@ -143,7 +143,7 @@ class _CallbackRequestDialogState extends State<CallbackRequestDialog> {
                   hintText:
                       'Опишіть, навіщо потрібно зв\'язатись з клієнтом...',
                   hintStyle: const TextStyle(
-                      fontSize: 13, color: Color(0xFF9CA3AF)),
+                      fontSize: 13, color: Color(0xFF6B7280)),
                   filled: true,
                   fillColor: const Color(0xFFF9FAFB),
                   contentPadding: const EdgeInsets.all(12),
@@ -290,7 +290,7 @@ class _DialogInfoRow extends StatelessWidget {
           Text(
             '$label:',
             style: const TextStyle(
-              color: Color(0xFF9CA3AF),
+              color: Color(0xFF6B7280),
               fontSize: 11.5,
               fontWeight: FontWeight.w500,
             ),

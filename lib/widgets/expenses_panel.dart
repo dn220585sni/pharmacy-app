@@ -258,7 +258,7 @@ class ExpensesPanelState extends State<ExpensesPanel> {
             child: const Text(
               'Ctrl+E',
               style: TextStyle(
-                color: Color(0xFF9CA3AF),
+                color: Color(0xFF6B7280),
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3,
@@ -289,7 +289,7 @@ class ExpensesPanelState extends State<ExpensesPanel> {
           decoration: InputDecoration(
             hintText: 'Телефон, препарат, №чеку, №замовлення',
             hintStyle:
-                const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
             prefixIcon: const Icon(Icons.search_rounded,
                 size: 18, color: Color(0xFF9CA3AF)),
             prefixIconConstraints:
@@ -393,7 +393,7 @@ class ExpensesPanelState extends State<ExpensesPanel> {
                 fontWeight: hasValue ? FontWeight.w600 : FontWeight.w400,
                 color: hasValue
                     ? const Color(0xFF1E7DC8)
-                    : const Color(0xFF9CA3AF),
+                    : const Color(0xFF6B7280),
               ),
             ),
             if (hasValue) ...[
@@ -429,7 +429,7 @@ class ExpensesPanelState extends State<ExpensesPanel> {
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 4),
             child: Text('—',
-                style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
+                style: TextStyle(color: Color(0xFF6B7280), fontSize: 12)),
           ),
           _buildDateChip('до', _dateTo, isFrom: false),
           const SizedBox(width: 8),
@@ -459,13 +459,13 @@ class ExpensesPanelState extends State<ExpensesPanel> {
                     style: const TextStyle(fontSize: 11, color: Color(0xFF374151)),
                     hint: const Text('Всі каси',
                         style: TextStyle(
-                            fontSize: 11, color: Color(0xFF9CA3AF))),
+                            fontSize: 11, color: Color(0xFF6B7280))),
                     items: [
                       const DropdownMenuItem<String?>(
                         value: null,
                         child: Text('Всі каси',
                             style: TextStyle(
-                                fontSize: 11, color: Color(0xFF9CA3AF))),
+                                fontSize: 11, color: Color(0xFF6B7280))),
                       ),
                       ...registers.map((r) => DropdownMenuItem<String?>(
                             value: r,
@@ -631,7 +631,7 @@ class ExpensesPanelState extends State<ExpensesPanel> {
                     ? 'Нічого не знайдено'
                     : 'Немає операцій',
                 style: const TextStyle(
-                  color: Color(0xFF9CA3AF),
+                  color: Color(0xFF6B7280),
                   fontSize: 13,
                 ),
               ),
@@ -1197,7 +1197,7 @@ class _ExpenseListTileState extends State<_ExpenseListTile> {
                 child: Text(
                   '$dateStr $timeStr · $_itemsSummary',
                   style: const TextStyle(
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                     fontSize: 11,
                   ),
                   maxLines: 1,
@@ -1271,7 +1271,7 @@ class _ExpenseItemRow extends StatelessWidget {
                     '$priceStr ₴/шт.',
                   ].join(' · '),
                   style: const TextStyle(
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                     fontSize: 10.5,
                   ),
                 ),
@@ -1536,7 +1536,7 @@ class _PopupActionButtonState extends State<_PopupActionButton> {
                   style: const TextStyle(
                     fontSize: 9.5,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                     letterSpacing: 0.8,
                   ),
                 ),

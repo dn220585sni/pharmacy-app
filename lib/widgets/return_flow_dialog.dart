@@ -146,7 +146,7 @@ class _ReturnFlowDialogState extends State<ReturnFlowDialog> {
                         Text(
                           'Чек №${widget.expense.receiptNumber}',
                           style: const TextStyle(
-                            color: Color(0xFF9CA3AF),
+                            color: Color(0xFF6B7280),
                             fontSize: 11,
                           ),
                         ),
@@ -371,7 +371,7 @@ class _ReturnFlowDialogState extends State<ReturnFlowDialog> {
                         style: TextStyle(
                           color: _checked[i]
                               ? const Color(0xFF1C1C2E)
-                              : const Color(0xFF9CA3AF),
+                              : const Color(0xFF6B7280),
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
                         ),
@@ -382,7 +382,7 @@ class _ReturnFlowDialogState extends State<ReturnFlowDialog> {
                         Text(
                           '${item.manufacturer} · ${item.quantity} шт.',
                           style: const TextStyle(
-                            color: Color(0xFF9CA3AF),
+                            color: Color(0xFF6B7280),
                             fontSize: 10,
                           ),
                         ),
@@ -395,7 +395,7 @@ class _ReturnFlowDialogState extends State<ReturnFlowDialog> {
                   style: TextStyle(
                     color: _checked[i]
                         ? const Color(0xFF1C1C2E)
-                        : const Color(0xFF9CA3AF),
+                        : const Color(0xFF6B7280),
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -423,7 +423,7 @@ class _ReturnFlowDialogState extends State<ReturnFlowDialog> {
           isExpanded: true,
           hint: const Text(
             'Оберіть причину повернення',
-            style: TextStyle(fontSize: 12.5, color: Color(0xFF9CA3AF)),
+            style: TextStyle(fontSize: 12.5, color: Color(0xFF6B7280)),
           ),
           icon: const Icon(Icons.expand_more_rounded,
               size: 18, color: Color(0xFF9CA3AF)),
@@ -591,7 +591,7 @@ class _ReturnFlowDialogState extends State<ReturnFlowDialog> {
             child: Text(
               'Натисніть "Надіслати SMS" для отримання коду підтвердження',
               style: TextStyle(
-                color: Color(0xFF9CA3AF),
+                color: Color(0xFF6B7280),
                 fontSize: 10.5,
               ),
             ),

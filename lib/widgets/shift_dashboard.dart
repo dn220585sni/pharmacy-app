@@ -203,7 +203,7 @@ class _ShiftDashboardState extends State<ShiftDashboard>
                     'Нараховано з початку зміни',
                     style: TextStyle(
                       fontSize: 11,
-                      color: Color(0xFF9CA3AF),
+                      color: Color(0xFF6B7280),
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -252,7 +252,7 @@ class _ShiftDashboardState extends State<ShiftDashboard>
           style: const TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w700,
-            color: Color(0xFF9CA3AF),
+            color: Color(0xFF6B7280),
             letterSpacing: 0.5,
           ),
         ),
@@ -330,7 +330,7 @@ class _ShiftDashboardState extends State<ShiftDashboard>
             const Spacer(),
             Text(
               'план $planLabel',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+              style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
             ),
           ],
         ),

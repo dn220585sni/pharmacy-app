@@ -1496,7 +1496,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
             child: const Text(
               'F2',
               style: TextStyle(
-                color: Color(0xFF9CA3AF),
+                color: Color(0xFF6B7280),
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3,
@@ -2725,7 +2725,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                     fillColor: const Color(0xFFF9FAFB),
                     suffixText: '₴',
                     suffixStyle: const TextStyle(
-                      color: Color(0xFF9CA3AF),
+                      color: Color(0xFF6B7280),
                       fontSize: 12,
                     ),
                     border: OutlineInputBorder(

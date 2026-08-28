@@ -1057,7 +1057,7 @@ class OrdersPanelState extends State<OrdersPanel>
             child: const Text(
               'Ctrl+I',
               style: TextStyle(
-                color: Color(0xFF9CA3AF),
+                color: Color(0xFF6B7280),
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3,
@@ -1147,7 +1147,7 @@ class OrdersPanelState extends State<OrdersPanel>
           decoration: InputDecoration(
             hintText: 'Номер замовлення, П.І.Б., Glovo',
             hintStyle:
-                const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
             prefixIcon: const Icon(Icons.search_rounded,
                 size: 18, color: Color(0xFF9CA3AF)),
             prefixIconConstraints:
@@ -1243,7 +1243,7 @@ class OrdersPanelState extends State<OrdersPanel>
               SizedBox(height: 12),
               Text(
                 'Завантаження замовлень...',
-                style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+                style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
               ),
             ],
           ),
@@ -1262,7 +1262,7 @@ class OrdersPanelState extends State<OrdersPanel>
               Text(
                 'Замовлень не знайдено',
                 style: TextStyle(
-                  color: Color(0xFF9CA3AF),
+                  color: Color(0xFF6B7280),
                   fontSize: 13,
                 ),
               ),
@@ -1387,7 +1387,7 @@ class OrdersPanelState extends State<OrdersPanel>
             SizedBox(width: 8),
             Text(
               'Завантаження даних замовлення...',
-              style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+              style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
             ),
           ],
         ),
@@ -1507,7 +1507,7 @@ class OrdersPanelState extends State<OrdersPanel>
                 Text(
                   dateStr,
                   style: const TextStyle(
-                      fontSize: 11, color: Color(0xFF9CA3AF)),
+                      fontSize: 11, color: Color(0xFF6B7280)),
                 ),
                 const SizedBox(width: 8),
                 Container(
@@ -1761,7 +1761,7 @@ class OrdersPanelState extends State<OrdersPanel>
                     }),
                     decoration: InputDecoration(
                       hintText: 'Пошук по номеру замовлення',
-                      hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                      hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
                       prefixIcon: const Icon(Icons.search, size: 16, color: Color(0xFF9CA3AF)),
                       prefixIconConstraints: const BoxConstraints(minWidth: 36),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 10),
@@ -1865,7 +1865,7 @@ class OrdersPanelState extends State<OrdersPanel>
                                       '${order.items.length} поз. · $itemNames',
                                       style: const TextStyle(
                                         fontSize: 11,
-                                        color: Color(0xFF9CA3AF),
+                                        color: Color(0xFF6B7280),
                                       ),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
@@ -2917,7 +2917,7 @@ class _OrderListTileState extends State<_OrderListTile> {
                       ].join(' · '),
                       style: const TextStyle(
                         fontSize: 11,
-                        color: Color(0xFF9CA3AF),
+                        color: Color(0xFF6B7280),
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -3327,7 +3327,7 @@ class _OrderItemRow extends StatelessWidget {
                           ].join(' \u2022 '),
                           style: const TextStyle(
                             fontSize: 10,
-                            color: Color(0xFF9CA3AF),
+                            color: Color(0xFF6B7280),
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -3340,7 +3340,7 @@ class _OrderItemRow extends StatelessWidget {
                       style: TextStyle(
                         color: isScanned
                             ? const Color(0xFF86EFAC)
-                            : const Color(0xFF9CA3AF),
+                            : const Color(0xFF6B7280),
                         fontSize: 11,
                       ),
                     ),
@@ -3539,7 +3539,7 @@ class _OrderItemRow extends StatelessWidget {
             SizedBox(height: 8),
             Text(
               'Зображення недоступне',
-              style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+              style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
             ),
           ],
         ),

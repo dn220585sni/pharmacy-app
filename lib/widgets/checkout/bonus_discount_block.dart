@@ -108,7 +108,7 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                             text:
                                 ' (доступно ${widget.loyalty!.bonusBalance.asMoney})',
                             style: const TextStyle(
-                                color: Color(0xFF9CA3AF), fontSize: 11.5),
+                                color: Color(0xFF6B7280), fontSize: 11.5),
                           ),
                       ],
                     ),
@@ -143,7 +143,7 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                     decoration: InputDecoration(
                       suffixText: '₴',
                       suffixStyle: const TextStyle(
-                        color: Color(0xFF9CA3AF),
+                        color: Color(0xFF6B7280),
                         fontSize: 12,
                       ),
                       isDense: true,
@@ -266,7 +266,7 @@ class _BonusDiscountBlockState extends State<BonusDiscountBlock> {
                             text:
                                 ' (${widget.availableDiscountAmount!.asMoney} ₴)',
                             style: const TextStyle(
-                              color: Color(0xFF9CA3AF),
+                              color: Color(0xFF6B7280),
                               fontSize: 11.5,
                             ),
                           ),

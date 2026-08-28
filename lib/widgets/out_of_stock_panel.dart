@@ -230,7 +230,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                   Text(
                     '${drug.category}  ·  ${drug.manufacturer}',
                     style: const TextStyle(
-                      color: Color(0xFF9CA3AF),
+                      color: Color(0xFF6B7280),
                       fontSize: 11.5,
                     ),
                   ),
@@ -421,7 +421,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                   '${drug.manufacturer} · ${drug.category}',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    color: Color(0xFF9CA3AF),
+                    color: Color(0xFF6B7280),
                     fontSize: 12,
                   ),
                 ),
@@ -614,7 +614,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                   Text(
                     'Ні, дякую',
                     style: TextStyle(
-                      color: Color(0xFF9CA3AF),
+                      color: Color(0xFF6B7280),
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                     ),
@@ -631,7 +631,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                       child: Text(
                         'Esc',
                         style: TextStyle(
-                          color: Color(0xFF9CA3AF),
+                          color: Color(0xFF6B7280),
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.3,
@@ -723,7 +723,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                 child: Text('Зал.',
                     textAlign: TextAlign.right,
                     style: TextStyle(
-                        color: Color(0xFF9CA3AF),
+                        color: Color(0xFF6B7280),
                         fontSize: 11,
                         fontWeight: FontWeight.w500)),
               ),
@@ -732,7 +732,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                 child: Text('Ціна',
                     textAlign: TextAlign.right,
                     style: TextStyle(
-                        color: Color(0xFF9CA3AF),
+                        color: Color(0xFF6B7280),
                         fontSize: 11,
                         fontWeight: FontWeight.w500)),
               ),
@@ -971,7 +971,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
               child: Text(
                 'В радіусі 10 км аптек з наявністю цього препарату не виявлено.\n\nЗапропонуйте клієнту аналог з переліку вище або замовте доставку препарату в вашу аптеку протягом 1-2 днів.',
                 style: TextStyle(
-                  color: Color(0xFF9CA3AF),
+                  color: Color(0xFF6B7280),
                   fontSize: 12.5,
                 ),
               ),
@@ -1056,7 +1056,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                             Text(
                               ph.workingHours,
                               style: const TextStyle(
-                                color: Color(0xFF9CA3AF),
+                                color: Color(0xFF6B7280),
                                 fontSize: 11,
                               ),
                             ),
@@ -1090,7 +1090,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                         Text(
                           ph.distance!,
                           style: const TextStyle(
-                            color: Color(0xFF9CA3AF),
+                            color: Color(0xFF6B7280),
                             fontSize: 10.5,
                           ),
                         ),
@@ -1187,7 +1187,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                     style: TextStyle(
                       color: authorized
                           ? Colors.white
-                          : const Color(0xFF9CA3AF),
+                          : const Color(0xFF6B7280),
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                     ),
@@ -1248,7 +1248,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                 : 'Замовлення та бронювання недоступні — виробник тимчасово не постачає цей препарат.',
             textAlign: TextAlign.center,
             style: const TextStyle(
-              color: Color(0xFF9CA3AF),
+              color: Color(0xFF6B7280),
               fontSize: 12.5,
               height: 1.4,
             ),

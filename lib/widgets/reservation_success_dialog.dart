@@ -132,7 +132,7 @@ class _ReservationSuccessDialogState extends State<ReservationSuccessDialog>
                     widget.drugName,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                      color: Color(0xFF9CA3AF),
+                      color: Color(0xFF6B7280),
                       fontSize: 12.5,
                     ),
                   ),

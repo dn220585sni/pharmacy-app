@@ -175,7 +175,7 @@ class OrderEdkCard extends StatelessWidget {
                       Text(
                         drug.manufacturer,
                         style: const TextStyle(
-                          color: Color(0xFF9CA3AF),
+                          color: Color(0xFF6B7280),
                           fontSize: 11,
                         ),
                       ),
@@ -335,7 +335,7 @@ class OrderEdkCard extends StatelessWidget {
                         const Text(
                           'Ні',
                           style: TextStyle(
-                            color: Color(0xFF9CA3AF),
+                            color: Color(0xFF6B7280),
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
                           ),
@@ -351,7 +351,7 @@ class OrderEdkCard extends StatelessWidget {
                           child: const Text(
                             'Esc',
                             style: TextStyle(
-                              color: Color(0xFF9CA3AF),
+                              color: Color(0xFF6B7280),
                               fontSize: 9,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.3,

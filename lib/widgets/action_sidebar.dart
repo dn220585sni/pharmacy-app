@@ -259,7 +259,7 @@ class _SidebarButtonState extends State<_SidebarButton> {
                             height: 1,
                             color: isHighlighted
                                 ? const Color(0xFF1E7DC8)
-                                : const Color(0xFF9CA3AF),
+                                : const Color(0xFF6B7280),
                           ),
                         ),
                       ),

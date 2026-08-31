@@ -31,7 +31,26 @@ mixin CheckoutMixin<T extends StatefulWidget> on State<T> {
   // Дефолт — КАРТКА: клієнту одразу називаємо повну суму (без готівкового
   // округлення). Округлення застосовується лише коли касир свідомо тисне
   // «Готівкою». Так уникаємо конфлікту «назвали менше, ніж треба карткою».
-  PaymentMethod paymentMethod = PaymentMethod.card;
+  PaymentMethod _paymentMethod = PaymentMethod.card;
+
+  PaymentMethod get paymentMethod => _paymentMethod;
+
+  /// Сеттер, а не поле, щоб КОЖНА зміна способу оплати була помічена — і з
+  /// перемикача, і з `resetCheckout`/`switchToCard`.
+  ///
+  /// Округлення НБУ — це серверна знижка, прив'язана до `TypeNakl`
+  /// (готівка=2, картка=5). Без перерахунку `GetSumSkid` воно «зависає» від
+  /// попереднього типу оплати (беклог Юлії, «Обов'язковий виклик getsumskid
+  /// при будь-якій зміні типу оплати»).
+  set paymentMethod(PaymentMethod method) {
+    if (_paymentMethod == method) return;
+    _paymentMethod = method;
+    onPaymentMethodChanged(method);
+  }
+
+  /// Хук для екрана: перерахувати ціни під новий `TypeNakl`. За замовчуванням
+  /// нічого не робить — реагує лише той, кому це потрібно.
+  void onPaymentMethodChanged(PaymentMethod method) {}
 
   final TextEditingController cashCtr = TextEditingController();
   final FocusNode cashFocus = FocusNode();

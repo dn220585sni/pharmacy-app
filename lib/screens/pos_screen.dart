@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../data/cart_offers.dart';
 import '../data/edk_offers.dart';
 import '../data/mock_drugs.dart';
+import '../models/payment_method.dart';
 import '../models/social_project.dart';
 import '../models/stop_price_action.dart';
 import '../services/auth_service.dart';
@@ -171,6 +172,23 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   int _pricingRequestSeq = 0;
   String _lastPricingKey = '';
   static const _pricingDebounceDuration = Duration(milliseconds: 500);
+
+  /// Спосіб оплати, під який пораховані ціни. Дефолт — картка, як у чекауті
+  /// (`CheckoutMixin`). Входить у `_pricingKey`, тож перемикання готівка/картка
+  /// саме собою запускає переклик `GetSumSkid` з новим `TypeNakl`: округлення
+  /// НБУ — серверна знижка, і вона залежить від типу оплати.
+  PaymentMethod _pricingPaymentMethod = PaymentMethod.card;
+
+  /// Спосіб оплати, під який ще треба лишити слід у журналі (виставляється при
+  /// перемиканні, гаситься після відповіді сервера).
+  ///
+  /// Навіщо: `finalTotal` у чекауті компенсує округлення НА КЛІЄНТІ — для
+  /// картки додає `roundingDiscount` назад. Поки `TypeNakl` не передавався,
+  /// сервер, схоже, завжди рахував як готівку, і компенсація була доречна.
+  /// Тепер сервер знає тип, тож може повертати `roundingDiscount=0` для
+  /// картки — і компенсація стане зайвою. Перевірити це можна лише на живій
+  /// касі, тож пишемо пару «тип → сума + округлення» у журнал.
+  PaymentMethod? _pendingPricingLog;
 
   /// Список соц-програм (server + always-shown local). Завантажується
   /// один раз після логіну.
@@ -2992,7 +3010,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         .map((i) => '${i.drug.id}:${i.quantity}:${i.fractionalQty ?? 0}')
         .join('|');
     final loyaltyPart = _customerLoyalty?.cardNo ?? _customerLoyalty?.phone ?? '';
-    return '$cartPart#$loyaltyPart';
+    return '$cartPart#$loyaltyPart#${_pricingPaymentMethod.name}';
   }
 
   /// Перевірити чи треба перерахувати ціни. Викликається з build().
@@ -3084,8 +3102,18 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         cart: _cart,
         loyalty: _customerLoyalty,
         typeProject: _isPakunokMode ? PakunokService.typeProjectTag : null,
+        typeNakl: _pricingPaymentMethod == PaymentMethod.card ? '5' : '2',
       );
       if (!mounted || mySeq != _pricingRequestSeq) return;
+      final logFor = _pendingPricingLog;
+      if (logFor != null) {
+        _pendingPricingLog = null;
+        FiscalLog.log('GetSumSkid після зміни типу оплати: '
+            'TypeNakl=${logFor == PaymentMethod.card ? "5 (картка)" : "2 (готівка)"} '
+            '→ total=${pricing.total.toStringAsFixed(2)} '
+            'округлення=${pricing.roundingDiscount.toStringAsFixed(2)} '
+            'fromServer=${pricing.fromServer}');
+      }
       setState(() {
         _serverPricing = pricing;
         if (showLoading) _isLoadingPricing = false;
@@ -3825,6 +3853,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         isPakunokMode: _isPakunokMode,
         scannedDrugIds: _scannedDrugIds,
         onItemScanned: (id) => setState(() => _scannedDrugIds.add(id)),
+        onPaymentMethodChanged: (method) {
+          if (!mounted || _pricingPaymentMethod == method) return;
+          _pendingPricingLog = method;
+          // setState → перебудова → `_maybeSchedulePricing` бачить новий ключ
+          // і сам ставить debounced переклик GetSumSkid.
+          setState(() => _pricingPaymentMethod = method);
+        },
       );
     }
     if (_ordersOpen) {

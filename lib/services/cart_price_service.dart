@@ -213,6 +213,10 @@ class CartPriceService {
   /// [orderId] — ID інтернет-замовлення (для онлайн-кошиків).
   /// [helsiNumber] — номер електронного рецепту з Helsi/eHealth.
   /// [typeProject] — тег спец-проекту (наприклад "Malyuk" для Пакунка Малюка).
+  /// [typeNakl] — тип накладної: готівка `'2'`, картка/безнал `'5'`. Впливає на
+  /// розрахунок: округлення НБУ сервер оформлює як знижку, і вона залежить від
+  /// типу оплати. Тому переклик обов'язковий на КОЖНУ зміну способу оплати —
+  /// інакше округлення лишається від попереднього типу.
   static Future<CartPricing> fetchTotals({
     required List<CartItem> cart,
     CustomerLoyalty? loyalty,
@@ -222,6 +226,7 @@ class CartPriceService {
     String? orderId,
     String? helsiNumber,
     String? typeProject,
+    String? typeNakl,
   }) async {
     if (cart.isEmpty) {
       return CartPricing.empty();
@@ -241,6 +246,7 @@ class CartPriceService {
       orderId: orderId,
       helsiNumber: helsiNumber,
       typeProject: typeProject,
+      typeNakl: typeNakl,
     );
   }
 
@@ -301,6 +307,7 @@ class CartPriceService {
     String? orderId,
     String? helsiNumber,
     String? typeProject,
+    String? typeNakl,
   }) async {
     final params = <String, String>{
       if (socialProgramCode != null && socialProgramCode.isNotEmpty)
@@ -310,6 +317,8 @@ class CartPriceService {
         'HelsiNUM': helsiNumber,
       if (typeProject != null && typeProject.isNotEmpty)
         'TypeProject': typeProject,
+      // Та сама назва й значення, що в `SavesgVNakl` — 2 готівка / 5 картка.
+      if (typeNakl != null && typeNakl.isNotEmpty) 'TypeNakl': typeNakl,
     };
 
     final response = await CacheApiClient().call('GetSumSkid', params: params);

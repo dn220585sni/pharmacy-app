@@ -73,6 +73,11 @@ class CartPanel extends StatefulWidget {
   /// Позначити позицію відсканованою (parent додає `drug.id` у `scannedDrugIds`).
   final ValueChanged<String>? onItemScanned;
 
+  /// Спосіб оплати змінився — parent має перерахувати `GetSumSkid` з новим
+  /// `TypeNakl`: округлення НБУ сервер оформлює як знижку, прив'язану до типу
+  /// оплати, і без переклику воно лишається від попереднього.
+  final ValueChanged<PaymentMethod>? onPaymentMethodChanged;
+
   const CartPanel({
     super.key,
     required this.cart,
@@ -94,6 +99,7 @@ class CartPanel extends StatefulWidget {
     this.isPakunokMode = false,
     this.scannedDrugIds = const {},
     this.onItemScanned,
+    this.onPaymentMethodChanged,
   });
 
   @override
@@ -557,6 +563,13 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   void switchToCard() {
     if (!_checkoutMode) return;
     super.switchToCard();
+  }
+
+  /// Ловимо ВСІ зміни способу оплати (перемикач, `switchToCard`,
+  /// `resetCheckout`) і піднімаємо в `PosScreen` — там живе виклик `GetSumSkid`.
+  @override
+  void onPaymentMethodChanged(PaymentMethod method) {
+    widget.onPaymentMethodChanged?.call(method);
   }
 
   /// Public method — F5 processes payment when already in checkout

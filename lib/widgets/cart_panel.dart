@@ -815,6 +815,13 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
               'фіскалізацію скасовано (nakl=$localNumber)');
           // Фіскального сліду немає — добивати нічого.
           await SaleJournal.abort(numNakl, 'оплату карткою не проведено');
+          // `res == null` = касир натиснув «Оплатити готівкою» у вікні помилки.
+          // Раніше тип оплати лишався «Картка», і його доводилось перемикати
+          // руками (беклог Юлії). Відхилену транзакцію (`!approved`) НЕ чіпаємо
+          // — там касир може захотіти повторити карткою.
+          if (res == null && mounted) {
+            setState(() => paymentMethod = PaymentMethod.cash);
+          }
           return false;
         }
         // Деталі оплати → Caché (PutTermData); GetDataRRO візьме pay_terminal.

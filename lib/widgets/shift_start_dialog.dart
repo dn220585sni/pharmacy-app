@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/money.dart';
 import '../services/api_config.dart';
+import '../services/fiscal_log.dart';
 import '../services/shift_service.dart';
 
 /// Діалог «Початок зміни» — показується одразу після логіну фармацевта.
@@ -47,14 +48,33 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
   @override
   void initState() {
     super.initState();
-    _depositCtr = TextEditingController(text: widget.carryover.format());
+    // ⚠️ Поле НЕ передзаповнюємо.
+    //
+    // Раніше сюди підставлявся `cash_in_box` з останнього Z — і касиру
+    // лишалось натиснути «Почати зміну». Але це готівка в касі на момент Z,
+    // тобто вчорашнє внесення + денна виручка − інкасація, а не розмінна
+    // монета. Виміряно 31.08 по журналу: 10 825,30 → продаж готівкою 35,00 →
+    // наступна пропозиція 10 860,30. Число росло само, а `startShift` робить
+    // на нього ФІСКАЛЬНЕ службове внесення в ПРРО — і роздутий `cash_in_box`
+    // завтра ставав новою пропозицією. Замкнене коло.
+    //
+    // Поки не з'ясовано правильне джерело (порожній `SumZZvit` — питання до
+    // Каті), суму вводить касир: він єдиний, хто фізично перерахував касу.
+    _depositCtr = TextEditingController();
+    _depositCtr.addListener(_onDepositChanged);
   }
+
+  void _onDepositChanged() => setState(() {});
 
   @override
   void dispose() {
+    _depositCtr.removeListener(_onDepositChanged);
     _depositCtr.dispose();
     super.dispose();
   }
+
+  /// Порожнє поле — не «нуль», а «касир ще не ввів». Свідомий 0 дозволений.
+  bool get _canStart => _depositCtr.text.trim().isNotEmpty;
 
   Future<void> _closeWithoutShift() async {
     final confirmed = await showDialog<bool>(
@@ -86,6 +106,11 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
 
   Future<void> _start() async {
     final deposit = Money.parse(_depositCtr.text);
+    // Збираємо реальні значення розмінної: за тиждень буде видно, наскільки
+    // касири розходяться з `cash_in_box`, і чи можна взагалі на нього спиратись.
+    FiscalLog.log('Старт зміни: касир ввів ${deposit.format()}; '
+        'довідка (готівка в касі на момент Z) ${widget.carryover.format()}; '
+        'різниця ${(deposit - widget.carryover).format()}');
     setState(() => _starting = true);
     final ok = await ShiftService.startShift(deposit);
     if (!mounted) return;
@@ -203,17 +228,24 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
                 ],
               ),
               const SizedBox(height: 6),
-              const Text(
-                'Запропоновано із залишку попереднього дня — звірте з виносом '
-                'останнього Z-звіту.',
-                style: TextStyle(fontSize: 11.5, color: Color(0xFF6B7280)),
+              Text(
+                widget.carryover.isPositive
+                    ? 'Для довідки: готівка в касі на момент останнього '
+                        'Z-звіту — ${widget.carryover.format()} ₴. Це НЕ '
+                        'розмінна монета: сума включає денну виручку, якщо '
+                        'інкасацію не робили. Введіть те, що фактично '
+                        'закладаєте в касу.'
+                    : 'Введіть суму розмінної монети, яку фактично закладаєте '
+                        'в касу.',
+                style: const TextStyle(
+                    fontSize: 11.5, color: Color(0xFF6B7280), height: 1.35),
               ),
               const SizedBox(height: 18),
 
               SizedBox(
                 height: 44,
                 child: ElevatedButton.icon(
-                  onPressed: _starting ? null : _start,
+                  onPressed: (_starting || !_canStart) ? null : _start,
                   icon: _starting
                       ? const SizedBox(
                           width: 16,

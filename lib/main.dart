@@ -49,8 +49,27 @@ void main() {
 }
 
 class _AppCloseObserver extends WidgetsBindingObserver {
+  /// Вихід уже опрацьовується.
+  ///
+  /// Z-звіт іде в ПРРО секундами; поки він летить, зміна на сервері ЩЕ
+  /// відкрита. Без цього прапорця повторний клік по хрестику заходив сюди
+  /// вдруге, бачив відкриту зміну і питав Z ще раз — саме це спостерігала
+  /// Юлія 31.08. Другий вхід просто ігноруємо: перший сам закриє програму,
+  /// коли завершить.
+  bool _exiting = false;
+
   @override
   Future<AppExitResponse> didRequestAppExit() async {
+    if (_exiting) return AppExitResponse.cancel;
+    _exiting = true;
+    try {
+      return await _handleExit();
+    } finally {
+      _exiting = false;
+    }
+  }
+
+  Future<AppExitResponse> _handleExit() async {
     // Свіжо перевірити РРО, чи зміна відкрита (локальний стан міг застаріти
     // після рестарту з відновленою зміною) — інакше при виході не пропонувався
     // Z для реально відкритої зміни.
@@ -62,7 +81,10 @@ class _AppCloseObserver extends WidgetsBindingObserver {
         final choice = await showShiftEndDialog(ctx);
         if (choice == ShiftEndChoice.cancel) return AppExitResponse.cancel;
         if (choice == ShiftEndChoice.closeShift) {
-          await ShiftService.closeShift();
+          final r = await ShiftService.closeShift();
+          // Підтвердження результату — на цьому шляху його не було взагалі.
+          await showShiftCloseResult(navigatorKey.currentContext,
+              success: r.success, error: r.error);
         }
         // justExit → вийти без Z-звіту (напр. перезапуск програми).
       }

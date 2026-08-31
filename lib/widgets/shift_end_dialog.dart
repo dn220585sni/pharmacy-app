@@ -30,6 +30,30 @@ Future<ShiftEndChoice> showShiftEndDialog(
   return choice ?? ShiftEndChoice.cancel;
 }
 
+/// Показати результат закриття зміни й дати касиру його прочитати.
+///
+/// Однакове підтвердження на ОБОХ шляхах закриття — з меню і через хрестик.
+/// На шляху хрестика його не було взагалі: касир не бачив, чи Z пройшов,
+/// тиснув хрестик ще раз і отримував повторний запит Z (Юлія, 31.08).
+/// Пауза наприкінці — щоб стрічку встигли побачити до закриття вікна.
+Future<void> showShiftCloseResult(
+  BuildContext? context, {
+  required bool success,
+  String? error,
+}) async {
+  if (context != null && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(success
+          ? 'Зміну закрито — Z-звіт сформовано'
+          : 'Не вдалося закрити зміну: $error'),
+      backgroundColor:
+          success ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+  await Future.delayed(const Duration(milliseconds: 1800));
+}
+
 class _ShiftEndDialog extends StatelessWidget {
   final bool showJustExit;
   const _ShiftEndDialog({required this.showJustExit});

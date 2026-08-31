@@ -149,6 +149,19 @@ class ShiftService {
       final x = await PrroService.xReport(includeChecks: false);
       if (x == null) return _state.isOpen;
       if (x.shiftOpen && !_state.isOpen) {
+        // ⚠️ Не воскрешати стан одразу після ПІДТВЕРДЖЕНОГО Z.
+        //
+        // Захист від подвійного Z тримається на `_state.isOpen` і `_closing`.
+        // Але цей рядок повертав `isOpen` назад у `true` з відповіді сервера —
+        // і роззброював захист: наступний виклик `closeShift` робив ДРУГИЙ
+        // справжній Z. Поки вікно свіже, відповіді «зміна відкрита» не віримо:
+        // ми щойно самі її закрили й маємо успішну відповідь ПРРО.
+        if (_zJustDone) {
+          FiscalLog.log('isShiftOpenOnServer: РРО ще показує зміну відкритою, '
+              'але Z підтверджено ${DateTime.now().difference(_lastZAt!).inSeconds}с '
+              'тому — вважаємо закритою, стан не воскрешаємо');
+          return false;
+        }
         _state = ShiftState(
           isOpen: true,
           openedAt: x.openedAt,
@@ -232,6 +245,9 @@ class ShiftService {
     await CashService.saveOperation(
         direction: CashDirection.cashIn, reason: reason, sum: deposit);
     _state = ShiftState(isOpen: true, openedAt: DateTime.now(), carryover: deposit);
+    // Нова зміна відкрита — вікно недовіри до РРО після минулого Z більше не
+    // діє (інакше воно б замаскувало щойно відкриту зміну).
+    _lastZAt = null;
     debugPrint('ShiftService: зміну відкрито (OPEN_SHIFT + службове внесення '
         '${deposit.format()}, причина="$reason")');
     return true;
@@ -239,6 +255,19 @@ class ShiftService {
 
   /// Триває закриття (guard від паралельних викликів кнопка+вихід).
   static bool _closing = false;
+
+  /// Момент останнього ПІДТВЕРДЖЕНОГО Z-звіту (успішна відповідь ПРРО).
+  ///
+  /// Потрібен лише [isShiftOpenOnServer]: доки вікно свіже, відповідь РРО
+  /// «зміна відкрита» вважаємо застарілою і не воскрешаємо `_state`. Живе в
+  /// пам'яті — після рестарту процесу джерелом правди знову стає сервер.
+  static DateTime? _lastZAt;
+
+  /// Скільки не довіряти відповіді РРО про відкриту зміну після вдалого Z.
+  static const _zSettleWindow = Duration(seconds: 90);
+
+  static bool get _zJustDone =>
+      _lastZAt != null && DateTime.now().difference(_lastZAt!) < _zSettleWindow;
 
   /// Закрити зміну — Z-звіт у ПРРО, потім фіксація операції в БД Caché (ZRep).
   /// Повертає результат ПРРО (фіскально значущий крок).
@@ -264,6 +293,7 @@ class ShiftService {
       final r = await PrroService.zReport();
       if (r.success) {
         _state = const ShiftState(isOpen: false);
+        _lastZAt = DateTime.now();
         await _fixZReportInDb();
         // `cash_in_box` з відповіді Z-звіту = гроші в касі на момент Z = пропонована
         // розмінна монета для НАСТУПНОЇ зміни. Зберігаємо (переживає рестарт).

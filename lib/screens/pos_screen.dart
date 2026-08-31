@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitType;
 import '../models/money.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1041,6 +1042,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// «Закрити зміну» з меню фармацевта: свіжі підсумки з xReport → діалог
   /// з пропозицією Z-звіту (без «Ні, лише вийти» — це не вихід з програми).
+  /// Після ПІДТВЕРДЖЕНОГО Z програма закривається сама (прохання Юлії 31.08):
+  /// касиру більше не треба тиснути хрестик, а саме той клік під час Z і
+  /// породжував повторний запит звіту. Вихід іде штатним шляхом
+  /// (`didRequestAppExit`), тож `NewClient` і `LogoutRlz` відпрацьовують як
+  /// завжди, а зміна на той момент уже закрита — другого діалогу не буде.
   Future<void> _closeShiftFromMenu() async {
     await ShiftService.refreshTotals();
     if (!mounted) return;
@@ -1048,14 +1054,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (choice != ShiftEndChoice.closeShift || !mounted) return;
     final result = await ShiftService.closeShift();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(result.success
-          ? 'Зміну закрито — Z-звіт сформовано'
-          : 'Не вдалося закрити зміну: ${result.error}'),
-      backgroundColor:
-          result.success ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
-      behavior: SnackBarBehavior.floating,
-    ));
+    await showShiftCloseResult(context,
+        success: result.success, error: result.error);
+    // Z не пройшов — зміна лишилась відкритою, касу не закриваємо: касир має
+    // побачити помилку і повторити.
+    if (!result.success) return;
+    await ServicesBinding.instance.exitApplication(AppExitType.cancelable);
   }
 
   /// LogoutRlz — закрити сесію при виході.

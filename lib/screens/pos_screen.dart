@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show AppExitType;
 import '../models/money.dart';
+import '../utils/scan_keymap.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../data/cart_offers.dart';
@@ -1109,11 +1110,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return true; // не віддаємо Tab у focus traversal
     }
     if (_scanning) {
-      final ch = event.character;
-      if (ch != null && ch.isNotEmpty && ch.codeUnitAt(0) >= 32) {
-        _scanBuffer.write(ch);
-      }
-      _resetScanIdle();
+      _appendScanKey(event);
       return true; // під час скана глушимо ввід (символи не йдуть у пошук)
     }
 
@@ -2110,6 +2107,52 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void _resetScanIdle() {
     _scanIdleTimer?.cancel();
     _scanIdleTimer = Timer(_scanIdle, _flushScan);
+  }
+
+  /// Додати клавішу до буфера скана — з ФІЗИЧНОЇ позиції, а не з `character`.
+  ///
+  /// `character` залежить від розкладки Windows: при українській та сама
+  /// клавіша дає «Й» замість «Q», і код зі стікера чи картки лояльності
+  /// приходив покаліченим (Андрій, 31.08). Деталі — `utils/scan_keymap.dart`.
+  void _appendScanKey(KeyEvent event) {
+    final key = event.physicalKey;
+    if (isScanTerminator(key)) {
+      _scanIdleTimer?.cancel();
+      _flushScan();
+      return;
+    }
+    if (isIgnoredForScan(key)) {
+      _resetScanIdle();
+      return;
+    }
+    final ch =
+        scanCharFor(key, shift: HardwareKeyboard.instance.isShiftPressed);
+    if (ch != null) {
+      _scanBuffer.write(ch);
+    } else {
+      // Запас: клавіші немає в мапі — беремо символ від системи, щоб не
+      // загубити код, і лишаємо слід, чого мапі бракує.
+      final fallback = event.character;
+      if (fallback != null &&
+          fallback.isNotEmpty &&
+          fallback.codeUnitAt(0) >= 32) {
+        _scanBuffer.write(fallback);
+      }
+      _logUnknownScanKey(key, fallback);
+    }
+    _resetScanIdle();
+  }
+
+  /// Невідомі клавіші — раз на клавішу за запуск, щоб не залити журнал. Саме
+  /// за цим слідом буде видно, чого бракує мапі після тесту на живому сканері.
+  static final Set<int> _loggedUnknownScanKeys = {};
+
+  void _logUnknownScanKey(PhysicalKeyboardKey key, String? character) {
+    if (!_loggedUnknownScanKeys.add(key.usbHidUsage)) return;
+    FiscalLog.log('Сканер: невідома клавіша '
+        'usbHid=0x${key.usbHidUsage.toRadixString(16)} '
+        '(${key.debugName ?? "?"}, символ="${character ?? ''}") — '
+        'немає в scan_keymap');
   }
 
   void _flushScan() {

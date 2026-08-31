@@ -84,7 +84,7 @@ class _AppCloseObserver extends WidgetsBindingObserver {
           final r = await ShiftService.closeShift();
           // Підтвердження результату — на цьому шляху його не було взагалі.
           await showShiftCloseResult(navigatorKey.currentContext,
-              success: r.success, error: r.error);
+              success: r.success, error: r.error, fixedInDb: r.fixedInDb);
         }
         // justExit → вийти без Z-звіту (напр. перезапуск програми).
       }

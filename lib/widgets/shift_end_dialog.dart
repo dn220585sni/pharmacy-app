@@ -36,22 +36,33 @@ Future<ShiftEndChoice> showShiftEndDialog(
 /// На шляху хрестика його не було взагалі: касир не бачив, чи Z пройшов,
 /// тиснув хрестик ще раз і отримував повторний запит Z (Юлія, 31.08).
 /// Пауза наприкінці — щоб стрічку встигли побачити до закриття вікна.
+/// [fixedInDb] `false` — окремий, ТРЕТІЙ стан: Z фіскально пройшов, але Caché
+/// його не записав. Раніше цей випадок показувався як звичайний успіх.
 Future<void> showShiftCloseResult(
   BuildContext? context, {
   required bool success,
   String? error,
+  bool fixedInDb = true,
 }) async {
+  final (text, color) = switch ((success, fixedInDb)) {
+    (false, _) => ('Не вдалося закрити зміну: $error', const Color(0xFFDC2626)),
+    (true, false) => (
+        'Z-звіт сформовано, але НЕ записаний у базу. '
+            'Зміна закрита — повідомте адміністратора.',
+        const Color(0xFFD97706)
+      ),
+    (true, true) => ('Зміну закрито — Z-звіт сформовано', const Color(0xFF16A34A)),
+  };
   if (context != null && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(success
-          ? 'Зміну закрито — Z-звіт сформовано'
-          : 'Не вдалося закрити зміну: $error'),
-      backgroundColor:
-          success ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+      content: Text(text),
+      backgroundColor: color,
       behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 8),
     ));
   }
-  await Future.delayed(const Duration(milliseconds: 1800));
+  // Попередження треба встигнути прочитати — воно довше за звичайне «ок».
+  await Future.delayed(Duration(milliseconds: success && fixedInDb ? 1800 : 4500));
 }
 
 class _ShiftEndDialog extends StatelessWidget {

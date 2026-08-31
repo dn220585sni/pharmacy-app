@@ -1055,10 +1055,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final result = await ShiftService.closeShift();
     if (!mounted) return;
     await showShiftCloseResult(context,
-        success: result.success, error: result.error);
+        success: result.success,
+        error: result.error,
+        fixedInDb: result.fixedInDb);
     // Z не пройшов — зміна лишилась відкритою, касу не закриваємо: касир має
     // побачити помилку і повторити.
     if (!result.success) return;
+    // Z пройшов, але в базу не ліг — теж не закриваємо: попередження має
+    // лишитись на екрані, з ним касиру йти до адміністратора.
+    if (!result.fixedInDb) return;
     await ServicesBinding.instance.exitApplication(AppExitType.cancelable);
   }
 

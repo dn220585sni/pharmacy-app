@@ -6,6 +6,7 @@ import '../models/cash_operation.dart';
 import '../models/money.dart';
 import '../models/shift_state.dart';
 import 'api_config.dart';
+import 'auth_service.dart';
 import 'cache_api_client.dart';
 import 'cash_service.dart';
 import 'fiscal_log.dart';
@@ -270,40 +271,43 @@ class ShiftService {
       _lastZAt != null && DateTime.now().difference(_lastZAt!) < _zSettleWindow;
 
   /// Закрити зміну — Z-звіт у ПРРО, потім фіксація операції в БД Caché (ZRep).
-  /// Повертає результат ПРРО (фіскально значущий крок).
   ///
   /// Ідемпотентний: якщо зміна вже закрита АБО закриття вже виконується — НЕ
   /// робимо повторний Z/ZRep. Інакше кожен зайвий виклик створює ще один запис
   /// «Вынос. Z-отчет» у касовій дисципліні (був баг: потрійний Z на одне закриття).
-  static Future<PrroResult> closeShift() async {
+  static Future<ShiftCloseResult> closeShift() async {
     if (!_state.isOpen) {
       debugPrint('ShiftService: closeShift — зміна вже закрита, пропускаємо');
-      return const PrroResult(success: true);
+      return const ShiftCloseResult(PrroResult(success: true), fixedInDb: true);
     }
     if (_closing) {
       debugPrint('ShiftService: closeShift уже виконується — пропускаємо');
-      return const PrroResult(success: true);
+      return const ShiftCloseResult(PrroResult(success: true), fixedInDb: true);
     }
     _closing = true;
     try {
       if (ApiConfig.useMock) {
         _state = const ShiftState(isOpen: false);
-        return const PrroResult(success: true);
+        return const ShiftCloseResult(PrroResult(success: true),
+            fixedInDb: true);
       }
       final r = await PrroService.zReport();
-      if (r.success) {
-        _state = const ShiftState(isOpen: false);
-        _lastZAt = DateTime.now();
-        await _fixZReportInDb();
-        // `cash_in_box` з відповіді Z-звіту = гроші в касі на момент Z = пропонована
-        // розмінна монета для НАСТУПНОЇ зміни. Зберігаємо (переживає рестарт).
-        final cashAtZ = Money.fromHryvnia(r.cashInBox ?? 0);
-        await _persistCarryover(cashAtZ);
-        debugPrint('ShiftService: closeShift OK (cashAtZ=${cashAtZ.format()})');
-      } else {
+      if (!r.success) {
         debugPrint('ShiftService: closeShift FAIL: ${r.error}');
+        return ShiftCloseResult(r, fixedInDb: false);
       }
-      return r;
+      _state = const ShiftState(isOpen: false);
+      _lastZAt = DateTime.now();
+      // Z уже фіскально відбувся. Далі — лише запис у Caché; його провал НЕ
+      // скасовує звіт, але й ховати його не можна (див. ShiftCloseResult).
+      final fixed = await _fixZReportInDb();
+      // `cash_in_box` з відповіді Z-звіту = гроші в касі на момент Z = пропонована
+      // розмінна монета для НАСТУПНОЇ зміни. Зберігаємо (переживає рестарт).
+      final cashAtZ = Money.fromHryvnia(r.cashInBox ?? 0);
+      await _persistCarryover(cashAtZ);
+      debugPrint('ShiftService: closeShift OK (cashAtZ=${cashAtZ.format()}, '
+          'fixedInDb=$fixed)');
+      return ShiftCloseResult(r, fixedInDb: fixed);
     } finally {
       _closing = false;
     }
@@ -351,7 +355,17 @@ class ShiftService {
   /// Зафіксувати Z-звіт у БД Caché (`ZRep`) — викликати ПІСЛЯ успішного Z у ПРРО.
   /// Best-effort: збій фіксації не скасовує вже зроблений у ПРРО Z-звіт,
   /// лише логуємо (за потреби — ретрай окремо).
-  static Future<void> _fixZReportInDb() async {
+  /// `true` — Caché прийняв фіксацію. `false` — Z фіскально пройшов, але в базі
+  /// його немає (див. [ShiftCloseResult.fixedInDb]).
+  static Future<bool> _fixZReportInDb() async {
+    // Діагностика причини: 27.08 о 18:51 ZRep упав із «Не авторизована сесія»,
+    // і по журналу було не відрізнити ДВА різні сценарії — (а) фармацевт вийшов
+    // з програми, сесію обнулив `logout`, (б) CSP-сесія протухла за таймаутом
+    // (локальний sessionId при цьому НЕ null). Цей рядок їх розводить.
+    if (AuthService.sessionId == null) {
+      FiscalLog.log('ZRep: сесії Caché немає ще ДО виклику — фармацевт вийшов '
+          'або не входив; фіксація Z у базі не пройде');
+    }
     try {
       final r = await CacheApiClient().call('ZRep');
       debugPrint('ShiftService: ZRep '
@@ -359,14 +373,36 @@ class ShiftService {
       // Слід у release-лозі: саме за цим записом звіряємо з Катериною, чи
       // фіксація Z оновила `SumZZvit` (п.7 листа). Без нього ми не могли
       // навести приклад — результат жив лише в debugPrint.
-      // ⚠️ Викликаємо БЕЗ параметрів; якщо сервіс очікує суму на вхід —
-      // це і є причина порожнього SumZZvit.
+      // Параметрів сервіс не приймає: суму він рахує сам із чеків і вносів-
+      // виносів за зміну (підтвердила Катерина 27.08). Тобто порожній
+      // SumZZvit — не наслідок того, що ми чогось не шлемо.
       FiscalLog.log('ZRep (фіксація Z у БД): '
           '${r.isOk ? "OK" : "FAIL"} result="${r.result}" '
           'поля=${r.data.keys.where((k) => k != 'Status' && k != 'Result').join(",")}');
+      return r.isOk;
     } catch (e) {
       debugPrint('ShiftService: ZRep ERROR: $e');
       FiscalLog.log('ZRep (фіксація Z у БД) ERROR: $e');
+      return false;
     }
   }
+}
+
+/// Результат закриття зміни: фіскальний крок і фіксація в базі — РІЗНІ речі.
+///
+/// Розділені після 27.08: Z пройшов у ПРРО, а `ZRep` упав («Не авторизована
+/// сесія») — провал ковтався, і касир бачив зелену стрічку «Z-звіт сформовано»,
+/// хоч у Caché запису не було. Успіх на екрані, порожньо в базі.
+class ShiftCloseResult {
+  /// Фіскально значущий крок — Z-звіт у ПРРО.
+  final PrroResult prro;
+
+  /// `false` — Z фіскально відбувся, але Caché його не записав. Зміна закрита,
+  /// касова дисципліна в базі — ні; це треба показати касиру, а не ховати.
+  final bool fixedInDb;
+
+  const ShiftCloseResult(this.prro, {required this.fixedInDb});
+
+  bool get success => prro.success;
+  String? get error => prro.error;
 }

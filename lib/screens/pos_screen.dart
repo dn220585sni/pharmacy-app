@@ -2173,11 +2173,32 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         'немає в scan_keymap');
   }
 
+  /// Чи `PosScreen` зараз найвищий маршрут — тобто згори НЕ відкрито діалог
+  /// (старт/завершення зміни, вибір фармацевта, ручний ввід коду, меню).
+  bool get _isTopRoute => ModalRoute.of(context)?.isCurrent ?? true;
+
   void _flushScan() {
     _scanning = false;
     final code = _scanBuffer.toString().trim();
     _scanBuffer.clear();
-    if (code.isNotEmpty) unawaited(_onScan(code));
+    if (code.isEmpty || !mounted) return;
+    // Захоплення Tab і символів лишається глобальним НАВІТЬ при відкритому
+    // діалозі — інакше цифри штрихкода потрапили б у його поле (напр. у суму
+    // службового внесення). А от диспатч глушимо: інакше товар тихо падав би
+    // в кошик за спиною діалогу (зауваження Андрія, 31.08).
+    if (!_isTopRoute) {
+      // Виняток — вікно невдалого скана. Провести упаковку ще раз замість
+      // натискання кнопки «Сканувати ще раз» це природний рефлекс касира, і
+      // результат має бути той самий: закриваємо вікно й обробляємо новий код.
+      if (_scanFailedDialogOpen) {
+        Navigator.of(context).pop();
+        unawaited(_onScan(code));
+        return;
+      }
+      FiscalLog.log('Сканер: скан "$code" проігноровано — відкритий діалог');
+      return;
+    }
+    unawaited(_onScan(code));
   }
 
   /// Диспатч розпізнаного скана: товар → кошик; картка ЛАЙК → ідентифікація;
@@ -2330,14 +2351,20 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// потрібне свідоме рішення (пересканувати / ввести вручну / прибрати
   /// позицію). Кнопку видалення показуємо, лише коли незвірена позиція одна:
   /// інакше незрозуміло, що саме зникне з кошика.
+  /// Відкрите вікно невдалого скана. Єдиний діалог, у якому новий скан має
+  /// сенс сам по собі — тому для нього в `_flushScan` є виняток.
+  bool _scanFailedDialogOpen = false;
+
   Future<void> _handleScanFailure(String reason) async {
     final pending = _unscannedItems;
     final single = pending.length == 1 ? pending.first : null;
+    _scanFailedDialogOpen = true;
     final action = await showScanFailedDialog(
       context: context,
       reason: reason,
       itemName: single?.drug.displayName,
     );
+    _scanFailedDialogOpen = false;
     if (!mounted || action == null) return;
     switch (action) {
       case ScanFailedAction.retry:

@@ -11,6 +11,7 @@ Future<void> showShiftStartDialog(
   BuildContext context, {
   required String pharmacist,
   required Money carryover,
+  bool? collectionDone,
   bool prevZPending = false,
 }) {
   return showDialog<void>(
@@ -19,6 +20,7 @@ Future<void> showShiftStartDialog(
     builder: (_) => _ShiftStartDialog(
       pharmacist: pharmacist,
       carryover: carryover,
+      collectionDone: collectionDone,
       prevZPending: prevZPending,
     ),
   );
@@ -27,10 +29,15 @@ Future<void> showShiftStartDialog(
 class _ShiftStartDialog extends StatefulWidget {
   final String pharmacist;
   final Money carryover;
+
+  /// Чи робили інкасацію в попередню зміну: `true` — [carryover] уже без
+  /// виручки, `false` — сума роздута, `null` — ПРРО не віддав `service_output`.
+  final bool? collectionDone;
   final bool prevZPending;
   const _ShiftStartDialog({
     required this.pharmacist,
     required this.carryover,
+    required this.collectionDone,
     required this.prevZPending,
   });
 
@@ -75,6 +82,26 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
 
   /// Порожнє поле — не «нуль», а «касир ще не ввів». Свідомий 0 дозволений.
   bool get _canStart => _depositCtr.text.trim().isNotEmpty;
+
+  /// Довідковий рядок під полем. Формулювання залежить від того, чи знаємо ми
+  /// про інкасацію: без виносу `cash_in_box` = вранішній внос + виручка
+  /// (Андрій Попов, 31.08), і тоді число взагалі не орієнтир.
+  String get _referenceHint {
+    if (!widget.carryover.isPositive) {
+      return 'Введіть суму розмінної монети, яку фактично закладаєте в касу.';
+    }
+    final sum = '${widget.carryover.format()} ₴';
+    return switch (widget.collectionDone) {
+      true => 'Для довідки: після інкасації в касі лишалось $sum на момент '
+          'останнього Z-звіту. Звірте з тим, що фактично закладаєте.',
+      false => 'Увага: інкасацію в попередню зміну не проводили, тож $sum '
+          'у касі на момент Z — це вранішній внесок разом із денною '
+          'виручкою, а не розмінна монета. Введіть фактичну суму.',
+      null => 'Для довідки: готівка в касі на момент останнього Z-звіту — '
+          '$sum. Це НЕ розмінна монета: без інкасації сюди входить денна '
+          'виручка. Введіть те, що фактично закладаєте в касу.',
+    };
+  }
 
   Future<void> _closeWithoutShift() async {
     final confirmed = await showDialog<bool>(
@@ -229,14 +256,7 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
               ),
               const SizedBox(height: 6),
               Text(
-                widget.carryover.isPositive
-                    ? 'Для довідки: готівка в касі на момент останнього '
-                        'Z-звіту — ${widget.carryover.format()} ₴. Це НЕ '
-                        'розмінна монета: сума включає денну виручку, якщо '
-                        'інкасацію не робили. Введіть те, що фактично '
-                        'закладаєте в касу.'
-                    : 'Введіть суму розмінної монети, яку фактично закладаєте '
-                        'в касу.',
+                _referenceHint,
                 style: const TextStyle(
                     fontSize: 11.5, color: Color(0xFF6B7280), height: 1.35),
               ),

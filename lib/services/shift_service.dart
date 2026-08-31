@@ -17,10 +17,32 @@ class ServiceDepositCheck {
   /// Чи потрібне службове внесення (ExVnos != 1).
   final bool needed;
 
-  /// Залишок з останнього Z-звіту (SumZZvit) — для передзаповнення.
+  /// Готівка в касі на момент останнього Z (`cash_in_box`) — ДОВІДКОВО.
+  /// Це не розмінна монета: без інкасації сюди входить денна виручка.
   final Money carryover;
 
-  const ServiceDepositCheck({required this.needed, required this.carryover});
+  /// Чи робили інкасацію в ту зміну: `true` — `cash_in_box` уже без виручки,
+  /// `false` — число роздуте, `null` — ПРРО не віддав `service_output`.
+  final bool? collectionDone;
+
+  const ServiceDepositCheck({
+    required this.needed,
+    required this.carryover,
+    this.collectionDone,
+  });
+}
+
+/// Слід останнього Z, збережений локально: скільки було в касі і чи робили винос.
+class ZCarryover {
+  final Money cashInBox;
+
+  /// Сума виносів за зміну (`service_output`). `null` — поля у відповіді немає.
+  final double? serviceOutput;
+
+  const ZCarryover(this.cashInBox, this.serviceOutput);
+
+  bool? get collectionDone =>
+      serviceOutput == null ? null : serviceOutput! > 0;
 }
 
 /// Сервіс робочої зміни.
@@ -90,30 +112,37 @@ class ShiftService {
     if (ApiConfig.useMock) {
       return ServiceDepositCheck(needed: true, carryover: Money.fromHryvnia(1250));
     }
-    // Пропонована розмінна монета = готівка в касі на момент останнього Z-звіту
-    // (збережено в closeShift; CashDesk `cash_in_box`). Фармацевт може змінити.
-    final carryover = await _loadCarryover() ?? Money.zero;
+    // ДОВІДКОВЕ число: готівка в касі на момент останнього Z (`cash_in_box`,
+    // збережено в closeShift). Не передзаповнює поле — див. shift_start_dialog.
+    final z = await _loadCarryover();
+    final carryover = z?.cashInBox ?? Money.zero;
+    final collection = z?.collectionDone;
     try {
       // ProvSumZOtchet — лише щоб зрозуміти, чи внесення взагалі потрібне (ExVnos).
       final r = await CacheApiClient().call('ProvSumZOtchet');
       if (r.isOk) {
         final needed = (r.data['ExVnos']?.toString() ?? '0') != '1';
         debugPrint('ShiftService: ProvSumZOtchet ExVnos="${r.data['ExVnos']}" '
-            'needed=$needed, розмінна(Z)=${carryover.format()}');
+            'needed=$needed, довідка(Z)=${carryover.format()}');
         // Друга половина прикладу для п.7: що саме віддав сервіс ПІСЛЯ Z.
-        // `SumZZvit` наразі порожній, тому розмінну беремо з `cash_in_box`
-        // Z-звіту ПРРО (збережено локально в closeShift).
         FiscalLog.log('ProvSumZOtchet: ExVnos="${r.data['ExVnos']}" '
             'SumZZvit="${r.data['SumZZvit'] ?? "(поля немає)"}" '
-            '→ пропонуємо ${carryover.format()} (з cash_in_box Z-звіту)');
-        return ServiceDepositCheck(needed: needed, carryover: carryover);
+            '→ довідка ${carryover.format()} (cash_in_box Z), '
+            'інкасація=${switch (collection) {
+          true => 'була',
+          false => 'НЕ була',
+          null => 'невідомо',
+        }}');
+        return ServiceDepositCheck(
+            needed: needed, carryover: carryover, collectionDone: collection);
       }
       debugPrint('ShiftService ProvSumZOtchet FAIL: ${r.result}');
     } catch (e) {
       debugPrint('ShiftService ProvSumZOtchet ERROR: $e');
     }
-    // На помилку — краще показати діалог (з розмінною), ніж пропустити старт.
-    return ServiceDepositCheck(needed: true, carryover: carryover);
+    // На помилку — краще показати діалог, ніж пропустити старт.
+    return ServiceDepositCheck(
+        needed: true, carryover: carryover, collectionDone: collection);
   }
 
   /// Підтягнути реальні підсумки відкритої зміни з ПРРО xReport (готівка в касі,
@@ -304,7 +333,14 @@ class ShiftService {
       // `cash_in_box` з відповіді Z-звіту = гроші в касі на момент Z = пропонована
       // розмінна монета для НАСТУПНОЇ зміни. Зберігаємо (переживає рестарт).
       final cashAtZ = Money.fromHryvnia(r.cashInBox ?? 0);
-      await _persistCarryover(cashAtZ);
+      await _persistCarryover(cashAtZ, r.serviceOutput);
+      // Слід для розбору розмінної: чи є в Z взагалі `service_output` і чи
+      // робили інкасацію. Без виносу `cash_in_box` = внос вранці + виручка
+      // (підтвердив Андрій Попов 31.08), тобто пропонувати його не можна.
+      FiscalLog.log('Z-звіт: cash_in_box=${cashAtZ.format()} '
+          'service_input=${r.serviceInput?.toStringAsFixed(2) ?? "(поля немає)"} '
+          'service_output=${r.serviceOutput?.toStringAsFixed(2) ?? "(поля немає)"}'
+          '${r.serviceOutput == 0 ? " — інкасації не було, сума включає виручку" : ""}');
       debugPrint('ShiftService: closeShift OK (cashAtZ=${cashAtZ.format()}, '
           'fixedInDb=$fixed)');
       return ShiftCloseResult(r, fixedInDb: fixed);
@@ -327,25 +363,33 @@ class ShiftService {
     }
   }
 
-  /// Зберегти готівку в касі на момент Z — пропонована розмінна для наступної зміни.
-  static Future<void> _persistCarryover(Money m) async {
+  /// Зберегти слід останнього Z: готівку в касі і суму виносів.
+  static Future<void> _persistCarryover(Money m, double? serviceOutput) async {
     final f = await _carryoverPath();
     if (f == null) return;
     try {
-      await f.writeAsString(jsonEncode({'kopiykas': m.kopiykas}));
+      await f.writeAsString(jsonEncode({
+        'kopiykas': m.kopiykas,
+        'service_output': ?serviceOutput,
+      }));
     } catch (e) {
       debugPrint('ShiftService: persist carryover FAIL: $e');
     }
   }
 
-  /// Прочитати збережену розмінну (з останнього Z). null якщо ще не було.
-  static Future<Money?> _loadCarryover() async {
+  /// Прочитати слід останнього Z. null якщо його ще не було.
+  /// Старий формат (без `service_output`) читається як «невідомо».
+  static Future<ZCarryover?> _loadCarryover() async {
     final f = await _carryoverPath();
     if (f == null || !await f.exists()) return null;
     try {
       final j = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
       final k = (j['kopiykas'] as num?)?.toInt();
-      return k != null ? Money.fromKopiykas(k) : null;
+      if (k == null) return null;
+      return ZCarryover(
+        Money.fromKopiykas(k),
+        (j['service_output'] as num?)?.toDouble(),
+      );
     } catch (e) {
       debugPrint('ShiftService: load carryover FAIL: $e');
       return null;

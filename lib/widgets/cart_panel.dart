@@ -153,10 +153,10 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     // Якщо є відповідь з сервера — пріоритет. Cash withdrawal накладаємо
     // зверху бо це окрема операція (видача готівки), не частина чеку.
     //
-    // Знижка округлення (skidka_sumcheck, НБУ 10 коп) діє ЛИШЕ на готівку.
-    // За замовчуванням спосіб оплати — КАРТКА (повна сума), тож клієнту одразу
-    // називаємо повну суму; округлення застосовується лише коли касир свідомо
-    // натиснув «Готівкою». Так уникаємо конфлікту «назвали менше, ніж карткою».
+    // Знижка округлення (skidka_sumcheck, 10 коп) діє ЛИШЕ на готівку.
+    // Дефолт — ГОТІВКА (31.08), як у решти роздрібу: показуємо суму зі
+    // знижкою округлення, а при свідомому переході на «Картку» вона зникає
+    // й сума повертається до повної.
     final sp = widget.serverPricing;
     final base = sp != null
         ? (paymentMethod == PaymentMethod.card
@@ -267,6 +267,13 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     if (widget.cart.isEmpty || !_allCartScanned) return;
     setState(() => _checkoutMode = true);
     _ensureTerminalsLoaded(); // підвантажити платіжні термінали (для картки)
+
+    // «Пакунок Малюка» — лише безготівка через термінал. Дефолт тепер
+    // готівковий, тож без цього переходу оплата в цьому режимі була б
+    // заблокована (`_canProcessPayment`), а причина — неочевидна.
+    if (widget.isPakunokMode && paymentMethod != PaymentMethod.card) {
+      switchToCard();
+    }
 
     // Auto-fill social project from prescription program if present
     if (_hasPrescriptionItems) {

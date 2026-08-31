@@ -28,10 +28,14 @@ mixin CheckoutMixin<T extends StatefulWidget> on State<T> {
   double? availableDiscount;
   bool isLoadingDiscount = false;
 
-  // Дефолт — КАРТКА: клієнту одразу називаємо повну суму (без готівкового
-  // округлення). Округлення застосовується лише коли касир свідомо тисне
-  // «Готівкою». Так уникаємо конфлікту «назвали менше, ніж треба карткою».
-  PaymentMethod _paymentMethod = PaymentMethod.card;
+  // Дефолт — ГОТІВКА (рішення 31.08).
+  //
+  // Раніше стояла картка: логіка була не називати клієнту суму меншу, ніж
+  // спишеться карткою, бо готівкове округлення йде вниз. На практиці ринок
+  // працює інакше — у супермаркетах і аптеках дефолт готівковий, а перехід
+  // на картку робиться за потреби; колеги підтвердили, що конфліктів через
+  // зростання суми при переході на картку не виникає.
+  PaymentMethod _paymentMethod = PaymentMethod.cash;
 
   PaymentMethod get paymentMethod => _paymentMethod;
 
@@ -83,7 +87,7 @@ mixin CheckoutMixin<T extends StatefulWidget> on State<T> {
   // ── Methods ────────────────────────────────────────────────────────────
 
   void resetCheckout() {
-    paymentMethod = PaymentMethod.card;
+    paymentMethod = PaymentMethod.cash;
     useBonuses = false;
     bonusCtr.clear();
     personalDiscount = null;

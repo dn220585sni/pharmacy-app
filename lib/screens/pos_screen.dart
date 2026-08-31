@@ -173,11 +173,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   String _lastPricingKey = '';
   static const _pricingDebounceDuration = Duration(milliseconds: 500);
 
-  /// Спосіб оплати, під який пораховані ціни. Дефолт — картка, як у чекауті
+  /// Спосіб оплати, під який пораховані ціни. Дефолт — готівка, як у чекауті
   /// (`CheckoutMixin`). Входить у `_pricingKey`, тож перемикання готівка/картка
-  /// саме собою запускає переклик `GetSumSkid` з новим `TypeNakl`: округлення
-  /// НБУ — серверна знижка, і вона залежить від типу оплати.
-  PaymentMethod _pricingPaymentMethod = PaymentMethod.card;
+  /// саме собою запускає переклик `GetSumSkid` з новим `TypeNakl`: округлення —
+  /// серверна знижка, і вона залежить від типу оплати.
+  PaymentMethod _pricingPaymentMethod = PaymentMethod.cash;
 
   /// Спосіб оплати, під який ще треба лишити слід у журналі (виставляється при
   /// перемиканні, гаситься після відповіді сервера).
@@ -3020,15 +3020,19 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   // ── Server pricing (GetSumSkid) ─────────────────────────────────────────
 
-  /// Сума до показу в UI (кнопка над таблицею): ПОВНА сума без готівкового
-  /// округлення — узгоджено з «До сплати» у чекауті (дефолт картка). Округлення
-  /// (НБУ 10 коп) застосовується лише при свідомому виборі готівки, тож у
-  /// загальному індикаторі показуємо неокруглену суму (`SumCheck` + повернута
-  /// знижка округлення), інакше fallback на локальну `_cartTotal`.
+  /// Сума на кнопці кошика — та сама, що й «До сплати» в чекауті.
+  ///
+  /// Дефолт готівковий (31.08), тож показуємо суму зі знижкою округлення; при
+  /// свідомому переході на картку обидва числа стають повними. Раніше кнопка
+  /// ЗАВЖДИ показувала повну суму, і поруч із готівковим «До сплати» це
+  /// читалось як розбіжність — 108,55 на кнопці проти 108,50 у чекауті
+  /// (питання Каті, 31.08). Тепер розходитись їм нема від чого.
   double get _displayCartTotal {
     final sp = _serverPricing;
     if (sp == null) return _cartTotal;
-    return sp.total + sp.roundingDiscount;
+    return _pricingPaymentMethod == PaymentMethod.card
+        ? sp.total + sp.roundingDiscount
+        : sp.total;
   }
 
   /// Snapshot тих параметрів, що впливають на калькуляцію цін на сервері.

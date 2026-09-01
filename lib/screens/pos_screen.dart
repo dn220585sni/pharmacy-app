@@ -684,10 +684,22 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         // (сервер віддає їх у порядку FEFO).
         final sameProduct = lastRows.where((r) => r.ukod == ukod).toList();
         if (sameProduct.isEmpty) continue;
-        return sameProduct.firstWhere(
+        final picked = sameProduct.firstWhere(
           (r) => r.qty > 0,
           orElse: () => sameProduct.first,
         );
+        // Коли партій кілька — фіксуємо ВСІ кандидати. Підозра (Юлія, беклог):
+        // у товару є окремі рядки цілої та розпочатої упаковки з тим самим
+        // u-кодом, і ми беремо розпочату, а з нею — ціну за саше (186 → 18,60).
+        // Без цього рядка вибір партії з журналу не видно взагалі.
+        if (sameProduct.length > 1) {
+          FiscalLog.log('ЄДК вибір партії для "$name": '
+              'обрано ids=${picked.ids} ціна=${picked.price} '
+              'залишок=${picked.qtyRaw} упак=${picked.unitsPerPackage}; '
+              'кандидати: ${sameProduct.map((r) => "ids=${r.ids}/ц=${r.price}"
+                  "/зал=${r.qtyRaw}/упак=${r.unitsPerPackage}").join(" ;; ")}');
+        }
+        return picked;
       }
       // Діагностика в release-лог: видно, чи пошук нічого не знайшов, чи
       // знайшов, але з іншими кодами. Із `replacementSKod` продаж можливий і
@@ -804,9 +816,20 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         imageUrl: imageUrl ?? replacementDetail?.imageUrl,
         pharmacistBonus: replacementDetail?.pharmacistBonus ?? batch?.bonus,
       );
+      // Розбіжність цін — саме те місце, де народжується баг «додало упаковку
+      // за ціною саше». Якщо ціна таблиці приблизно вкладається в ціну
+      // пропозиції рівно `unitsPerPackage` разів — ми взяли рядок РОЗПОЧАТОЇ
+      // упаковки, тобто ціну за одиницю. Поки лише фіксуємо: підміняти ціну
+      // наосліп не будемо, спершу підтвердження з живої каси.
       if (batch != null && batch.price != offer.replacementPrice) {
-        debugPrint('ЄДК: ціна пропозиції ${offer.replacementPrice} ≠ '
-            'ціна таблиці ${batch.price} (${offer.replacementName}) — беремо з таблиці');
+        final units = replacementDrug.unitsPerPackage ?? 0;
+        final looksPerUnit = units > 1 &&
+            offer.replacementPrice > 0 &&
+            (batch.price * units - offer.replacementPrice).abs() < 0.05;
+        FiscalLog.log('ЄДК ЦІНА розходиться (${offer.replacementName}): '
+            'пропозиція=${offer.replacementPrice} таблиця=${batch.price} '
+            'упак=$units → у кошик піде ${replacementDrug.price}'
+            '${looksPerUnit ? " ⚠️ схоже на ціну за ОДИНИЦЮ, а не за упаковку" : ""}');
       }
 
       String? promo;

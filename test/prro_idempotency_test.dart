@@ -110,6 +110,52 @@ void main() {
       expect(c.sum, 123.45);
     });
 
+    test('тип читається з ключа `type_` — реальний payload CashDesk', () {
+      // Точний елемент `checks_list` з X-звіту тестової каси (01.09.2026,
+      // прислав Андрій Попов). Ключ саме `type_`, з підкресленням.
+      // Ми читали `type`, тому поле було завжди порожнім — а на ньому тримався
+      // відсів протилежного типу в `matchCheck`, тож звірка дублів A1 для
+      // повернень не спрацьовувала жодного разу.
+      final c = PrroShiftCheck.fromJson({
+        'datetime': '01.09.2026 09:51:26',
+        'local_number': '668',
+        'order_num': 'Mh-PJdyDWjU',
+        'payments': [],
+        'sum': 27483.80,
+        'tax': [],
+        'type_': 'SERVICE_INPUT',
+      });
+      expect(c.type, 'SERVICE_INPUT');
+      expect(c.localNumber, 668);
+      expect(c.sum, 27483.80);
+    });
+
+    test('старий ключ `type` теж читається (запасний варіант)', () {
+      final c = PrroShiftCheck.fromJson({'type': 'Z_SALE', 'sum': 10});
+      expect(c.type, 'Z_SALE');
+    });
+
+    test('повернення з `type_` матчиться, а продаж під нього НЕ підпадає', () {
+      final checks = [
+        PrroShiftCheck.fromJson({
+          'type_': 'Z_RETURN',
+          'order_num': '200',
+          'local_number': 5001,
+          'sum': 50,
+        }),
+      ];
+      // До виправлення ключа тут завжди був null: порожній `type` не містив
+      // 'RETURN', і повернення відсівалось власною ж умовою.
+      expect(
+        PrroService.matchCheck(checks, localNumber: 5001, isReturn: true),
+        isNotNull,
+      );
+      expect(
+        PrroService.matchCheck(checks, localNumber: 5001, isReturn: false),
+        isNull,
+      );
+    });
+
     test('відсутній local_number → null (звірка неможлива, не 0)', () {
       final c = PrroShiftCheck.fromJson({'type': 'Z_SALE', 'sum': 10});
       expect(c.localNumber, isNull);

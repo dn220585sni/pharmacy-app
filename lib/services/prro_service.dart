@@ -388,7 +388,13 @@ class PrroShiftCheck {
   });
 
   factory PrroShiftCheck.fromJson(Map<String, dynamic> json) => PrroShiftCheck(
-        type: json['type']?.toString() ?? '',
+        // ⚠️ Ключ саме `type_`, з підкресленням — так віддає CashDesk
+        // (payload від Андрія Попова, 01.09). Ми читали `type`, і поле було
+        // ЗАВЖДИ порожнім. Наслідок був не косметичний: у `matchCheck` умова
+        // `type.contains('RETURN') != isReturn` для повернень завжди давала
+        // `continue`, тобто звірка дублів A1 для ПОВЕРНЕНЬ не працювала
+        // взагалі. `type` лишаємо запасним варіантом.
+        type: (json['type_'] ?? json['type'])?.toString() ?? '',
         orderNum: json['order_num']?.toString() ?? '',
         datetime: json['datetime']?.toString(),
         localNumber: flexInt(json['local_number']),

@@ -17,13 +17,10 @@ class ServiceDepositCheck {
   /// Чи потрібне службове внесення (ExVnos != 1).
   final bool needed;
 
-  /// Готівка в касі на момент останнього Z (`cash_in_box`) — ДОВІДКОВО.
-  /// Це не розмінна монета: без інкасації сюди входить денна виручка.
+  /// Гроші, що лишились у касовому ящику на момент останнього Z
+  /// (`cash_in_box`). Саме їх вранці декларують службовим внесенням — Z
+  /// обнуляє лічильник ПРРО, а кошти нікуди не діваються.
   final Money carryover;
-
-  /// Чи робили інкасацію в ту зміну: `true` — `cash_in_box` уже без виручки,
-  /// `false` — число роздуте, `null` — ПРРО не віддав `service_output`.
-  final bool? collectionDone;
 
   /// Коли був той Z. `null` — невідомо (старий формат файлу).
   final DateTime? carryoverAt;
@@ -34,7 +31,6 @@ class ServiceDepositCheck {
   const ServiceDepositCheck({
     required this.needed,
     required this.carryover,
-    this.collectionDone,
     this.carryoverAt,
     this.carryoverStale = true,
   });
@@ -53,8 +49,6 @@ class ZCarryover {
 
   const ZCarryover(this.cashInBox, this.serviceOutput, this.at);
 
-  bool? get collectionDone =>
-      serviceOutput == null ? null : serviceOutput! > 0;
 
   /// Файл лежить у профілі КОНКРЕТНОГО користувача Windows, тож може бути
   /// днями старший за реальний останній Z — або взагалі з іншого робочого
@@ -135,11 +129,10 @@ class ShiftService {
     if (ApiConfig.useMock) {
       return ServiceDepositCheck(needed: true, carryover: Money.fromHryvnia(1250));
     }
-    // ДОВІДКОВЕ число: готівка в касі на момент останнього Z (`cash_in_box`,
-    // збережено в closeShift). Не передзаповнює поле — див. shift_start_dialog.
+    // Залишок у ящику з останнього Z (збережено в closeShift). Діалог підставить
+    // його в поле, але лише якщо він свіжий — див. shift_start_dialog.
     final z = await _loadCarryover();
     final carryover = z?.cashInBox ?? Money.zero;
-    final collection = z?.collectionDone;
     try {
       // ProvSumZOtchet — лише щоб зрозуміти, чи внесення взагалі потрібне (ExVnos).
       final r = await CacheApiClient().call('ProvSumZOtchet');
@@ -150,16 +143,12 @@ class ShiftService {
         // Друга половина прикладу для п.7: що саме віддав сервіс ПІСЛЯ Z.
         FiscalLog.log('ProvSumZOtchet: ExVnos="${r.data['ExVnos']}" '
             'SumZZvit="${r.data['SumZZvit'] ?? "(поля немає)"}" '
-            '→ довідка ${carryover.format()} (cash_in_box Z), '
-            'інкасація=${switch (collection) {
-          true => 'була',
-          false => 'НЕ була',
-          null => 'невідомо',
-        }}');
+            '→ залишок ${carryover.format()} (cash_in_box Z'
+            '${z?.at == null ? ", дата невідома" : ""}'
+            '${z?.isStale ?? true ? ", застарілий — не підставляємо" : ""})');
         return ServiceDepositCheck(
           needed: needed,
           carryover: carryover,
-          collectionDone: collection,
           carryoverAt: z?.at,
           carryoverStale: z?.isStale ?? true,
         );
@@ -172,7 +161,6 @@ class ShiftService {
     return ServiceDepositCheck(
       needed: true,
       carryover: carryover,
-      collectionDone: collection,
       carryoverAt: z?.at,
       carryoverStale: z?.isStale ?? true,
     );

@@ -898,7 +898,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
               context,
               pharmacist: selected.user,
               carryover: check.carryover,
-              collectionDone: check.collectionDone,
               carryoverAt: check.carryoverAt,
               carryoverStale: check.carryoverStale,
             );
@@ -1059,7 +1058,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       context,
       pharmacist: _currentPharmacist!.user,
       carryover: check.carryover,
-      collectionDone: check.collectionDone,
       carryoverAt: check.carryoverAt,
       carryoverStale: check.carryoverStale,
     );

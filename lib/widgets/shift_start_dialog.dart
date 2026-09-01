@@ -12,6 +12,8 @@ Future<void> showShiftStartDialog(
   required String pharmacist,
   required Money carryover,
   bool? collectionDone,
+  DateTime? carryoverAt,
+  bool carryoverStale = true,
   bool prevZPending = false,
 }) {
   return showDialog<void>(
@@ -21,6 +23,8 @@ Future<void> showShiftStartDialog(
       pharmacist: pharmacist,
       carryover: carryover,
       collectionDone: collectionDone,
+      carryoverAt: carryoverAt,
+      carryoverStale: carryoverStale,
       prevZPending: prevZPending,
     ),
   );
@@ -33,11 +37,18 @@ class _ShiftStartDialog extends StatefulWidget {
   /// Чи робили інкасацію в попередню зміну: `true` — [carryover] уже без
   /// виручки, `false` — сума роздута, `null` — ПРРО не віддав `service_output`.
   final bool? collectionDone;
+
+  /// Коли був той Z, і чи можна взагалі показувати число.
+  final DateTime? carryoverAt;
+  final bool carryoverStale;
+
   final bool prevZPending;
   const _ShiftStartDialog({
     required this.pharmacist,
     required this.carryover,
     required this.collectionDone,
+    required this.carryoverAt,
+    required this.carryoverStale,
     required this.prevZPending,
   });
 
@@ -87,19 +98,32 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
   /// про інкасацію: без виносу `cash_in_box` = вранішній внос + виручка
   /// (Андрій Попов, 31.08), і тоді число взагалі не орієнтир.
   String get _referenceHint {
-    if (!widget.carryover.isPositive) {
-      return 'Введіть суму розмінної монети, яку фактично закладаєте в касу.';
+    // Число показуємо, ЛИШЕ якщо знаємо його дату і воно свіже. Файл лежить у
+    // профілі конкретного користувача Windows: 01.09 там виявилось значення
+    // від 27.08, ми підписали його «останній Z-звіт», і його скопіювали в
+    // поле — вийшло службове внесення на 27 483,80 замість розмінної монети.
+    if (!widget.carryover.isPositive || widget.carryoverStale) {
+      return 'Введіть суму розмінної монети, яку фактично закладаєте в касу. '
+          'Дані про останній Z-звіт на цьому робочому місці відсутні або '
+          'застарілі, тому підказки з сумою немає.';
     }
+    final at = widget.carryoverAt;
+    final when = at == null
+        ? ''
+        : ' (${at.day.toString().padLeft(2, '0')}.'
+            '${at.month.toString().padLeft(2, '0')} '
+            '${at.hour.toString().padLeft(2, '0')}:'
+            '${at.minute.toString().padLeft(2, '0')})';
     final sum = '${widget.carryover.format()} ₴';
     return switch (widget.collectionDone) {
       true => 'Для довідки: після інкасації в касі лишалось $sum на момент '
-          'останнього Z-звіту. Звірте з тим, що фактично закладаєте.',
+          'Z-звіту$when. Звірте з тим, що фактично закладаєте.',
       false => 'Увага: інкасацію в попередню зміну не проводили, тож $sum '
-          'у касі на момент Z — це вранішній внесок разом із денною '
-          'виручкою, а не розмінна монета. Введіть фактичну суму.',
-      null => 'Для довідки: готівка в касі на момент останнього Z-звіту — '
-          '$sum. Це НЕ розмінна монета: без інкасації сюди входить денна '
-          'виручка. Введіть те, що фактично закладаєте в касу.',
+          'у касі на момент Z-звіту$when — це вранішній внесок разом із '
+          'денною виручкою, а не розмінна монета. Введіть фактичну суму.',
+      null => 'Для довідки: готівка в касі на момент Z-звіту$when — $sum. '
+          'Це НЕ розмінна монета: без інкасації сюди входить денна виручка. '
+          'Введіть те, що фактично закладаєте в касу.',
     };
   }
 

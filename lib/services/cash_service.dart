@@ -3,6 +3,7 @@ import '../models/cash_operation.dart';
 import '../models/money.dart';
 import 'api_config.dart';
 import 'cache_api_client.dart';
+import 'fiscal_log.dart';
 
 /// Службові операції каси: внесення / винесення.
 ///   GetOperKassa(NameWorkRRO) → список причин;
@@ -18,8 +19,10 @@ class CashService {
       );
       if (r.isOk) return parseCashReasons(r.data);
       debugPrint('CashService getReasons FAIL: ${r.result}');
+      FiscalLog.log('GetOperKassa(${direction.param}) FAIL: ${r.result}');
     } catch (e) {
       debugPrint('CashService getReasons ERROR: $e');
+      FiscalLog.log('GetOperKassa(${direction.param}) ERROR: $e');
     }
     return const [];
   }
@@ -40,6 +43,12 @@ class CashService {
           'ekkKodKli': ApiConfig.ekkKodKli,
         },
       );
+      // Слід у release-журналі обов'язковий: 01.09 Катерина повідомила, що
+      // операції вносів-виносів перестали з'являтися в базі, а перевірити це
+      // з нашого боку було НІЧИМ — результат жив лише в debugPrint.
+      FiscalLog.log('SaveSumDay(${direction.param}, "$reason", '
+          '${sum.format()}, ekkKodKli=${ApiConfig.ekkKodKli}): '
+          '${r.isOk ? "OK" : "FAIL"} result="${r.result}"');
       if (r.isOk) {
         debugPrint(
             'CashService: ${direction.param} "$reason" ${sum.format()} OK');
@@ -48,6 +57,8 @@ class CashService {
       debugPrint('CashService saveOperation FAIL: ${r.result}');
     } catch (e) {
       debugPrint('CashService saveOperation ERROR: $e');
+      FiscalLog.log('SaveSumDay(${direction.param}, "$reason", '
+          '${sum.format()}) ERROR: $e');
     }
     return false;
   }

@@ -25,24 +25,47 @@ class ServiceDepositCheck {
   /// `false` — число роздуте, `null` — ПРРО не віддав `service_output`.
   final bool? collectionDone;
 
+  /// Коли був той Z. `null` — невідомо (старий формат файлу).
+  final DateTime? carryoverAt;
+
+  /// Число застаріле або недатоване — показувати його НЕ можна.
+  final bool carryoverStale;
+
   const ServiceDepositCheck({
     required this.needed,
     required this.carryover,
     this.collectionDone,
+    this.carryoverAt,
+    this.carryoverStale = true,
   });
 }
 
-/// Слід останнього Z, збережений локально: скільки було в касі і чи робили винос.
+/// Слід останнього Z, збережений локально: скільки було в касі і коли.
 class ZCarryover {
   final Money cashInBox;
 
-  /// Сума виносів за зміну (`service_output`). `null` — поля у відповіді немає.
+  /// Сума виносів за зміну (`service_output`). `null` — поля у відповіді немає
+  /// (перевірено 31.08: наш ПРРО його НЕ віддає).
   final double? serviceOutput;
 
-  const ZCarryover(this.cashInBox, this.serviceOutput);
+  /// Коли робився той Z. `null` — старий формат файлу, дату не знаємо.
+  final DateTime? at;
+
+  const ZCarryover(this.cashInBox, this.serviceOutput, this.at);
 
   bool? get collectionDone =>
       serviceOutput == null ? null : serviceOutput! > 0;
+
+  /// Файл лежить у профілі КОНКРЕТНОГО користувача Windows, тож може бути
+  /// днями старший за реальний останній Z — або взагалі з іншого робочого
+  /// місця. 01.09 це коштувало нам службового внесення на 27 483,80: у профілі
+  /// `user` лежало значення від 27.08, ми показали його як «останній Z», і
+  /// його скопіювали в поле. Дату не знаємо або вона стара — числу не віримо.
+  bool get isStale {
+    final t = at;
+    if (t == null) return true;
+    return DateTime.now().difference(t) > const Duration(hours: 36);
+  }
 }
 
 /// Сервіс робочої зміни.
@@ -134,7 +157,12 @@ class ShiftService {
           null => 'невідомо',
         }}');
         return ServiceDepositCheck(
-            needed: needed, carryover: carryover, collectionDone: collection);
+          needed: needed,
+          carryover: carryover,
+          collectionDone: collection,
+          carryoverAt: z?.at,
+          carryoverStale: z?.isStale ?? true,
+        );
       }
       debugPrint('ShiftService ProvSumZOtchet FAIL: ${r.result}');
     } catch (e) {
@@ -142,7 +170,12 @@ class ShiftService {
     }
     // На помилку — краще показати діалог, ніж пропустити старт.
     return ServiceDepositCheck(
-        needed: true, carryover: carryover, collectionDone: collection);
+      needed: true,
+      carryover: carryover,
+      collectionDone: collection,
+      carryoverAt: z?.at,
+      carryoverStale: z?.isStale ?? true,
+    );
   }
 
   /// Підтягнути реальні підсумки відкритої зміни з ПРРО xReport (готівка в касі,
@@ -371,6 +404,8 @@ class ShiftService {
       await f.writeAsString(jsonEncode({
         'kopiykas': m.kopiykas,
         'service_output': ?serviceOutput,
+        // Без дати число неможливо відрізнити від п'ятиденного (див. isStale).
+        'at': DateTime.now().toIso8601String(),
       }));
     } catch (e) {
       debugPrint('ShiftService: persist carryover FAIL: $e');
@@ -389,6 +424,7 @@ class ShiftService {
       return ZCarryover(
         Money.fromKopiykas(k),
         (j['service_output'] as num?)?.toDouble(),
+        DateTime.tryParse(j['at']?.toString() ?? ''),
       );
     } catch (e) {
       debugPrint('ShiftService: load carryover FAIL: $e');

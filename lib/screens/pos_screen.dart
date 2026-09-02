@@ -936,6 +936,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
               carryover: check.carryover,
               carryoverAt: check.carryoverAt,
               carryoverStale: check.carryoverStale,
+              fromServer: check.fromServer,
             );
           });
         }
@@ -1096,6 +1097,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       carryover: check.carryover,
       carryoverAt: check.carryoverAt,
       carryoverStale: check.carryoverStale,
+      fromServer: check.fromServer,
     );
   }
 

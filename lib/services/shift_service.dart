@@ -28,11 +28,16 @@ class ServiceDepositCheck {
   /// Число застаріле або недатоване — показувати його НЕ можна.
   final bool carryoverStale;
 
+  /// Сума прийшла з `SumZZvit` (сервер), а не з локального файлу профілю.
+  /// Серверна однакова на всіх робочих місцях і застаріти не може.
+  final bool fromServer;
+
   const ServiceDepositCheck({
     required this.needed,
     required this.carryover,
     this.carryoverAt,
     this.carryoverStale = true,
+    this.fromServer = false,
   });
 }
 
@@ -134,10 +139,29 @@ class ShiftService {
     final z = await _loadCarryover();
     final carryover = z?.cashInBox ?? Money.zero;
     try {
-      // ProvSumZOtchet — лише щоб зрозуміти, чи внесення взагалі потрібне (ExVnos).
+      // ProvSumZOtchet: `ExVnos` — чи потрібне внесення, `SumZZvit` — сума
+      // останнього Z (пріоритетне джерело, див. нижче).
       final r = await CacheApiClient().call('ProvSumZOtchet');
       if (r.isOk) {
         final needed = (r.data['ExVnos']?.toString() ?? '0') != '1';
+        // ⭐ Джерело правди — СЕРВЕРНИЙ `SumZZvit` (сума останнього Z). Він
+        // нарешті заповнюється (01.09), і це знімає головну ваду локального
+        // файлу: той лежить у профілі конкретного користувача Windows і 01.09
+        // підставив значення від 27.08 замість учорашнього — помилка на
+        // 16 623,50. Серверне значення однакове на всіх робочих місцях і
+        // застаріти не може.
+        final fromServer = Money.tryParse(r.data['SumZZvit']?.toString() ?? '');
+        if (fromServer != null && fromServer.isPositive) {
+          FiscalLog.log('ProvSumZOtchet: ExVnos="${r.data['ExVnos']}" '
+              'SumZZvit=${fromServer.format()} → беремо з СЕРВЕРА '
+              '(локальний файл: ${carryover.format()})');
+          return ServiceDepositCheck(
+            needed: needed,
+            carryover: fromServer,
+            carryoverStale: false,
+            fromServer: true,
+          );
+        }
         debugPrint('ShiftService: ProvSumZOtchet ExVnos="${r.data['ExVnos']}" '
             'needed=$needed, довідка(Z)=${carryover.format()}');
         // Друга половина прикладу для п.7: що саме віддав сервіс ПІСЛЯ Z.

@@ -116,6 +116,30 @@ class PharmacyApp extends StatelessWidget {
       title: 'ФармаПОС',
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
+      // Tab НЕ переміщує фокус: це префікс скана від сканера штрихкодів.
+      //
+      // `WidgetsApp` за замовчуванням мапить Tab на `NextFocusIntent`, і фокус
+      // їхав на наступний віджет при КОЖНОМУ скані — рядок нижче в списку, а
+      // при порожньому кошику аж у меню «Пошук за симптомами» (три баги в
+      // беклозі 02.09).
+      //
+      // ⚠️ Обробник у `HardwareKeyboard` цього не рятує, хоч і повертає `true`:
+      // `KeyEventManager` викликає систему фокуса БЕЗУМОВНО і лише склеює
+      // результати через `||` (hardware_keyboard.dart:1197). Тобто `return true`
+      // глушить подію для платформи, але не для focus traversal. Перекрити
+      // можна лише шорткатом НИЖЧЕ за дефолтні — тобто тут, у `builder`, який
+      // накриває і діалоги, бо вони всередині Navigator.
+      //
+      // Наслідок: Tab не працює як навігація між полями ніде в застосунку. Для
+      // каси зі сканером це навмисно — скан може прилетіти будь-якої миті.
+      builder: (context, child) => Shortcuts(
+        shortcuts: const <ShortcutActivator, Intent>{
+          SingleActivator(LogicalKeyboardKey.tab): DoNothingIntent(),
+          SingleActivator(LogicalKeyboardKey.tab, shift: true):
+              DoNothingIntent(),
+        },
+        child: child ?? const SizedBox.shrink(),
+      ),
       theme: ThemeData(
         brightness: Brightness.light,
         scaffoldBackgroundColor: const Color(0xFFF4F5F8),

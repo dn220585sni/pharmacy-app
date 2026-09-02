@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/money.dart';
 import '../models/cash_expense.dart';
 import '../data/mock_expenses.dart';
+import '../services/api_config.dart';
+import '../services/cash_expenses_service.dart';
 import 'hover_icon_button.dart';
 import 'callback_request_dialog.dart';
 import 'return_flow_dialog.dart';
@@ -34,6 +38,7 @@ class ExpensesPanelState extends State<ExpensesPanel> {
   DateTime? _dateFrom;
   DateTime? _dateTo;
   String? _selectedRegister;
+  bool _loading = false;
 
   bool get _hasQuery => _searchController.text.trim().isNotEmpty;
 
@@ -79,9 +84,41 @@ class ExpensesPanelState extends State<ExpensesPanel> {
   @override
   void initState() {
     super.initState();
-    _allExpenses = List<CashExpense>.from(mockExpenses);
+    _allExpenses = ApiConfig.useMock
+        ? List<CashExpense>.from(mockExpenses)
+        : <CashExpense>[];
     _filteredExpenses = _allExpenses;
     _searchController.addListener(_applyFilters);
+    if (!ApiConfig.useMock) {
+      // Сервіс вимагає період, тож дефолт — сьогодні. Порожні дати означали б
+      // запит «за всю історію», а екран потрібен насамперед для поточного дня.
+      final today = DateTime.now();
+      _dateFrom = today;
+      _dateTo = today;
+      _load();
+    }
+  }
+
+  /// Перезапит накладних із `GetNaklKas`. Фільтри (тип, каса, пошук) далі
+  /// застосовуються локально до вже завантаженого періоду.
+  Future<void> _load() async {
+    if (ApiConfig.useMock) return;
+    setState(() => _loading = true);
+    final list = await CashExpensesService.fetch(
+      from: _dateFrom ?? DateTime.now(),
+      to: _dateTo ?? _dateFrom ?? DateTime.now(),
+    );
+    if (!mounted) return;
+    setState(() {
+      _allExpenses = list;
+      _loading = false;
+      // Обрана раніше каса могла зникнути з нового періоду.
+      if (_selectedRegister != null &&
+          !_availableRegisters.contains(_selectedRegister)) {
+        _selectedRegister = null;
+      }
+    });
+    _applyFilters();
   }
 
   @override
@@ -358,7 +395,12 @@ class ExpensesPanelState extends State<ExpensesPanel> {
         _dateTo = picked;
       }
     });
-    _applyFilters();
+    // Період — параметр запиту, а не локальний фільтр: тягнемо заново.
+    if (ApiConfig.useMock) {
+      _applyFilters();
+    } else {
+      unawaited(_load());
+    }
   }
 
   Widget _buildDateChip(String label, DateTime? value, {required bool isFrom}) {
@@ -616,6 +658,15 @@ class ExpensesPanelState extends State<ExpensesPanel> {
   }
 
   Widget _buildExpensesList() {
+    if (_loading) {
+      return const Center(
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
     if (_filteredExpenses.isEmpty) {
       return Center(
         child: Padding(

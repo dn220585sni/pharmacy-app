@@ -789,16 +789,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       // S-код від сервера авторитетний навіть тоді, коли рядка в пошуку немає.
       final skod =
           offer.replacementSKod.isNotEmpty ? offer.replacementSKod : (batch?.ids ?? '');
-      // Слід у release-лозі: без нього не видно, чи заміна взагалі резолвиться
-      // в партію на реальній касі.
-      FiscalLog.log(skod.isEmpty
-          ? 'ЄДК: ${offer.replacementName} — s-код НЕ резолвиться '
-              '(u-код ${offer.replacementId}) → пропозицію показуємо, '
-              'додавання в кошик заблоковано'
-          : 'ЄДК: ${offer.replacementName} → s-код $skod '
-              '(${offer.replacementSKod.isNotEmpty ? "з GetEdkOffers" : "з пошуку"}), '
-              '${batch != null ? "залишок ${batch.qty}, ціна ${batch.price}" : "партії в таблиці не знайшли — ціна з пропозиції"}');
-
       final replacementDrug = Drug(
         // srv_<s-код> — той самий формат, що й у звичайних товарів: на нього
         // зав'язані резервування і матчинг цін GetSumSkid. Без s-коду лишаємо
@@ -829,6 +819,21 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         imageUrl: imageUrl ?? replacementDetail?.imageUrl,
         pharmacistBonus: replacementDetail?.pharmacistBonus ?? batch?.bonus,
       );
+      // Слід у release-лозі: без нього не видно ні того, чи заміна резолвиться
+      // в партію, ні — головне — ЯКА ціна піде в кошик і звідки. Прогін 02.09
+      // показав, що партії немає взагалі, тож ціна береться з пропозиції; її
+      // значення досі жило лише в debugPrint і на касі було невидиме.
+      FiscalLog.log(skod.isEmpty
+          ? 'ЄДК: ${offer.replacementName} — s-код НЕ резолвиться '
+              '(u-код ${offer.replacementId}) → пропозицію показуємо, '
+              'додавання в кошик заблоковано'
+          : 'ЄДК: ${offer.replacementName} → s-код $skod '
+              '(${offer.replacementSKod.isNotEmpty ? "з GetEdkOffers" : "з пошуку"}), '
+              '${batch != null ? "залишок ${batch.qty}, ціна таблиці ${batch.price}" : "партії в таблиці НЕ знайшли"}'
+              ', ціна пропозиції ${offer.replacementPrice}'
+              ', упак=${replacementDrug.unitsPerPackage ?? "?"}'
+              ' → у кошик ${replacementDrug.price}');
+
       // Розбіжність цін — саме те місце, де народжується баг «додало упаковку
       // за ціною саше». Якщо ціна таблиці приблизно вкладається в ціну
       // пропозиції рівно `unitsPerPackage` разів — ми взяли рядок РОЗПОЧАТОЇ

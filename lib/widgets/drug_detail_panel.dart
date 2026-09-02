@@ -6,6 +6,7 @@ import '../services/api_config.dart';
 import '../services/farmasell_service.dart';
 import '../services/drug_service.dart';
 import '../services/product_browser_service.dart';
+import '../utils/phone.dart';
 import 'drug_list_item.dart'; // for kColBadge
 import 'instruction_dialog.dart';
 import 'shift_dashboard.dart';
@@ -1854,8 +1855,13 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
   }
 
   void _onPhoneChanged() {
-    final digits = _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
-    if (digits.length >= 9 && _discountPrice == null && !_isLoading) {
+    // Нормалізація — в `utils/phone.dart`: підказка в полі раніше пропонувала
+    // формат із нулем («050 …»), а код клеїв введене до префікса «+380», і
+    // виходив зайвий нуль (беклог Юлії).
+    final digits = nationalDigits(_phoneCtrl.text);
+    // Рівно 9: раніше умова була `>= 9`, тож із зайвим нулем запит летів на
+    // недобраному номері ще під час набору.
+    if (digits.length == 9 && _discountPrice == null && !_isLoading) {
       _checkDiscount(digits);
     }
   }
@@ -1912,7 +1918,9 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
 
   void _confirm() {
     if (_discountPrice == null) return;
-    final digits = _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+    // Через ту саму нормалізацію, що й перевірка знижки: інакше зайвий нуль
+    // поїхав би далі за діалог.
+    final digits = nationalDigits(_phoneCtrl.text);
     Navigator.pop(context);
     final fractionalQty = (!_wholePackage && widget.drug.canSplitByBlister)
         ? 1
@@ -2010,7 +2018,8 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
                 letterSpacing: 0.5,
               ),
               decoration: InputDecoration(
-                hintText: '050 123 45 67',
+                // БЕЗ нуля на початку — поле вже має префікс «+380 ».
+                hintText: '50 123 45 67',
                 hintStyle: const TextStyle(
                   color: Color(0xFFD1D5DB),
                   fontWeight: FontWeight.w400,

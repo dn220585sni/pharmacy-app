@@ -148,22 +148,77 @@ class ProductBrowserService {
     }
   }
 
+  // ── Звіряння назв (спільне для пошуку слуга і для картинки ЄДК) ──────────
+
+  static const _formStopWords = ['ГРАН', 'ТАБЛ', 'КАПС', 'СУСП', 'СИРОП',
+    'КРЕМ', 'МАЗЬ', 'РОЗЧ', 'ГЕЛЬ', 'СПРЕЙ', 'КРАП', 'ПОР',
+    'АМП', 'СУПОЗ', 'ФЛАК', 'ШИП', 'Д/', 'Р-Н', 'Р/Н'];
+
+  static const _formMap = {
+    'ТАБЛ': 'таблетк', 'КАПС': 'капсул', 'СУСП': 'суспенз',
+    'СИРОП': 'сироп', 'ГРАН': 'гранул', 'КРЕМ': 'крем',
+    'МАЗЬ': 'мазь', 'ГЕЛЬ': 'гель', 'СПРЕЙ': 'спрей',
+    'КРАП': 'крапл', 'Р-Н': 'розчин', 'Р/Н': 'розчин',
+    'РОЗЧ': 'розчин', 'ПОР': 'порош', 'АМП': 'ампул',
+    'СУПОЗ': 'супозитор', 'ШИП': 'шипуч', 'АЕРОЗОЛЬ': 'аерозол',
+  };
+
+  /// Назви приходять то російською (Caché), то українською (anc.ua).
+  static String normName(String s) =>
+      s.toLowerCase().replaceAll('и', 'і').replaceAll('ы', 'і');
+
+  /// Торгова назва — слова до першого маркера лікарської форми.
+  /// «РЕМЕСУЛИД РАПИД ГРАН. 100 МГ…» → «РЕМЕСУЛИД РАПИД».
+  static String brandNameOf(String name) {
+    final words = name.split(RegExp(r'\s+'));
+    final brand = <String>[];
+    for (final w in words) {
+      if (_formStopWords.any((p) => w.toUpperCase().startsWith(p))) break;
+      brand.add(w);
+    }
+    return brand.isNotEmpty ? brand.join(' ') : name;
+  }
+
+  /// Лікарська форма з назви (`таблетк`, `гранул`…), `null` якщо не впізнали.
+  static String? dosageFormOf(String name) {
+    final upper = name.toUpperCase();
+    for (final e in _formMap.entries) {
+      if (upper.contains(e.key)) return e.value;
+    }
+    return null;
+  }
+
+  /// Обрати з [candidates] той товар, що справді відповідає [drugName].
+  ///
+  /// `null` — впевненого збігу немає. Це важливо: у картці ЄДК ми раніше
+  /// брали `results.first` наосліп, і на запит про ремесулід показувалось фото
+  /// актовегіна (беклог Юлії). Краще без картинки, ніж чужа.
+  static ProductSearchResult? pickMatch(
+    String drugName,
+    List<ProductSearchResult> candidates,
+  ) {
+    if (candidates.isEmpty) return null;
+    final first = normName(drugName.split(RegExp(r'\s+')).first);
+    final form = dosageFormOf(drugName);
+    bool sameBrand(ProductSearchResult p) =>
+        normName(p.name.split(RegExp(r'\s+')).first) == first;
+    if (form != null) {
+      for (final p in candidates) {
+        if (sameBrand(p) && normName(p.name).contains(normName(form))) return p;
+      }
+    }
+    for (final p in candidates) {
+      if (sameBrand(p)) return p;
+    }
+    return null;
+  }
+
   /// Search endpoint → return slug of first matching product.
   static Future<String?> _searchSlug(String query) async {
     try {
       // Шукаємо тільки по торговій назві (без форми випуску)
       final words = query.split(RegExp(r'\s+'));
-      final stopPatterns = ['ГРАН', 'ТАБЛ', 'КАПС', 'СУСП', 'СИРОП',
-        'КРЕМ', 'МАЗЬ', 'РОЗЧ', 'ГЕЛЬ', 'СПРЕЙ', 'КРАП', 'ПОР',
-        'АМП', 'СУПОЗ', 'ФЛАК', 'ШИП', 'Д/', 'Р-Н', 'Р/Н'];
-      final brandWords = <String>[];
-      for (final w in words) {
-        if (stopPatterns.any((p) => w.toUpperCase().startsWith(p))) break;
-        brandWords.add(w);
-      }
-      final searchQuery = brandWords.isNotEmpty
-          ? brandWords.join(' ')
-          : query;
+      final searchQuery = brandNameOf(query);
 
       final url = Uri.parse(
         'https://anc.ua/productbrowser/v2/ua/search/products'
@@ -181,26 +236,9 @@ class ProductBrowserService {
       if (products == null || products.isEmpty) return null;
 
       // Матчимо по назві + формі випуску (и↔і для рос./укр.)
-      String norm(String s) => s.toLowerCase().replaceAll('и', 'і').replaceAll('ы', 'і');
+      String norm(String s) => normName(s);
       final queryFirst = norm(words.first);
-
-      // Визначаємо форму випуску з запиту
-      const formMap = {
-        'ТАБЛ': 'таблетк', 'КАПС': 'капсул', 'СУСП': 'суспенз',
-        'СИРОП': 'сироп', 'ГРАН': 'гранул', 'КРЕМ': 'крем',
-        'МАЗЬ': 'мазь', 'ГЕЛЬ': 'гель', 'СПРЕЙ': 'спрей',
-        'КРАП': 'крапл', 'Р-Н': 'розчин', 'Р/Н': 'розчин',
-        'РОЗЧ': 'розчин', 'ПОР': 'порош', 'АМП': 'ампул',
-        'СУПОЗ': 'супозитор', 'ШИП': 'шипуч', 'АЕРОЗОЛЬ': 'аерозол',
-      };
-      final queryUpper = query.toUpperCase();
-      String? queryForm;
-      for (final e in formMap.entries) {
-        if (queryUpper.contains(e.key)) {
-          queryForm = e.value;
-          break;
-        }
-      }
+      final queryForm = dosageFormOf(query);
 
       // Спочатку шукаємо збіг по назві + формі
       if (queryForm != null) {

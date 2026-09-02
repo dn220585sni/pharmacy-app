@@ -727,18 +727,31 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       final offer = apiOffers.first;
       final edkKey = drug.ukod ?? drug.id;
 
-      // Fetch image from anc.ua for replacement drug
+      // Картинка заміни з anc.ua.
+      //
+      // ⚠️ Раніше брали `results.first` наосліп — і на ремесулід у картці
+      // показувалось фото актовегіна (беклог Юлії). Тепер шукаємо за ТОРГОВОЮ
+      // назвою (без форми випуску — з нею сайт часто не знаходить нічого) і
+      // звіряємо знайдене з тим, що шукали. Немає впевненого збігу → краще без
+      // картинки, ніж чужа.
       String? imageUrl;
       try {
-        final searchName = offer.replacementName
+        final brand = ProductBrowserService.brandNameOf(offer.replacementName);
+        final searchName = brand
             .split(' ')
             .map((w) => w.isNotEmpty
                 ? '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}'
                 : w)
             .join(' ');
-        final results = await ProductBrowserService.searchProducts(searchName, limit: 3);
-        if (results.isNotEmpty) {
-          imageUrl = results.first.imageUrl;
+        final results =
+            await ProductBrowserService.searchProducts(searchName, limit: 5);
+        final match =
+            ProductBrowserService.pickMatch(offer.replacementName, results);
+        imageUrl = match?.imageUrl;
+        if (match == null && results.isNotEmpty) {
+          FiscalLog.log('ЄДК: фото для "${offer.replacementName}" не взяли — '
+              'anc.ua віддав ${results.length} товарів, жоден не збігся '
+              '(перший: "${results.first.name}")');
         }
       } catch (_) {}
 

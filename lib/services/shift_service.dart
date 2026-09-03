@@ -123,16 +123,52 @@ class ShiftService {
   static bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
+  static String _d(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}.'
+      '${d.month.toString().padLeft(2, '0')}';
+
   /// Перевірити, чи потрібне службове внесення на старті зміни, і отримати
   /// залишок з останнього Z-звіту (ProvSumZOtchet). Реальний бекенд.
   static Future<ServiceDepositCheck> checkServiceDeposit() async {
     if (ApiConfig.useMock) {
       return ServiceDepositCheck(needed: true, carryover: Money.fromHryvnia(1250));
     }
-    // Залишок у ящику з останнього Z (збережено в closeShift). Діалог підставить
-    // його в поле, але лише якщо він свіжий — див. shift_start_dialog.
+    // ⭐ Залишок беремо ЖИВИМ запитом до ПРРО — Z-звіт за період (ендпоїнт від
+    // Андрія, 03.09). Саме так працює роздріб: «все данные берутся из ПРРО».
+    //
+    // Це прибирає ваду локального знімка: `shift_carryover.json` лежить у
+    // профілі КОНКРЕТНОГО користувача Windows, і 01.09 через це підставилось
+    // значення від 27.08 замість учорашнього — помилка на 16 623,50.
+    //
+    // Вікно беремо широке й закінчуємо ВЧОРА: `cash_in_box` періодичного звіту
+    // це кінцевий залишок на кінець періоду, тобто те, що фізично лишилось у
+    // ящику на ранок. Широке — щоб пережити вихідні й дні без роботи.
+    // `include_checks: false` — нам потрібне лише число, а за місяць список
+    // операцій був би чималий.
+    final now = DateTime.now();
+    final yesterday = DateTime(now.year, now.month, now.day)
+        .subtract(const Duration(days: 1));
+    final period = await PrroService.zReportPeriod(
+      from: yesterday.subtract(const Duration(days: 30)),
+      to: yesterday,
+    );
+
+    // Локальний знімок лишається ЗАПАСНИМ шляхом: Андрій попередив, що
+    // періодичний звіт вимагає інтернету і зареєстрованого Z.
     final z = await _loadCarryover();
-    final carryover = z?.cashInBox ?? Money.zero;
+    final live = period == null ? null : Money.fromHryvnia(period.cashInBox);
+    final carryover =
+        (live != null && live.isPositive) ? live : (z?.cashInBox ?? Money.zero);
+    final liveOk = live != null && live.isPositive;
+    // Живе значення з ПРРО завжди актуальне; локальний знімок — лише якщо
+    // датований і свіжий.
+    final at = liveOk ? yesterday : z?.at;
+    final stale = liveOk ? false : (z?.isStale ?? true);
+    if (liveOk) {
+      FiscalLog.log('Залишок з ПРРО (Z за період по ${_d(yesterday)}): '
+          '${live.format()}; локальний знімок ${z?.cashInBox.format() ?? "немає"}'
+          '${(period?.serviceOutput ?? 0) > 0 ? "" : " — інкасації за період не було"}');
+    }
     try {
       // ProvSumZOtchet: `ExVnos` — чи потрібне внесення, `SumZZvit` — сума
       // останнього Z (пріоритетне джерело, див. нижче).
@@ -165,8 +201,8 @@ class ShiftService {
         return ServiceDepositCheck(
           needed: needed,
           carryover: carryover,
-          carryoverAt: z?.at,
-          carryoverStale: z?.isStale ?? true,
+          carryoverAt: at,
+          carryoverStale: stale,
         );
       }
       debugPrint('ShiftService ProvSumZOtchet FAIL: ${r.result}');
@@ -177,8 +213,8 @@ class ShiftService {
     return ServiceDepositCheck(
       needed: true,
       carryover: carryover,
-      carryoverAt: z?.at,
-      carryoverStale: z?.isStale ?? true,
+      carryoverAt: at,
+      carryoverStale: stale,
     );
   }
 

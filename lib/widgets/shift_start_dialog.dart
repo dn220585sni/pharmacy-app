@@ -113,8 +113,8 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
             '${at.month.toString().padLeft(2, '0')} '
             '${at.hour.toString().padLeft(2, '0')}:'
             '${at.minute.toString().padLeft(2, '0')}';
-    return 'Підставлено залишок у касовому ящику за Z-звітом$when '
-        '(з цього робочого місця). Якщо фактична сума інша — виправте.';
+    return 'Підставлено залишок у касовому ящику за Z-звітом$when. '
+        'Якщо фактична сума інша — виправте.';
   }
 
   Future<void> _closeWithoutShift() async {

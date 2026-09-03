@@ -418,6 +418,12 @@ class PrroXReport {
 
   /// Сума службових внесень за зміну — CashDesk `service_input`.
   final double serviceInput;
+
+  /// Службова видача (інкасація). У звичайному Z-звіті цього поля НЕМАЄ
+  /// (перевірено 31.08 і 01.09), а Z ЗА ПЕРІОД його віддає — саме за ним
+  /// видно, чи робили інкасацію.
+  final double serviceOutput;
+
   final int ordersCount;
   final double ordersSum;
   final List<PrroShiftCheck> checks;
@@ -432,6 +438,7 @@ class PrroXReport {
     required this.checks,
     this.cashInBoxStart = 0,
     this.serviceInput = 0,
+    this.serviceOutput = 0,
     this.shiftDurationMinutes,
     this.openedAt,
     this.pdfBase64,
@@ -471,6 +478,7 @@ class PrroXReport {
       cashInBox: flexDouble(json['cash_in_box']) ?? 0,
       cashInBoxStart: flexDouble(json['cash_in_box_start']) ?? 0,
       serviceInput: flexDouble(json['service_input']) ?? 0,
+      serviceOutput: flexDouble(json['service_output']) ?? 0,
       shiftDurationMinutes: flexInt(json['shift_duration']),
       // Час відкриття: SmartConnect (прод) віддає його в OPEN_SESSION_TIME
       // (from_date порожній, shift_duration відсутній); cloud-test — у from_date.
@@ -1038,6 +1046,77 @@ class PrroService {
         error: 'Помилка ПРРО: $e',
         errorKind: PrroErrorKind.logical,
       );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Z-звіт за період
+  // ---------------------------------------------------------------------------
+
+  static String _dmy(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}.'
+      '${d.month.toString().padLeft(2, '0')}.${d.year}';
+
+  /// Z-звіт ЗА ПЕРІОД — `POST /shift/zReport/period` (Андрій Попов, 03.09).
+  ///
+  /// Читаючий запит: це дані вже зареєстрованих у податковій Z-звітів, тож
+  /// безпечний і повторюваний. Дає те, чого X-звіт не вміє — він бачить лише
+  /// ПОТОЧНУ зміну:
+  ///   • `cash_in_box` — кінцевий залишок у касі на кінець періоду;
+  ///   • `service_input`/`service_output` — внесення й видача (інкасація);
+  ///   • `checks_list` — усі фіскальні операції періоду, у порядку реєстрації.
+  ///
+  /// Дві умови від Андрія: потрібен інтернет (запит іде в особистий кабінет)
+  /// і сам Z має встигнути зареєструватися, а не чекати в черзі за офлайн-
+  /// чеками. Тому це збагачення, а не залежність: виклик може повернути `null`,
+  /// і кожен виклик має мати запасний шлях.
+  static Future<PrroXReport?> zReportPeriod({
+    required DateTime from,
+    required DateTime to,
+    bool includeChecks = false,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    if (!await _ensureAuth()) return null;
+    try {
+      // developer-id — ЛИШЕ в заголовках (`_headers`). Дублювання в тілі
+      // SmartConnect відхиляє з HTTP 400, на цьому вже горів xReport.
+      final body = {
+        'num_fiscal': activeFiscalNumber.toString(),
+        'print_width': PrroConfig.printWidth,
+        'pdf_width': PrroConfig.pdfWidth,
+        'from': _dmy(from),
+        'to': _dmy(to),
+        'include_checks': includeChecks,
+      };
+      final response = await _client
+          .post(
+            Uri.parse('${PrroConfig.baseUrl}/shift/zReport/period'),
+            headers: _headers,
+            body: jsonEncode(body),
+          )
+          .timeout(timeout);
+
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        final text = utf8.decode(response.bodyBytes);
+        FiscalLog.log('zReport/period FAIL: HTTP ${response.statusCode} '
+            '${text.substring(0, text.length.clamp(0, 120))}');
+        return null;
+      }
+
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! Map<String, dynamic>) return null;
+      final report = PrroXReport.fromJson(decoded);
+      FiscalLog.log('zReport/period ${_dmy(from)}–${_dmy(to)}: '
+          'кінцевий залишок ${report.cashInBox}, '
+          'внесення ${report.serviceInput}, видача ${report.serviceOutput}'
+          '${includeChecks ? ", операцій ${report.checks.length}" : ""}');
+      return report;
+    } on TimeoutException {
+      FiscalLog.log('zReport/period: таймаут');
+      return null;
+    } catch (e) {
+      FiscalLog.log('zReport/period ERROR: $e');
+      return null;
     }
   }
 

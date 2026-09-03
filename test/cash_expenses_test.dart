@@ -92,17 +92,69 @@ void main() {
     expect(e.type, ExpenseType.reserve);
   });
 
-  test('повернення й відмова визначаються прапорцями', () {
-    final ret = CashExpensesService.expenseFromJson({
-      'dtNakl': '31.08.2026 10:00:00', 'NumNakl': '1', 'sum': '1',
-      'flagRRO': '1', 'exReturn': '1', 'items': [],
-    });
-    expect(ret!.status, ExpenseStatus.returned);
-    expect(ret.type, ExpenseType.returnOp);
+  group('типи документів за описом Катерини (03.09)', () {
+    CashExpense parse(Map<String, dynamic> extra) =>
+        CashExpensesService.expenseFromJson({
+          'dtNakl': '31.08.2026 10:00:00',
+          'NumNakl': '1',
+          'sum': '10',
+          'flagRRO': '1',
+          'items': [],
+          ...extra,
+        })!;
 
+    test('wdservice → служба доставки', () {
+      expect(parse({'wdservice': 'Glovo'}).type, ExpenseType.glovo);
+      expect(parse({'wdservice': 'Нова пошта'}).type, ExpenseType.novaPoshta);
+    });
+
+    test('«Рецепт беспл» → реімбурсація, звичайний рецепт → 1303', () {
+      expect(parse({'tNakl': 'Рецепт беспл'}).type, ExpenseType.reimbursement);
+      expect(parse({'tNakl': 'Рецепт', 'Receipt': '1303/77'}).type,
+          ExpenseType.prescription1303);
+    });
+
+    test('«Терминал» і «Чек» — звичайний чек, а не окремий тип', () {
+      // tNakl — тип ДОКУМЕНТА, і «Терминал» тут не робить чек особливим.
+      expect(parse({'tNakl': 'Терминал'}).type, ExpenseType.receipt);
+      expect(parse({'tNakl': 'Чек'}).type, ExpenseType.receipt);
+    });
+
+    test('страхування має пріоритет над рецептом', () {
+      expect(parse({'exInsur': '1', 'Receipt': '55'}).type,
+          ExpenseType.insurance);
+    });
+
+    test('exReturn ≠ повернення: чек лишається чеком, але статус «повернений»',
+        () {
+      // `exReturn` каже, що ПО ЦЬОМУ чеку є повернення, а не що він ним є.
+      final e = parse({'exReturn': '1'});
+      expect(e.type, ExpenseType.receipt);
+      expect(e.status, ExpenseStatus.returned);
+      // А ось документ повернення — це той, у якого є NumNaklForReturn.
+      expect(parse({'NumNaklForReturn': '2900664544'}).type,
+          ExpenseType.returnOp);
+    });
+
+    test('телефон ЖУК витягується з rezerv', () {
+      expect(parse({'rezerv': 'ЖУК 0978288880'}).customerPhone, '978288880');
+      // Звичайний резерв або номер ІЗ телефону не містить.
+      expect(parse({'rezerv': 'Резерв 12'}).customerPhone, isNull);
+      expect(parse({'rezerv': ''}).customerPhone, isNull);
+    });
+
+    test('неповний номер краще відкинути, ніж узяти обрізаним', () {
+      // У прикладі Катерини «ЖУК 097828888» лише 9 цифр разом із нулем, тобто
+      // на цифру менше за український мобільний. Такий номер ми не беремо:
+      // показати обрізаний гірше, ніж не показати нічого.
+      expect(parse({'rezerv': 'ЖУК 097828888'}).customerPhone, isNull);
+    });
+  });
+
+  test('відмова (exOtkaz) має пріоритет над рештою статусів', () {
     final off = CashExpensesService.expenseFromJson({
       'dtNakl': '31.08.2026 10:00:00', 'NumNakl': '2', 'sum': '1',
-      'flagRRO': '1', 'exOtkaz': '1', 'items': [],
+      'flagRRO': '1', 'exOtkaz': '1', 'exReturn': '1', 'items': [],
     });
     expect(off!.status, ExpenseStatus.cancelled);
   });

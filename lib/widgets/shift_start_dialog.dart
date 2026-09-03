@@ -17,7 +17,6 @@ Future<void> showShiftStartDialog(
   required Money carryover,
   DateTime? carryoverAt,
   bool carryoverStale = true,
-  bool fromServer = false,
   bool prevZPending = false,
 }) {
   return showDialog<void>(
@@ -28,7 +27,6 @@ Future<void> showShiftStartDialog(
       carryover: carryover,
       carryoverAt: carryoverAt,
       carryoverStale: carryoverStale,
-      fromServer: fromServer,
       prevZPending: prevZPending,
     ),
   );
@@ -42,8 +40,6 @@ class _ShiftStartDialog extends StatefulWidget {
   final DateTime? carryoverAt;
   final bool carryoverStale;
 
-  /// Сума з сервера (`SumZZvit`), а не з локального файлу профілю.
-  final bool fromServer;
 
   final bool prevZPending;
   const _ShiftStartDialog({
@@ -51,7 +47,6 @@ class _ShiftStartDialog extends StatefulWidget {
     required this.carryover,
     required this.carryoverAt,
     required this.carryoverStale,
-    required this.fromServer,
     required this.prevZPending,
   });
 
@@ -110,11 +105,6 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
       return 'Введіть суму, що фактично лишилась у касовому ящику. Дані про '
           'останній Z-звіт на цьому робочому місці відсутні або застарілі, '
           'тому підставити її автоматично не можемо.';
-    }
-    if (widget.fromServer) {
-      // Дату Z сервер не віддає, тож і не вигадуємо її.
-      return 'Підставлено суму останнього Z-звіту (з бази). Якщо фактична '
-          'сума в касовому ящику інша — виправте.';
     }
     final at = widget.carryoverAt;
     final when = at == null

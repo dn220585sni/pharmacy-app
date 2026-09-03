@@ -28,16 +28,11 @@ class ServiceDepositCheck {
   /// Число застаріле або недатоване — показувати його НЕ можна.
   final bool carryoverStale;
 
-  /// Сума прийшла з `SumZZvit` (сервер), а не з локального файлу профілю.
-  /// Серверна однакова на всіх робочих місцях і застаріти не може.
-  final bool fromServer;
-
   const ServiceDepositCheck({
     required this.needed,
     required this.carryover,
     this.carryoverAt,
     this.carryoverStale = true,
-    this.fromServer = false,
   });
 }
 
@@ -144,32 +139,29 @@ class ShiftService {
       final r = await CacheApiClient().call('ProvSumZOtchet');
       if (r.isOk) {
         final needed = (r.data['ExVnos']?.toString() ?? '0') != '1';
-        // ⭐ Джерело правди — СЕРВЕРНИЙ `SumZZvit` (сума останнього Z). Він
-        // нарешті заповнюється (01.09), і це знімає головну ваду локального
-        // файлу: той лежить у профілі конкретного користувача Windows і 01.09
-        // підставив значення від 27.08 замість учорашнього — помилка на
-        // 16 623,50. Серверне значення однакове на всіх робочих місцях і
-        // застаріти не може.
+        // ⚠️ Розподіл ролей за домовленістю (уточнила Катерина 03.09):
+        // з `ProvSumZOtchet` ми беремо ЛИШЕ ознаку `ExVnos` — чи потрібне
+        // внесення. СУМУ рахуємо з ПРРО. `SumZZvit` має збігатися, але за
+        // замовчуванням у роздрібі значення для ПРРО береться «з сейфу», тож
+        // авторитетним його не вважаємо.
+        //
+        // 02.09 я був переключив джерело на `SumZZvit` — це суперечило
+        // домовленості й повернуто назад. Натомість звіряємо обидва числа й
+        // пишемо розбіжність: за словами Катерини вони мають сходитись, і
+        // саме розбіжність буде сигналом, що щось не так.
         final fromServer = Money.tryParse(r.data['SumZZvit']?.toString() ?? '');
-        if (fromServer != null && fromServer.isPositive) {
-          FiscalLog.log('ProvSumZOtchet: ExVnos="${r.data['ExVnos']}" '
-              'SumZZvit=${fromServer.format()} → беремо з СЕРВЕРА '
-              '(локальний файл: ${carryover.format()})');
-          return ServiceDepositCheck(
-            needed: needed,
-            carryover: fromServer,
-            carryoverStale: false,
-            fromServer: true,
-          );
-        }
+        final mismatch = fromServer != null &&
+            fromServer.isPositive &&
+            carryover.isPositive &&
+            fromServer != carryover;
         debugPrint('ShiftService: ProvSumZOtchet ExVnos="${r.data['ExVnos']}" '
-            'needed=$needed, довідка(Z)=${carryover.format()}');
-        // Друга половина прикладу для п.7: що саме віддав сервіс ПІСЛЯ Z.
+            'needed=$needed, залишок(ПРРО)=${carryover.format()}');
         FiscalLog.log('ProvSumZOtchet: ExVnos="${r.data['ExVnos']}" '
             'SumZZvit="${r.data['SumZZvit'] ?? "(поля немає)"}" '
-            '→ залишок ${carryover.format()} (cash_in_box Z'
-            '${z?.at == null ? ", дата невідома" : ""}'
-            '${z?.isStale ?? true ? ", застарілий — не підставляємо" : ""})');
+            '→ беремо з ПРРО ${carryover.format()}'
+            '${z?.at == null ? " (дата невідома)" : ""}'
+            '${z?.isStale ?? true ? " (застарілий — не підставляємо)" : ""}'
+            '${mismatch ? " ⚠️ РОЗБІЖНІСТЬ із SumZZvit" : ""}');
         return ServiceDepositCheck(
           needed: needed,
           carryover: carryover,

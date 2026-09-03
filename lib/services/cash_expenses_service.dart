@@ -135,6 +135,49 @@ class CashExpensesService {
     );
   }
 
+  /// Що реально є в даних за період — одним рядком у журнал.
+  ///
+  /// Привід: за два місяці не знайшлось ЖОДНОЇ накладної з ознакою
+  /// реімбурсації, страхування чи повернення (Микола, 03.09). Для живої аптеки
+  /// це неправдоподібно, тож питання одне: чи цих документів немає у відповіді,
+  /// чи вони є, але я мапив не ті поля. Рахуємо по СИРИХ даних, до мапінгу —
+  /// інакше власна помилка сховала б сама себе.
+  static void _logMarkers(
+    List<Map<String, dynamic>> raw,
+    List<CashExpense> parsed,
+    DateTime from,
+    DateTime to,
+  ) {
+    if (raw.isEmpty) return;
+    final tNakls = <String, int>{};
+    var receipt = 0, delivery = 0, insur = 0, retFor = 0, exRet = 0;
+    var rezerv = 0, notFiscal = 0, otkaz = 0;
+    for (final j in raw) {
+      final t = j['tNakl']?.toString().trim() ?? '';
+      tNakls[t.isEmpty ? '(порожньо)' : t] =
+          (tNakls[t.isEmpty ? '(порожньо)' : t] ?? 0) + 1;
+      if ((j['Receipt']?.toString().trim() ?? '').isNotEmpty) receipt++;
+      if ((j['wdservice']?.toString().trim() ?? '').isNotEmpty) delivery++;
+      if ((j['NumNaklForReturn']?.toString().trim() ?? '').isNotEmpty) retFor++;
+      if ((j['rezerv']?.toString().trim() ?? '').isNotEmpty) rezerv++;
+      if (_flag(j['exInsur'])) insur++;
+      if (_flag(j['exReturn'])) exRet++;
+      if (_flag(j['exOtkaz'])) otkaz++;
+      if (!_flag(j['flagRRO'])) notFiscal++;
+    }
+    final byType = <ExpenseType, int>{};
+    for (final e in parsed) {
+      byType[e.type] = (byType[e.type] ?? 0) + 1;
+    }
+    FiscalLog.log('GetNaklKas ОЗНАКИ ${_fmt(from)}–${_fmt(to)}: '
+        'накл=${raw.length}; '
+        'tNakl: ${tNakls.entries.map((e) => "${e.key}=${e.value}").join(", ")}; '
+        'Receipt≠∅=$receipt, wdservice≠∅=$delivery, rezerv≠∅=$rezerv, '
+        'exInsur=$insur, exReturn=$exRet, exOtkaz=$otkaz, '
+        'NumNaklForReturn≠∅=$retFor, flagRRO≠1=$notFiscal; '
+        'наш мапінг: ${byType.entries.map((e) => "${e.key.name}=${e.value}").join(", ")}');
+  }
+
   /// Накладні каси за період. Порожній список = або справді порожньо, або
   /// сервіс не відповів — розрізняти нема потреби, екран в обох випадках
   /// показує «нічого не знайдено».
@@ -165,6 +208,7 @@ class CashExpensesService {
         FiscalLog.log('GetNaklKas: ${raw.length - parsed.length} з '
             '${raw.length} накладних не розібрано (немає дати або номера)');
       }
+      _logMarkers(raw, parsed, from, to);
       debugPrint('GetNaklKas ${_fmt(from)}–${_fmt(to)}: '
           '${parsed.length} накладних');
       return parsed;

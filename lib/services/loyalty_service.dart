@@ -3,6 +3,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/spl_params.dart';
+import 'fiscal_log.dart';
 import 'spl_params_service.dart';
 
 /// Конфігурація Sparta Loyalty Platform (ЛАЙК).
@@ -95,6 +96,32 @@ class LoyaltySaleResult {
 /// HTTPS POST JSON API з подвійним SHA256 підписом.
 class LoyaltyService {
   static final _client = http.Client();
+
+  /// Діагностика: які поля анкети реально повертає Спарта.
+  ///
+  /// Привід — правило друку чека (Андрій, 03.09): друкуємо лише тоді, коли в
+  /// анкеті «Получать эл-й чек» = `no`; інакше чек електронний. Такого поля ми
+  /// нікуди не мапимо, і невідомо, чи воно взагалі приходить — `person` ми
+  /// розбираємо на чотири поля, решту мовчки викидаємо. `extendedPersonalInfo`
+  /// ми вже шлемо, тож відповідь цілком може його містити.
+  ///
+  /// У журнал ідуть ІМЕНА полів; значення — лише для прапорців
+  /// (`true`/`false`/`yes`/`no`/`0`/`1`). Персональні дані так не витечуть.
+  static void _logPersonShape(Map<String, dynamic>? person, String source) {
+    if (person == null || person.isEmpty) return;
+    const flagish = {'true', 'false', 'yes', 'no', '0', '1', 'y', 'n'};
+    final parts = person.entries.map((e) {
+      final v = e.value;
+      if (v is bool) return '${e.key}=$v';
+      if (v is List) return '${e.key}[${v.length}]';
+      if (v is Map) return '${e.key}{${v.keys.join("|")}}';
+      final s = v?.toString().trim().toLowerCase() ?? '';
+      if (flagish.contains(s)) return '${e.key}=$s';
+      if (s.isEmpty) return '${e.key}=∅';
+      return e.key;
+    });
+    FiscalLog.log('SPL $source: поля анкети — ${parts.join(", ")}');
+  }
 
   /// Гарантувати, що застосовано живі креди з GetSPLParam (раз на сесію).
   /// Викликається перед сигнатурними викликами (checkCard/sale). Якщо
@@ -288,6 +315,7 @@ class LoyaltyService {
 
     final resp = result['response'] as Map<String, dynamic>? ?? {};
     final person = resp['person'] as Map<String, dynamic>?;
+    _logPersonShape(person, 'checkCard');
 
     return LoyaltyCheckResult(
       success: true,
@@ -424,6 +452,7 @@ class LoyaltyService {
     }
 
     final person = persons.first as Map<String, dynamic>;
+    _logPersonShape(person, 'customer/find');
     return LoyaltyCheckResult(
       success: true,
       cardNo: person['cardNo']?.toString(),

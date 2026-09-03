@@ -15,8 +15,6 @@ Future<void> showShiftStartDialog(
   BuildContext context, {
   required String pharmacist,
   required Money carryover,
-  DateTime? carryoverAt,
-  bool carryoverStale = true,
   bool prevZPending = false,
 }) {
   return showDialog<void>(
@@ -25,8 +23,6 @@ Future<void> showShiftStartDialog(
     builder: (_) => _ShiftStartDialog(
       pharmacist: pharmacist,
       carryover: carryover,
-      carryoverAt: carryoverAt,
-      carryoverStale: carryoverStale,
       prevZPending: prevZPending,
     ),
   );
@@ -36,17 +32,12 @@ class _ShiftStartDialog extends StatefulWidget {
   final String pharmacist;
   final Money carryover;
 
-  /// Коли був той Z, і чи можна взагалі йому вірити.
-  final DateTime? carryoverAt;
-  final bool carryoverStale;
 
 
   final bool prevZPending;
   const _ShiftStartDialog({
     required this.pharmacist,
     required this.carryover,
-    required this.carryoverAt,
-    required this.carryoverStale,
     required this.prevZPending,
   });
 
@@ -64,21 +55,13 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
   @override
   void initState() {
     super.initState();
-    // Підставляємо залишок з останнього Z — але ЛИШЕ якщо він свіжий.
-    //
     // Окремої розмінної монети на старті зміни ніхто не вносить (уточнив
     // Микола 01.09): гроші, що лишились у касовому ящику з учора, продовжують
     // працювати. Z обнуляє лічильник готівки в ПРРО, тому вранці той залишок
-    // треба задекларувати службовим внесенням — і це рівно `cash_in_box` з
-    // останнього Z. Тобто автопідстановка тут доречна.
-    //
-    // Датування критичне: `shift_carryover.json` лежить у профілі КОНКРЕТНОГО
-    // користувача Windows. 01.09 у профілі `user` виявилось значення від
-    // 27.08 (27 483,80), тоді як реальний останній Z був 31.08 на 10 860,30 —
-    // у профілі іншого користувача. Помилка на 16 623,50. Тому застаріле або
-    // недатоване число не підставляємо й не показуємо взагалі.
+    // треба задекларувати службовим внесенням — і це `cash_in_box` із Z-звіту
+    // за період. Порожньо буває лише тоді, коли ПРРО недоступний.
     _depositCtr = TextEditingController(
-      text: _hasFreshCarryover ? widget.carryover.format() : '',
+      text: _hasCarryover ? widget.carryover.format() : '',
     );
     _depositCtr.addListener(_onDepositChanged);
   }
@@ -95,27 +78,13 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
   /// Порожнє поле — не «нуль», а «касир ще не ввів». Свідомий 0 дозволений.
   bool get _canStart => _depositCtr.text.trim().isNotEmpty;
 
-  /// Чи можна довіряти збереженому залишку: він є, ненульовий і датований
-  /// не пізніше ніж 36 годин тому.
-  bool get _hasFreshCarryover =>
-      widget.carryover.isPositive && !widget.carryoverStale;
+  bool get _hasCarryover => widget.carryover.isPositive;
 
-  String get _referenceHint {
-    if (!_hasFreshCarryover) {
-      return 'Введіть суму, що фактично лишилась у касовому ящику. Дані про '
-          'останній Z-звіт на цьому робочому місці відсутні або застарілі, '
-          'тому підставити її автоматично не можемо.';
-    }
-    final at = widget.carryoverAt;
-    final when = at == null
-        ? ''
-        : ' від ${at.day.toString().padLeft(2, '0')}.'
-            '${at.month.toString().padLeft(2, '0')} '
-            '${at.hour.toString().padLeft(2, '0')}:'
-            '${at.minute.toString().padLeft(2, '0')}';
-    return 'Підставлено залишок у касовому ящику за Z-звітом$when. '
-        'Якщо фактична сума інша — виправте.';
-  }
+  String get _referenceHint => _hasCarryover
+      ? 'Підставлено залишок у касовому ящику за даними ПРРО. Якщо фактична '
+          'сума інша — виправте.'
+      : 'Введіть суму, що фактично лишилась у касовому ящику: ПРРО зараз '
+          'недоступний, тож підставити її автоматично не можемо.';
 
   Future<void> _closeWithoutShift() async {
     final confirmed = await showDialog<bool>(
@@ -147,13 +116,11 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
 
   Future<void> _start() async {
     final deposit = Money.parse(_depositCtr.text);
-    // Розбіжність із залишком за Z варта сліду: якщо касири регулярно
-    // виправляють підставлене число, значить локальне джерело бреше і треба
-    // серверне (`SumZZvit` / Z-звіт за період).
+    // Розбіжність варта сліду: якщо касири регулярно виправляють підставлене
+    // число, значить дані ПРРО не сходяться з фактичним ящиком.
     FiscalLog.log('Старт зміни: внесено ${deposit.format()}; '
-        'залишок за Z ${widget.carryover.format()}'
-        '${_hasFreshCarryover ? "" : " (застарілий, не підставлявся)"}; '
-        'різниця ${(deposit - widget.carryover).format()}');
+        'залишок за ПРРО ${_hasCarryover ? widget.carryover.format() : "немає"}'
+        '${_hasCarryover ? "; різниця ${(deposit - widget.carryover).format()}" : ""}');
     setState(() => _starting = true);
     final ok = await ShiftService.startShift(deposit);
     if (!mounted) return;

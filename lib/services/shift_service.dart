@@ -1,7 +1,4 @@
-import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 import '../models/cash_operation.dart';
 import '../models/money.dart';
 import '../models/shift_state.dart';
@@ -22,44 +19,12 @@ class ServiceDepositCheck {
   /// обнуляє лічильник ПРРО, а кошти нікуди не діваються.
   final Money carryover;
 
-  /// Коли був той Z. `null` — невідомо (старий формат файлу).
-  final DateTime? carryoverAt;
-
-  /// Число застаріле або недатоване — показувати його НЕ можна.
-  final bool carryoverStale;
-
+  /// `Money.zero` — ПРРО недоступний і числа немає. Тоді касир вводить суму
+  /// сам: показувати щось приблизне гірше, ніж не показувати нічого.
   const ServiceDepositCheck({
     required this.needed,
     required this.carryover,
-    this.carryoverAt,
-    this.carryoverStale = true,
   });
-}
-
-/// Слід останнього Z, збережений локально: скільки було в касі і коли.
-class ZCarryover {
-  final Money cashInBox;
-
-  /// Сума виносів за зміну (`service_output`). `null` — поля у відповіді немає
-  /// (перевірено 31.08: наш ПРРО його НЕ віддає).
-  final double? serviceOutput;
-
-  /// Коли робився той Z. `null` — старий формат файлу, дату не знаємо.
-  final DateTime? at;
-
-  const ZCarryover(this.cashInBox, this.serviceOutput, this.at);
-
-
-  /// Файл лежить у профілі КОНКРЕТНОГО користувача Windows, тож може бути
-  /// днями старший за реальний останній Z — або взагалі з іншого робочого
-  /// місця. 01.09 це коштувало нам службового внесення на 27 483,80: у профілі
-  /// `user` лежало значення від 27.08, ми показали його як «останній Z», і
-  /// його скопіювали в поле. Дату не знаємо або вона стара — числу не віримо.
-  bool get isStale {
-    final t = at;
-    if (t == null) return true;
-    return DateTime.now().difference(t) > const Duration(hours: 36);
-  }
 }
 
 /// Сервіс робочої зміни.
@@ -133,18 +98,19 @@ class ShiftService {
     if (ApiConfig.useMock) {
       return ServiceDepositCheck(needed: true, carryover: Money.fromHryvnia(1250));
     }
-    // ⭐ Залишок беремо ЖИВИМ запитом до ПРРО — Z-звіт за період (ендпоїнт від
+    // Залишок беремо ЖИВИМ запитом до ПРРО — Z-звіт за період (ендпоїнт від
     // Андрія, 03.09). Саме так працює роздріб: «все данные берутся из ПРРО».
     //
-    // Це прибирає ваду локального знімка: `shift_carryover.json` лежить у
-    // профілі КОНКРЕТНОГО користувача Windows, і 01.09 через це підставилось
-    // значення від 27.08 замість учорашнього — помилка на 16 623,50.
+    // Вікно широке, закінчується ВЧОРА: `cash_in_box` періодичного звіту це
+    // кінцевий залишок на кінець періоду, тобто те, що фізично лишилось у
+    // ящику на ранок. Широке — щоб пережити вихідні. `include_checks: false`,
+    // бо потрібне лише число.
     //
-    // Вікно беремо широке й закінчуємо ВЧОРА: `cash_in_box` періодичного звіту
-    // це кінцевий залишок на кінець періоду, тобто те, що фізично лишилось у
-    // ящику на ранок. Широке — щоб пережити вихідні й дні без роботи.
-    // `include_checks: false` — нам потрібне лише число, а за місяць список
-    // операцій був би чималий.
+    // Запасного шляху свідомо НЕМАЄ. Раніше тут був локальний знімок останнього
+    // Z, але він лежав у профілі окремого користувача Windows і давав НЕВІРНІ
+    // числа: 01.09 підставив значення від 27.08 (помилка на 16 623,50), 03.09
+    // розійшовся з ПРРО на 27 275,96. Якщо ПРРО недоступний, чесніше лишити
+    // поле порожнім — касир бачить, що в ящику, і введе сам.
     final now = DateTime.now();
     final yesterday = DateTime(now.year, now.month, now.day)
         .subtract(const Duration(days: 1));
@@ -152,22 +118,11 @@ class ShiftService {
       from: yesterday.subtract(const Duration(days: 30)),
       to: yesterday,
     );
-
-    // Локальний знімок лишається ЗАПАСНИМ шляхом: Андрій попередив, що
-    // періодичний звіт вимагає інтернету і зареєстрованого Z.
-    final z = await _loadCarryover();
-    final live = period == null ? null : Money.fromHryvnia(period.cashInBox);
     final carryover =
-        (live != null && live.isPositive) ? live : (z?.cashInBox ?? Money.zero);
-    final liveOk = live != null && live.isPositive;
-    // Живе значення з ПРРО завжди актуальне; локальний знімок — лише якщо
-    // датований і свіжий.
-    final at = liveOk ? yesterday : z?.at;
-    final stale = liveOk ? false : (z?.isStale ?? true);
-    if (liveOk) {
+        period == null ? Money.zero : Money.fromHryvnia(period.cashInBox);
+    if (carryover.isPositive) {
       FiscalLog.log('Залишок з ПРРО (Z за період по ${_d(yesterday)}): '
-          '${live.format()}; локальний знімок ${z?.cashInBox.format() ?? "немає"}'
-          '${(period?.serviceOutput ?? 0) > 0 ? "" : " — інкасації за період не було"}');
+          '${carryover.format()}, видача за період ${period!.serviceOutput}');
     }
     try {
       // ProvSumZOtchet: `ExVnos` — чи потрібне внесення, `SumZZvit` — сума
@@ -195,27 +150,15 @@ class ShiftService {
         FiscalLog.log('ProvSumZOtchet: ExVnos="${r.data['ExVnos']}" '
             'SumZZvit="${r.data['SumZZvit'] ?? "(поля немає)"}" '
             '→ беремо з ПРРО ${carryover.format()}'
-            '${z?.at == null ? " (дата невідома)" : ""}'
-            '${z?.isStale ?? true ? " (застарілий — не підставляємо)" : ""}'
             '${mismatch ? " ⚠️ РОЗБІЖНІСТЬ із SumZZvit" : ""}');
-        return ServiceDepositCheck(
-          needed: needed,
-          carryover: carryover,
-          carryoverAt: at,
-          carryoverStale: stale,
-        );
+        return ServiceDepositCheck(needed: needed, carryover: carryover);
       }
       debugPrint('ShiftService ProvSumZOtchet FAIL: ${r.result}');
     } catch (e) {
       debugPrint('ShiftService ProvSumZOtchet ERROR: $e');
     }
     // На помилку — краще показати діалог, ніж пропустити старт.
-    return ServiceDepositCheck(
-      needed: true,
-      carryover: carryover,
-      carryoverAt: at,
-      carryoverStale: stale,
-    );
+    return ServiceDepositCheck(needed: true, carryover: carryover);
   }
 
   /// Підтягнути реальні підсумки відкритої зміни з ПРРО xReport (готівка в касі,
@@ -403,17 +346,11 @@ class ShiftService {
       // Z уже фіскально відбувся. Далі — лише запис у Caché; його провал НЕ
       // скасовує звіт, але й ховати його не можна (див. ShiftCloseResult).
       final fixed = await _fixZReportInDb();
-      // `cash_in_box` з відповіді Z-звіту = гроші в касі на момент Z = пропонована
-      // розмінна монета для НАСТУПНОЇ зміни. Зберігаємо (переживає рестарт).
+      // Локально нічого не зберігаємо: залишок для наступної зміни беремо
+      // живим Z-звітом за період, а знімок у профілі користувача двічі давав
+      // невірні числа (01.09 і 03.09) — див. `checkServiceDeposit`.
       final cashAtZ = Money.fromHryvnia(r.cashInBox ?? 0);
-      await _persistCarryover(cashAtZ, r.serviceOutput);
-      // Слід для розбору розмінної: чи є в Z взагалі `service_output` і чи
-      // робили інкасацію. Без виносу `cash_in_box` = внос вранці + виручка
-      // (підтвердив Андрій Попов 31.08), тобто пропонувати його не можна.
-      FiscalLog.log('Z-звіт: cash_in_box=${cashAtZ.format()} '
-          'service_input=${r.serviceInput?.toStringAsFixed(2) ?? "(поля немає)"} '
-          'service_output=${r.serviceOutput?.toStringAsFixed(2) ?? "(поля немає)"}'
-          '${r.serviceOutput == 0 ? " — інкасації не було, сума включає виручку" : ""}');
+      FiscalLog.log('Z-звіт: cash_in_box=${cashAtZ.format()}');
       debugPrint('ShiftService: closeShift OK (cashAtZ=${cashAtZ.format()}, '
           'fixedInDb=$fixed)');
       return ShiftCloseResult(r, fixedInDb: fixed);
@@ -422,55 +359,6 @@ class ShiftService {
     }
   }
 
-  // ── Перенос розмінної монети (cash_in_box на момент Z) ───────────────────────
-
-  static const _carryoverFile = 'shift_carryover.json';
-
-  static Future<File?> _carryoverPath() async {
-    if (kIsWeb) return null;
-    try {
-      final dir = await getApplicationSupportDirectory();
-      return File('${dir.path}/$_carryoverFile');
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Зберегти слід останнього Z: готівку в касі і суму виносів.
-  static Future<void> _persistCarryover(Money m, double? serviceOutput) async {
-    final f = await _carryoverPath();
-    if (f == null) return;
-    try {
-      await f.writeAsString(jsonEncode({
-        'kopiykas': m.kopiykas,
-        'service_output': ?serviceOutput,
-        // Без дати число неможливо відрізнити від п'ятиденного (див. isStale).
-        'at': DateTime.now().toIso8601String(),
-      }));
-    } catch (e) {
-      debugPrint('ShiftService: persist carryover FAIL: $e');
-    }
-  }
-
-  /// Прочитати слід останнього Z. null якщо його ще не було.
-  /// Старий формат (без `service_output`) читається як «невідомо».
-  static Future<ZCarryover?> _loadCarryover() async {
-    final f = await _carryoverPath();
-    if (f == null || !await f.exists()) return null;
-    try {
-      final j = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-      final k = (j['kopiykas'] as num?)?.toInt();
-      if (k == null) return null;
-      return ZCarryover(
-        Money.fromKopiykas(k),
-        (j['service_output'] as num?)?.toDouble(),
-        DateTime.tryParse(j['at']?.toString() ?? ''),
-      );
-    } catch (e) {
-      debugPrint('ShiftService: load carryover FAIL: $e');
-      return null;
-    }
-  }
 
   /// Зафіксувати Z-звіт у БД Caché (`ZRep`) — викликати ПІСЛЯ успішного Z у ПРРО.
   /// Best-effort: збій фіксації не скасовує вже зроблений у ПРРО Z-звіт,

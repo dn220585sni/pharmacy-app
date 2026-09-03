@@ -175,14 +175,6 @@ class PrroResult {
   /// Виміряно й на нашій касі — пропозиція росла рівно на готівкову виручку.
   final double? cashInBox;
 
-  /// Службові внесення/виноси за зміну (`service_input` / `service_output`).
-  ///
-  /// `serviceOutput` — ключ до розмінної: якщо винос (інкасація) БУВ, то
-  /// `cashInBox` уже без виручки і його можна пропонувати; якщо нуль — число
-  /// роздуте. `null` = поля у відповіді немає (перевіряємо по журналу).
-  final double? serviceInput;
-  final double? serviceOutput;
-
   final String? error;
   final PrroErrorKind? errorKind;
 
@@ -204,8 +196,6 @@ class PrroResult {
     this.link,
     this.isOffline = false,
     this.cashInBox,
-    this.serviceInput,
-    this.serviceOutput,
     this.error,
     this.errorKind,
     this.recovered = false,
@@ -222,8 +212,6 @@ class PrroResult {
         qrData = null,
         qrBase64 = null,
         textPrint = null,
-        serviceInput = null,
-        serviceOutput = null,
         pdfBase64 = null,
         link = null,
         isOffline = false,
@@ -1465,8 +1453,6 @@ class PrroService {
           // рядками, і тоді `as num?` мовчки давав null — той самий клас бага,
           // що колись зламав розбір `local_number` у X-звіті.
           cashInBox: flexDouble(json['cash_in_box']),
-          serviceInput: flexDouble(json['service_input']),
-          serviceOutput: flexDouble(json['service_output']),
         );
       } else {
         return PrroResult.failure(

@@ -201,20 +201,28 @@ class CashExpensesService {
   /// Накладні каси за період. Порожній список = або справді порожньо, або
   /// сервіс не відповів — розрізняти нема потреби, екран в обох випадках
   /// показує «нічого не знайдено».
+  /// [kodKli] — каса, чиї накладні беремо. За замовчуванням своя, але клієнт
+  /// може прийти по резерв або з поверненням не на ту касу, де його
+  /// обслуговували, тож панель дає обрати будь-яку касу аптеки зі списку
+  /// `GetKlient` (Задача 25).
   static Future<List<CashExpense>> fetch({
     required DateTime from,
     required DateTime to,
+    String? kodKli,
   }) async {
     if (ApiConfig.useMock) return const [];
+    final register = (kodKli == null || kodKli.trim().isEmpty)
+        ? ApiConfig.ekkKodKli
+        : kodKli.trim();
     try {
       final r = await CacheApiClient().call('GetNaklKas', params: {
         'dateFrom': _fmt(from),
         'dateTo': _fmt(to),
-        'KodKli': ApiConfig.ekkKodKli,
+        'KodKli': register,
       });
       if (!r.isOk) {
         FiscalLog.log('GetNaklKas FAIL (${_fmt(from)}–${_fmt(to)}, '
-            'KodKli=${ApiConfig.ekkKodKli}): ${r.result}');
+            'KodKli=$register): ${r.result}');
         return const [];
       }
       final raw = (r.data['Nakls'] as List? ?? const [])
@@ -229,7 +237,7 @@ class CashExpensesService {
             '${raw.length} накладних не розібрано (немає дати або номера)');
       }
       _logMarkers(raw, parsed, from, to);
-      debugPrint('GetNaklKas ${_fmt(from)}–${_fmt(to)}: '
+      debugPrint('GetNaklKas ${_fmt(from)}–${_fmt(to)} KodKli=$register: '
           '${parsed.length} накладних');
       return parsed;
     } catch (e) {

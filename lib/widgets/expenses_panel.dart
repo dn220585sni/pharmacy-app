@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/money.dart';
 import '../models/cash_expense.dart';
+import '../models/cash_register.dart';
 import '../data/mock_expenses.dart';
 import '../services/api_config.dart';
 import '../services/cash_expenses_service.dart';
+import '../services/registers_service.dart';
 import 'hover_icon_button.dart';
 import 'callback_request_dialog.dart';
 import 'return_flow_dialog.dart';
@@ -37,16 +39,25 @@ class ExpensesPanelState extends State<ExpensesPanel> {
   String _selectedFilter = 'Всі';
   DateTime? _dateFrom;
   DateTime? _dateTo;
-  String? _selectedRegister;
+  /// Каси аптеки — `GetKlient` (Задача 25). Порожньо, поки не завантажились
+  /// або якщо сервіс не відповів; тоді вибирати нема з чого й працюємо зі
+  /// своєю касою.
+  List<CashRegister> _registers = const [];
+
+  /// `KodKli` каси, чиї накладні дивимось. `null` — своя, з реєстру.
+  ///
+  /// Це САМЕ параметр запиту, а не локальний фільтр: `GetNaklKas` віддає
+  /// накладні однієї каси, тож зміна вибору означає новий запит. Раніше тут
+  /// був фільтр по вже завантаженому списку — і він не міг показати нічого,
+  /// крім своєї каси, бо інших даних у ньому не бувало.
+  String? _registerId;
+
   bool _loading = false;
 
   bool get _hasQuery => _searchController.text.trim().isNotEmpty;
 
-  List<String> get _availableRegisters {
-    final regs = _allExpenses.map((e) => e.register).toSet().toList();
-    regs.sort();
-    return regs;
-  }
+  /// Поточна каса — обрана або своя.
+  String get _activeRegisterId => _registerId ?? ApiConfig.ekkKodKli;
 
   static const _primaryFilters = [
     'Всі',
@@ -96,7 +107,16 @@ class ExpensesPanelState extends State<ExpensesPanel> {
       _dateFrom = today;
       _dateTo = today;
       _load();
+      _loadRegisters();
     }
+  }
+
+  /// Список кас аптеки — разово, паралельно з накладними. Збій не заважає
+  /// роботі: без списку лишається своя каса.
+  Future<void> _loadRegisters() async {
+    final list = await RegistersService.pharmacyRegisters();
+    if (!mounted || list.isEmpty) return;
+    setState(() => _registers = list);
   }
 
   /// Перезапит накладних із `GetNaklKas`. Фільтри (тип, каса, пошук) далі
@@ -107,16 +127,12 @@ class ExpensesPanelState extends State<ExpensesPanel> {
     final list = await CashExpensesService.fetch(
       from: _dateFrom ?? DateTime.now(),
       to: _dateTo ?? _dateFrom ?? DateTime.now(),
+      kodKli: _registerId,
     );
     if (!mounted) return;
     setState(() {
       _allExpenses = list;
       _loading = false;
-      // Обрана раніше каса могла зникнути з нового періоду.
-      if (_selectedRegister != null &&
-          !_availableRegisters.contains(_selectedRegister)) {
-        _selectedRegister = null;
-      }
     });
     _applyFilters();
   }
@@ -170,10 +186,7 @@ class ExpensesPanelState extends State<ExpensesPanel> {
         list = list.where((e) => e.dateTime.isBefore(to)).toList();
       }
 
-      // Register filter
-      if (_selectedRegister != null) {
-        list = list.where((e) => e.register == _selectedRegister).toList();
-      }
+      // Каса локально не фільтрується — вона параметр запиту (див. _registerId).
 
       // Text search
       if (query.isNotEmpty) {
@@ -462,7 +475,11 @@ class ExpensesPanelState extends State<ExpensesPanel> {
   }
 
   Widget _buildDateAndRegisterRow() {
-    final registers = _availableRegisters;
+    final registers = _registers;
+    // Каса, відмінна від власної, — стан, який має впадати в око: фармацевт
+    // дивиться чужі накладні й легко про це забуде.
+    final isForeign =
+        _registerId != null && _registerId != ApiConfig.ekkKodKli;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
       child: Row(
@@ -481,45 +498,58 @@ class ExpensesPanelState extends State<ExpensesPanel> {
                 height: 28,
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 decoration: BoxDecoration(
-                  color: _selectedRegister != null
-                      ? const Color(0xFFE8F3FB)
+                  color: isForeign
+                      ? const Color(0xFFFFF8E1)
                       : const Color(0xFFF4F5F8),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: _selectedRegister != null
-                        ? const Color(0xFF1E7DC8)
+                    color: isForeign
+                        ? const Color(0xFFB45309)
                         : const Color(0xFFE5E7EB),
                   ),
                 ),
                 child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String?>(
-                    value: _selectedRegister,
+                  child: DropdownButton<String>(
+                    value: registers.any((r) => r.id == _activeRegisterId)
+                        ? _activeRegisterId
+                        : null,
                     isExpanded: true,
                     isDense: true,
-                    icon: const Icon(Icons.expand_more_rounded,
-                        size: 16, color: Color(0xFF9CA3AF)),
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF374151)),
-                    hint: const Text('Всі каси',
+                    icon: Icon(Icons.expand_more_rounded,
+                        size: 16,
+                        color: isForeign
+                            ? const Color(0xFFB45309)
+                            : const Color(0xFF9CA3AF)),
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: isForeign
+                            ? const Color(0xFFB45309)
+                            : const Color(0xFF374151)),
+                    hint: const Text('Каса',
                         style: TextStyle(
                             fontSize: 11, color: Color(0xFF6B7280))),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('Всі каси',
-                            style: TextStyle(
-                                fontSize: 11, color: Color(0xFF6B7280))),
-                      ),
-                      ...registers.map((r) => DropdownMenuItem<String?>(
-                            value: r,
-                            child: Text(
-                              r.length > 18 ? '${r.substring(0, 18)}…' : r,
-                              style: const TextStyle(fontSize: 11),
-                            ),
-                          )),
-                    ],
+                    items: registers
+                        .map((r) => DropdownMenuItem<String>(
+                              value: r.id,
+                              child: Tooltip(
+                                message: r.name,
+                                waitDuration: const Duration(milliseconds: 500),
+                                child: Text(
+                                  r.id == ApiConfig.ekkKodKli
+                                      ? '${r.shortName} — ваша'
+                                      : r.shortName,
+                                  style: const TextStyle(fontSize: 11),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ))
+                        .toList(),
                     onChanged: (value) {
-                      setState(() => _selectedRegister = value);
-                      _applyFilters();
+                      if (value == null || value == _activeRegisterId) return;
+                      // Нова каса — новий запит: GetNaklKas віддає накладні
+                      // однієї каси, локально їх не відфільтруєш.
+                      setState(() => _registerId = value);
+                      unawaited(_load());
                     },
                   ),
                 ),

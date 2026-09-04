@@ -20,6 +20,7 @@ import '../services/terminal_service.dart';
 import '../services/prro_queue.dart';
 import '../services/prro_service.dart';
 import '../services/receipt_archive.dart';
+import '../services/receipt_outbox.dart';
 import '../services/sale_journal.dart';
 import '../services/session_service.dart';
 import '../services/sparta_service.dart';
@@ -1029,6 +1030,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       // Зберегти PDF чека в архів (папка receipts) — той самий контент, що у
       // вікні. Best-effort, у фоні, не блокує показ.
       unawaited(ReceiptArchive.savePdf(result));
+      // Тека `out`: pdf + txt + QR-png під номером чека, звідки чек
+      // можна дістати й роздрукувати руками. Живе 7 днів.
+      unawaited(ReceiptOutbox.save(result));
       if (!mounted) return true;
       if (result.recovered) {
         // A1: чек знайдено в зміні після обриву — вікна з QR/PDF немає (X-звіт

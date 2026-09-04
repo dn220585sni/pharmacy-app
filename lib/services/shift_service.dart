@@ -19,11 +19,18 @@ class ServiceDepositCheck {
   /// обнуляє лічильник ПРРО, а кошти нікуди не діваються.
   final Money carryover;
 
-  /// `Money.zero` — ПРРО недоступний і числа немає. Тоді касир вводить суму
-  /// сам: показувати щось приблизне гірше, ніж не показувати нічого.
+  /// Чому залишку немає — словами ПРРО, а не нашою здогадкою.
+  ///
+  /// `null`, якщо залишок отримано. Інакше тут те, що відповів сам ПРРО:
+  /// 04.09.2026 це було «Присутні невигружені чеки за вказаний період» —
+  /// причина, з якою фармацевт може щось зробити, на відміну від
+  /// «ПРРО зараз недоступний», яке ми показували раніше.
+  final String? carryoverIssue;
+
   const ServiceDepositCheck({
     required this.needed,
     required this.carryover,
+    this.carryoverIssue,
   });
 }
 
@@ -118,11 +125,13 @@ class ShiftService {
       from: yesterday.subtract(const Duration(days: 30)),
       to: yesterday,
     );
-    final carryover =
-        period == null ? Money.zero : Money.fromHryvnia(period.cashInBox);
+    final carryover = period.isOk
+        ? Money.fromHryvnia(period.report!.cashInBox)
+        : Money.zero;
+    final issue = period.issue;
     if (carryover.isPositive) {
       FiscalLog.log('Залишок з ПРРО (Z за період по ${_d(yesterday)}): '
-          '${carryover.format()}, видача за період ${period!.serviceOutput}');
+          '${carryover.format()}, видача за період ${period.report!.serviceOutput}');
     }
     try {
       // ProvSumZOtchet: `ExVnos` — чи потрібне внесення, `SumZZvit` — сума
@@ -151,14 +160,16 @@ class ShiftService {
             'SumZZvit="${r.data['SumZZvit'] ?? "(поля немає)"}" '
             '→ беремо з ПРРО ${carryover.format()}'
             '${mismatch ? " ⚠️ РОЗБІЖНІСТЬ із SumZZvit" : ""}');
-        return ServiceDepositCheck(needed: needed, carryover: carryover);
+        return ServiceDepositCheck(
+            needed: needed, carryover: carryover, carryoverIssue: issue);
       }
       debugPrint('ShiftService ProvSumZOtchet FAIL: ${r.result}');
     } catch (e) {
       debugPrint('ShiftService ProvSumZOtchet ERROR: $e');
     }
     // На помилку — краще показати діалог, ніж пропустити старт.
-    return ServiceDepositCheck(needed: true, carryover: carryover);
+    return ServiceDepositCheck(
+        needed: true, carryover: carryover, carryoverIssue: issue);
   }
 
   /// Підтягнути реальні підсумки відкритої зміни з ПРРО xReport (готівка в касі,

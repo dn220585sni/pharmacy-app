@@ -15,6 +15,7 @@ Future<void> showShiftStartDialog(
   BuildContext context, {
   required String pharmacist,
   required Money carryover,
+  String? carryoverIssue,
   bool prevZPending = false,
 }) {
   return showDialog<void>(
@@ -23,6 +24,7 @@ Future<void> showShiftStartDialog(
     builder: (_) => _ShiftStartDialog(
       pharmacist: pharmacist,
       carryover: carryover,
+      carryoverIssue: carryoverIssue,
       prevZPending: prevZPending,
     ),
   );
@@ -32,12 +34,14 @@ class _ShiftStartDialog extends StatefulWidget {
   final String pharmacist;
   final Money carryover;
 
-
+  /// Причина, чому залишку немає — словами ПРРО.
+  final String? carryoverIssue;
 
   final bool prevZPending;
   const _ShiftStartDialog({
     required this.pharmacist,
     required this.carryover,
+    required this.carryoverIssue,
     required this.prevZPending,
   });
 
@@ -80,11 +84,30 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
 
   bool get _hasCarryover => widget.carryover.isPositive;
 
-  String get _referenceHint => _hasCarryover
-      ? 'Підставлено залишок у касовому ящику за даними ПРРО. Якщо фактична '
-          'сума інша — виправте.'
-      : 'Введіть суму, що фактично лишилась у касовому ящику: ПРРО зараз '
-          'недоступний, тож підставити її автоматично не можемо.';
+  /// Причина від ПРРО, якщо він її назвав.
+  ///
+  /// Раніше тут завжди стояло «ПРРО зараз недоступний» — формулювання, з яким
+  /// фармацевт не може зробити нічого. Насправді ПРРО часто відповідає й
+  /// пояснює: 04.09.2026 це було «Присутні невигружені чеки за вказаний
+  /// період». З такою фразою людина принаймні знає, кому дзвонити.
+  String? get _issue {
+    final s = widget.carryoverIssue?.trim();
+    return (s == null || s.isEmpty) ? null : s;
+  }
+
+  String get _referenceHint {
+    if (_hasCarryover) {
+      return 'Підставлено залишок у касовому ящику за даними ПРРО. '
+          'Якщо фактична сума інша — виправте.';
+    }
+    final issue = _issue;
+    if (issue != null) {
+      return 'Введіть суму, що фактично лишилась у касовому ящику: '
+          'ПРРО не дав залишок — $issue.';
+    }
+    return 'Введіть суму, що фактично лишилась у касовому ящику: ПРРО зараз '
+        'недоступний, тож підставити її автоматично не можемо.';
+  }
 
   Future<void> _closeWithoutShift() async {
     final confirmed = await showDialog<bool>(
@@ -120,7 +143,8 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
     // число, значить дані ПРРО не сходяться з фактичним ящиком.
     FiscalLog.log('Старт зміни: внесено ${deposit.format()}; '
         'залишок за ПРРО ${_hasCarryover ? widget.carryover.format() : "немає"}'
-        '${_hasCarryover ? "; різниця ${(deposit - widget.carryover).format()}" : ""}');
+        '${_hasCarryover ? "; різниця ${(deposit - widget.carryover).format()}" : ""}'
+        '${_issue != null ? "; причина: ${_issue!}" : ""}');
     setState(() => _starting = true);
     final ok = await ShiftService.startShift(deposit);
     if (!mounted) return;
@@ -240,8 +264,15 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
               const SizedBox(height: 6),
               Text(
                 _referenceHint,
-                style: const TextStyle(
-                    fontSize: 11.5, color: Color(0xFF6B7280), height: 1.35),
+                // Названа причина — це стан, який варто помітити, а не
+                // службовий текст. Той самий бурштин, що й у попередженні
+                // про незакритий Z вище.
+                style: TextStyle(
+                    fontSize: 11.5,
+                    color: _issue != null
+                        ? const Color(0xFFB45309)
+                        : const Color(0xFF6B7280),
+                    height: 1.35),
               ),
               const SizedBox(height: 18),
 

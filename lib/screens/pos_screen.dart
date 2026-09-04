@@ -939,6 +939,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
               context,
               pharmacist: selected.user,
               carryover: check.carryover,
+              carryoverIssue: check.carryoverIssue,
             );
           });
         }
@@ -1097,6 +1098,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       context,
       pharmacist: _currentPharmacist!.user,
       carryover: check.carryover,
+      carryoverIssue: check.carryoverIssue,
     );
   }
 

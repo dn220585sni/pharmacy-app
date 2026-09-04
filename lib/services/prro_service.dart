@@ -154,6 +154,25 @@ enum PrroErrorKind {
   auth,
 }
 
+
+/// Результат Z-звіту за період: або сам звіт, або причина, чому його немає.
+///
+/// Раніше метод повертав просто `null`, і фармацевт бачив вигадане «ПРРО зараз
+/// недоступний» — навіть коли ПРРО відповів і чітко назвав причину
+/// («Присутні невигружені чеки за вказаний період», 04.09.2026). З таким
+/// формулюванням людина принаймні знає, кому дзвонити.
+class PrroPeriodResult {
+  final PrroXReport? report;
+
+  /// Готовий до показу рядок або `null`, якщо все добре.
+  final String? issue;
+
+  const PrroPeriodResult.ok(PrroXReport this.report) : issue = null;
+  const PrroPeriodResult.failed(String this.issue) : report = null;
+
+  bool get isOk => report != null;
+}
+
 /// Результат операції ПРРО.
 class PrroResult {
   final bool success;
@@ -1058,13 +1077,15 @@ class PrroService {
   /// і сам Z має встигнути зареєструватися, а не чекати в черзі за офлайн-
   /// чеками. Тому це збагачення, а не залежність: виклик може повернути `null`,
   /// і кожен виклик має мати запасний шлях.
-  static Future<PrroXReport?> zReportPeriod({
+  static Future<PrroPeriodResult> zReportPeriod({
     required DateTime from,
     required DateTime to,
     bool includeChecks = false,
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    if (!await _ensureAuth()) return null;
+    if (!await _ensureAuth()) {
+      return const PrroPeriodResult.failed('ПРРО не авторизований');
+    }
     try {
       // developer-id — ЛИШЕ в заголовках (`_headers`). Дублювання в тілі
       // SmartConnect відхиляє з HTTP 400, на цьому вже горів xReport.
@@ -1088,24 +1109,48 @@ class PrroService {
         final text = utf8.decode(response.bodyBytes);
         FiscalLog.log('zReport/period FAIL: HTTP ${response.statusCode} '
             '${text.substring(0, text.length.clamp(0, 120))}');
-        return null;
+        return PrroPeriodResult.failed(explainPrroBody(text));
       }
 
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-      if (decoded is! Map<String, dynamic>) return null;
+      if (decoded is! Map<String, dynamic>) {
+        return const PrroPeriodResult.failed('ПРРО повернув несподівану відповідь');
+      }
       final report = PrroXReport.fromJson(decoded);
       FiscalLog.log('zReport/period ${_dmy(from)}–${_dmy(to)}: '
           'кінцевий залишок ${report.cashInBox}, '
           'внесення ${report.serviceInput}, видача ${report.serviceOutput}'
           '${includeChecks ? ", операцій ${report.checks.length}" : ""}');
-      return report;
+      return PrroPeriodResult.ok(report);
     } on TimeoutException {
       FiscalLog.log('zReport/period: таймаут');
-      return null;
+      return const PrroPeriodResult.failed('ПРРО не відповів вчасно');
     } catch (e) {
       FiscalLog.log('zReport/period ERROR: $e');
-      return null;
+      return const PrroPeriodResult.failed('Немає звʼязку з ПРРО');
     }
+  }
+
+  /// Витягти людську причину з тіла помилки SmartConnect.
+  ///
+  /// Формат — `{"message":"…","type":"WARNING"}`; саме так 04.09.2026 прийшло
+  /// «Присутні невигружені чеки за вказаний період». Якщо тіло не таке —
+  /// віддаємо його вкорочене: будь-який текст від ПРРО кориснішій за наше
+  /// припущення про недоступність.
+  @visibleForTesting
+  static String explainPrroBody(String body) {
+    try {
+      final j = jsonDecode(body);
+      if (j is Map) {
+        final msg = j['message']?.toString().trim() ?? '';
+        if (msg.isNotEmpty) return msg;
+      }
+    } catch (_) {
+      // Не JSON — нижче віддамо як є.
+    }
+    final t = body.trim();
+    if (t.isEmpty) return 'ПРРО відповів помилкою без пояснення';
+    return t.length <= 160 ? t : '${t.substring(0, 160)}…';
   }
 
   // ---------------------------------------------------------------------------

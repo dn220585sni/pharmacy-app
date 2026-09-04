@@ -890,10 +890,15 @@ class ExpensesPanelState extends State<ExpensesPanel> {
         expense.amount.asMoney;
     final minutesSinceSale =
         DateTime.now().difference(expense.dateTime).inMinutes;
-    final canReturn =
-        expense.status != ExpenseStatus.returned && minutesSinceSale <= 30;
-    final returnExpired =
-        expense.status != ExpenseStatus.returned && minutesSinceSale > 30;
+    // `blok` від сервера (Катерина, 04.09): непорожнє означає, що чек міняти
+    // не можна, і несе причину. Це сильніша заборона за 30-хвилинне вікно —
+    // її вирішує сервер, а не наш годинник, тож перевіряємо першою.
+    final canReturn = !expense.isBlocked &&
+        expense.status != ExpenseStatus.returned &&
+        minutesSinceSale <= 30;
+    final returnExpired = !expense.isBlocked &&
+        expense.status != ExpenseStatus.returned &&
+        minutesSinceSale > 30;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
@@ -925,6 +930,40 @@ class ExpensesPanelState extends State<ExpensesPanel> {
             ],
           ),
           const SizedBox(height: 10),
+          // Заборона від сервера — з його ж формулюванням. Червоне, а не
+          // бурштинове: це не «час вийшов», це «не можна».
+          if (expense.isBlocked)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEE2E2),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFCA5A5)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.lock_outline_rounded,
+                        size: 14, color: Color(0xFFB91C1C)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Чек змінювати не можна: ${expense.blockReason}',
+                        style: const TextStyle(
+                          color: Color(0xFFB91C1C),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           // Return-expired notice
           if (returnExpired)
             Padding(

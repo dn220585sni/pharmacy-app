@@ -70,6 +70,26 @@ class CashExpensesService {
     return digits.length == 9 ? digits : null;
   }
 
+  /// `tNaklR` — тип чека в поняттях ЄФ2.0, доданий Катериною 04.09.2026.
+  ///
+  /// Це ПРЯМА відповідь на питання, яке ми доти вгадували по непрямих
+  /// ознаках (`exInsur`, `wdservice`, `NumNaklForReturn`, «беспл» у `tNakl`).
+  /// Значення збігаються з нашим переліком один в один, тож здогадки більше
+  /// не потрібні.
+  ///
+  /// `null` — поля немає (стара відповідь) або значення незнайоме; тоді
+  /// працює давній розбір по ознаках.
+  static ExpenseType? typeFromTNaklR(String raw) => switch (raw.trim().toLowerCase()) {
+        'rezerv' => ExpenseType.reserve,
+        'reimb' => ExpenseType.reimbursement,
+        '1303' => ExpenseType.prescription1303,
+        'insur' => ExpenseType.insurance,
+        'glovo' => ExpenseType.glovo,
+        'newpost' => ExpenseType.novaPoshta,
+        'return' => ExpenseType.returnOp,
+        _ => null,
+      };
+
   /// Розібрати одну накладну. `null` — рядок без дати або без номера.
   static CashExpense? expenseFromJson(Map<String, dynamic> j) {
     final when = parseNaklDate(j['dtNakl']?.toString() ?? '');
@@ -85,8 +105,14 @@ class CashExpensesService {
     //   Receipt    — № рецепта (реімбурсація, 1303 тощо);
     //   wdservice  — служба доставки;
     //   exReturn   — для цього чека Є повернення (сам чек не є поверненням);
-    //   exOtkaz    — відмова клієнта або аптеки;
+    //   exOtkaz    — відмова по ІЗ (клієнта або аптеки);
     //   exInsur    — продаж за страхуванням.
+    //
+    // Додано 04.09:
+    //   tNaklR     — ТИП чека в поняттях ЄФ2.0; головне джерело, див. нижче;
+    //   blok       — непорожнє означає «чек міняти не можна» + причина;
+    //   PrimInsur  — страхова компанія;  FIOInsur — ПІБ застрахованої особи;
+    //   idorder    — номер ІЗ;  UnionIZ — основна накладна при обʼєднанні ІЗ.
     final reserve = j['rezerv']?.toString().trim() ?? '';
     final returnFor = j['NumNaklForReturn']?.toString().trim() ?? '';
     final receiptNo = j['Receipt']?.toString().trim() ?? '';
@@ -118,9 +144,15 @@ class CashExpensesService {
       receiptNumber: num_,
       dateTime: when,
       amount: flexDouble(j['sum']) ?? 0,
-      // Порядок важливий: спершу те, що однозначно визначає документ
-      // (повернення, страхування), далі доставка й рецепт, і аж потім резерв.
-      type: switch (true) {
+      // `tNaklR` — пряма відповідь від сервера, їй і віримо. Розбір по
+      // непрямих ознаках нижче лишається запасним шляхом: він потрібен, поки
+      // в базі є накладні, створені до появи поля.
+      //
+      // Порядок у запасному шляху важливий: спершу те, що однозначно визначає
+      // документ (повернення, страхування), далі доставка й рецепт, і аж
+      // потім резерв.
+      type: typeFromTNaklR(j['tNaklR']?.toString() ?? '') ??
+          switch (true) {
         // Сам документ Є поверненням — на відміну від `exReturn`, який лише
         // каже, що ПО ЦЬОМУ чеку колись оформили повернення.
         _ when returnFor.isNotEmpty => ExpenseType.returnOp,
@@ -152,7 +184,18 @@ class CashExpensesService {
       // `SpartaCard` у це поле не підставляємо: інша сутність.
       customerPhone: _phoneFrom(reserve),
       items: items,
+      blockReason: _orNull(j['blok']),
+      insurer: _orNull(j['PrimInsur']),
+      insuredName: _orNull(j['FIOInsur']),
+      orderId: _orNull(j['idorder']),
+      unionInvoice: _orNull(j['UnionIZ']),
     );
+  }
+
+  /// Порожній рядок від Caché — це «поля немає», а не значення.
+  static String? _orNull(dynamic v) {
+    final s = v?.toString().trim() ?? '';
+    return s.isEmpty ? null : s;
   }
 
   /// Що реально є в даних за період — одним рядком у журнал.
@@ -170,12 +213,19 @@ class CashExpensesService {
   ) {
     if (raw.isEmpty) return;
     final tNakls = <String, int>{};
+    // Окремо рахуємо tNaklR: саме за ним видно, чи сервер уже проставляє тип,
+    // чи ми досі тримаємось на запасному розборі по ознаках.
+    final tNaklRs = <String, int>{};
     var receipt = 0, delivery = 0, insur = 0, retFor = 0, exRet = 0;
-    var rezerv = 0, notFiscal = 0, otkaz = 0;
+    var rezerv = 0, notFiscal = 0, otkaz = 0, blocked = 0;
     for (final j in raw) {
       final t = j['tNakl']?.toString().trim() ?? '';
       tNakls[t.isEmpty ? '(порожньо)' : t] =
           (tNakls[t.isEmpty ? '(порожньо)' : t] ?? 0) + 1;
+      final tr = j['tNaklR']?.toString().trim() ?? '';
+      tNaklRs[tr.isEmpty ? '(порожньо)' : tr] =
+          (tNaklRs[tr.isEmpty ? '(порожньо)' : tr] ?? 0) + 1;
+      if ((j['blok']?.toString().trim() ?? '').isNotEmpty) blocked++;
       if ((j['Receipt']?.toString().trim() ?? '').isNotEmpty) receipt++;
       if ((j['wdservice']?.toString().trim() ?? '').isNotEmpty) delivery++;
       if ((j['NumNaklForReturn']?.toString().trim() ?? '').isNotEmpty) retFor++;
@@ -192,6 +242,8 @@ class CashExpensesService {
     FiscalLog.log('GetNaklKas ОЗНАКИ ${_fmt(from)}–${_fmt(to)}: '
         'накл=${raw.length}; '
         'tNakl: ${tNakls.entries.map((e) => "${e.key}=${e.value}").join(", ")}; '
+        'tNaklR: ${tNaklRs.entries.map((e) => "${e.key}=${e.value}").join(", ")}; '
+        'blok≠∅=$blocked; '
         'Receipt≠∅=$receipt, wdservice≠∅=$delivery, rezerv≠∅=$rezerv, '
         'exInsur=$insur, exReturn=$exRet, exOtkaz=$otkaz, '
         'NumNaklForReturn≠∅=$retFor, flagRRO≠1=$notFiscal; '

@@ -53,6 +53,11 @@ class CashExpense {
     required this.register,
     this.customerPhone,
     required this.items,
+    this.blockReason,
+    this.insurer,
+    this.insuredName,
+    this.orderId,
+    this.unionInvoice,
   });
 
   final String id;
@@ -69,7 +74,26 @@ class CashExpense {
   final String? customerPhone;
   final List<ExpenseItem> items;
 
+  /// `blok` — чек міняти НЕ можна, тут причина (Катерина, 04.09.2026).
+  /// `null` — обмежень немає.
+  final String? blockReason;
+
+  /// `PrimInsur` — страхова компанія.
+  final String? insurer;
+
+  /// `FIOInsur` — ПІБ застрахованої особи.
+  final String? insuredName;
+
+  /// `idorder` — номер інтернет-замовлення.
+  final String? orderId;
+
+  /// `UnionIZ` — основна накладна при обʼєднанні кількох ІЗ.
+  final String? unionInvoice;
+
   bool get isReserve => status == ExpenseStatus.reserved;
+
+  /// Чи заборонено змінювати цей чек (повернення, коригування тощо).
+  bool get isBlocked => (blockReason ?? '').trim().isNotEmpty;
 
   String get statusLabel {
     switch (status) {

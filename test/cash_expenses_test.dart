@@ -9,6 +9,7 @@ import 'package:pharmacy_app/services/cash_expenses_service.dart';
 /// Фікстура — точний фрагмент відповіді тестової каси (01.09), включно з
 /// числами В РЯДКАХ («125.00», «1.000») і рядком «Знижка на чек» без skod.
 void main() {
+  _tNaklRTests();
   const raw = '''
 {"Status":"OK","Nakls":[
 {"dtNakl":"31.08.2026 08:01:19","NumNakl":"2900664544","sum":"125.00",
@@ -183,5 +184,89 @@ void main() {
     final parsed =
         list.map(CashExpensesService.expenseFromJson).whereType<CashExpense>();
     expect(parsed.length, 2);
+  });
+}
+
+void _tNaklRTests() {
+  CashExpense parse(Map<String, dynamic> extra) =>
+      CashExpensesService.expenseFromJson({
+        'dtNakl': '04.09.2026 10:00:00',
+        'NumNakl': '900001',
+        'sum': '100',
+        'flagRRO': '1',
+        'items': [],
+        ...extra,
+      })!;
+
+  group('tNaklR — прямий тип від сервера (Катерина, 04.09)', () {
+    test('усі сім значень мапляться один в один', () {
+      expect(parse({'tNaklR': 'rezerv'}).type, ExpenseType.reserve);
+      expect(parse({'tNaklR': 'reimb'}).type, ExpenseType.reimbursement);
+      expect(parse({'tNaklR': '1303'}).type, ExpenseType.prescription1303);
+      expect(parse({'tNaklR': 'insur'}).type, ExpenseType.insurance);
+      expect(parse({'tNaklR': 'glovo'}).type, ExpenseType.glovo);
+      expect(parse({'tNaklR': 'newpost'}).type, ExpenseType.novaPoshta);
+      expect(parse({'tNaklR': 'return'}).type, ExpenseType.returnOp);
+    });
+
+    test('регістр і пробіли не заважають', () {
+      expect(parse({'tNaklR': ' INSUR '}).type, ExpenseType.insurance);
+    });
+
+    test('перебиває здогадку по непрямих ознаках', () {
+      // Раніше рецепт із номером ставав 1303. Сервер каже «страховий» —
+      // віримо серверу.
+      final e = parse({'tNaklR': 'insur', 'Receipt': '777'});
+      expect(e.type, ExpenseType.insurance);
+    });
+
+    test('порожнє або незнайоме значення — працює старий розбір', () {
+      expect(parse({'tNaklR': '', 'exInsur': '1'}).type,
+          ExpenseType.insurance);
+      expect(parse({'tNaklR': 'щось нове', 'wdservice': 'Glovo'}).type,
+          ExpenseType.glovo);
+      // Поля взагалі немає — стара відповідь сервера.
+      expect(parse({'Receipt': '777'}).type, ExpenseType.prescription1303);
+    });
+  });
+
+  group('blok — заборона змінювати чек', () {
+    test('непорожнє значення блокує й несе причину', () {
+      final e = parse({'blok': 'Чек передано в податкову'});
+      expect(e.isBlocked, isTrue);
+      expect(e.blockReason, 'Чек передано в податкову');
+    });
+
+    test('порожнє або відсутнє — обмежень немає', () {
+      expect(parse({'blok': ''}).isBlocked, isFalse);
+      expect(parse({'blok': '   '}).isBlocked, isFalse);
+      expect(parse({}).isBlocked, isFalse);
+      expect(parse({}).blockReason, isNull);
+    });
+  });
+
+  group('страхові та ІЗ реквізити', () {
+    test('PrimInsur і FIOInsur потрапляють у модель', () {
+      final e = parse({
+        'tNaklR': 'insur',
+        'PrimInsur': 'ТАС',
+        'FIOInsur': 'Іваненко Іван Іванович',
+      });
+      expect(e.insurer, 'ТАС');
+      expect(e.insuredName, 'Іваненко Іван Іванович');
+    });
+
+    test('idorder і UnionIZ теж', () {
+      final e = parse({'idorder': '164435516', 'UnionIZ': '900000'});
+      expect(e.orderId, '164435516');
+      expect(e.unionInvoice, '900000');
+    });
+
+    test('порожні рядки стають null, а не порожнім значенням', () {
+      final e = parse({'PrimInsur': '', 'FIOInsur': '  ', 'idorder': ''});
+      expect(e.insurer, isNull);
+      expect(e.insuredName, isNull);
+      expect(e.orderId, isNull);
+    });
   });
 }

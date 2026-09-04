@@ -60,6 +60,12 @@ class LoyaltyCheckResult {
   final String? errorMsg;
   final List<String> messages;
 
+  /// Анкетні додатки Спарти: `code` → `value` з `addonsList`.
+  ///
+  /// Значення різнотипні: рядок (`"yes"`), число (`children: 1`), список
+  /// (`chronic: ["CHRON1","CHRON2"]`) або `null`, якщо поле не заповнене.
+  final Map<String, dynamic> addons;
+
   LoyaltyCheckResult({
     required this.success,
     this.balanceAfter = 0,
@@ -69,7 +75,16 @@ class LoyaltyCheckResult {
     this.cardNo,
     this.errorMsg,
     this.messages = const [],
+    this.addons = const {},
   });
+
+  /// Анкетне «Получать эл-й чек» — код `cashreceipt`.
+  ///
+  /// Назва оманлива: `yes` означає, що клієнт отримує ЕЛЕКТРОННИЙ чек, тож
+  /// папір НЕ друкуємо; `no` — друкуємо. Розбирає це
+  /// `ReceiptPrintRule.electronicFromAnketa`, а не цей геттер: тут лише сире
+  /// значення, `null` — поля в анкеті немає.
+  String? get cashReceipt => addons['cashreceipt']?.toString();
 }
 
 /// Результат продажу.
@@ -96,6 +111,26 @@ class LoyaltySaleResult {
 /// HTTPS POST JSON API з подвійним SHA256 підписом.
 class LoyaltyService {
   static final _client = http.Client();
+
+  /// `addonsList` → `code` → `value`.
+  ///
+  /// Формат підтверджено листом Андрія (03.09.2026): масив обʼєктів
+  /// `{"code":…, "value":…, "valueAsDictLabel":…}`. Беремо `value`:
+  /// `valueAsDictLabel` — те саме, лише відформатоване для показу (дати там
+  /// перетворені на «Thu Aug 27 11:30:53 CEST 2026»).
+  @visibleForTesting
+  static Map<String, dynamic> addonsFrom(Map<String, dynamic>? person) {
+    final list = person?['addonsList'];
+    if (list is! List) return const {};
+    final out = <String, dynamic>{};
+    for (final e in list) {
+      if (e is! Map) continue;
+      final code = e['code']?.toString() ?? '';
+      if (code.isEmpty) continue;
+      out[code] = e['value'];
+    }
+    return out;
+  }
 
   /// Діагностика: які поля анкети реально повертає Спарта.
   ///
@@ -325,6 +360,7 @@ class LoyaltyService {
       lastName: person?['lastName']?.toString(),
       mobile: person?['mobile']?.toString(),
       messages: _extractMessages(resp),
+      addons: addonsFrom(person),
     );
   }
 
@@ -459,6 +495,7 @@ class LoyaltyService {
       firstName: person['firstName']?.toString(),
       lastName: person['lastName']?.toString(),
       mobile: person['mobile']?.toString(),
+      addons: addonsFrom(person),
     );
   }
 }

@@ -59,11 +59,20 @@ Future<void> main(List<String> args) async {
 
     print('');
     print('→ ReadBonusCard. ПРИКЛАДІТЬ КАРТКУ ДО ТЕРМІНАЛА (до 90 с)…');
+    // Форма запиту за 5.22.1. `prompt` — рядки, які термінал показує на
+    // екрані; без нього він мовчить, бо йому нема чого відобразити. `timeout`
+    // у мілісекундах, за описом типово 60 с.
     final res = await term.send(
       {
         'method': 'ReadBonusCard',
         'step': 0,
-        'params': {'enterPIN': enterPin},
+        'prompt': {
+          'line': [
+            {'text': 'ПЕРЕВІРКА КАРТКИ', 'font': 'B', 'align': 'C'},
+            {'text': 'Прикладіть картку', 'font': 'B', 'align': 'C'},
+          ],
+        },
+        'params': {'enterPIN': enterPin, 'timeout': '60000'},
       },
       timeout: const Duration(seconds: 90),
     );

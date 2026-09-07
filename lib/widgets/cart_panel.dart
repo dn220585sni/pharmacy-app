@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../mixins/checkout_mixin.dart';
+import '../services/auth_service.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
 import '../models/customer_loyalty.dart';
@@ -79,6 +80,9 @@ class CartPanel extends StatefulWidget {
   /// оплати, і без переклику воно лишається від попереднього.
   final ValueChanged<PaymentMethod>? onPaymentMethodChanged;
 
+  /// Хто зараз працює — потрібен для прав. `null` = ще не увійшли.
+  final PharmacistInfo? pharmacist;
+
   const CartPanel({
     super.key,
     required this.cart,
@@ -101,6 +105,7 @@ class CartPanel extends StatefulWidget {
     this.scannedDrugIds = const {},
     this.onItemScanned,
     this.onPaymentMethodChanged,
+    this.pharmacist,
   });
 
   @override
@@ -578,6 +583,38 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   @override
   void onPaymentMethodChanged(PaymentMethod method) {
     widget.onPaymentMethodChanged?.call(method);
+  }
+
+  // ── Резерв ────────────────────────────────────────────────────────────────
+
+  /// Резерви формує лише завідувач аптекою (`flagZA` з `GetUsersRlz`,
+  /// Катерина 07.09.2026).
+  ///
+  /// Поки користувача не визначено — права немає. Це свідомо строгіше за
+  /// «дозволити, поки не знаємо»: помилково дозволений резерв доведеться
+  /// розбирати, помилково заборонений — лише перелогінитись.
+  bool get _canMakeReserve => widget.pharmacist?.isManager ?? false;
+
+  /// Пояснити відмову. Кнопка навмисно лишається натискною: сіра кнопка, що
+  /// мовчить, читається як поламана каса.
+  void _denyReserve() {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Резерви може формувати тільки Завідувач аптекою'),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: Color(0xFFB45309),
+      duration: Duration(seconds: 3),
+    ));
+  }
+
+  /// TODO: сам резерв ще не реалізований — сервісу під нього поки немає.
+  /// Зараз кнопка лише розмежовує права; коли зʼявиться серверна операція,
+  /// вона підставиться сюди й нічого більше міняти не доведеться.
+  void _makeReserve() {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Формування резерву ще не підключено'),
+      behavior: SnackBarBehavior.floating,
+      duration: Duration(seconds: 2),
+    ));
   }
 
   /// Public method — F5 processes payment when already in checkout
@@ -2574,7 +2611,12 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                   child: _SmallButton(
                       icon: Icons.inventory_2_outlined,
                       label: 'Резерв F6',
-                      onTap: () {})),
+                      // Резерви формує лише завідувач аптекою (flagZA з
+                      // GetUsersRlz, Катерина 07.09). Під фармацевтом кнопка
+                      // сіра, але натискна — інакше причина лишиться
+                      // невідомою.
+                      looksDisabled: !_canMakeReserve,
+                      onTap: _canMakeReserve ? _makeReserve : _denyReserve)),
               const SizedBox(width: 7),
               Expanded(
                   child: _SmallButton(
@@ -2913,18 +2955,28 @@ class _SmallButton extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
   final bool enabled;
+
+  /// Виглядати неактивною, але лишатись натискною.
+  ///
+  /// Потрібно там, де відмова має ПОЯСНЕННЯ: «Резерв F6» під фармацевтом
+  /// сірий, та при натисканні каже, що резерви формує лише завідувач.
+  /// Просто вимкнена кнопка мовчить, і касир вирішує, що каса зламалась.
+  final bool looksDisabled;
+
   const _SmallButton({
     required this.icon,
     required this.label,
     this.onTap,
     this.enabled = true, // ignore: unused_element_parameter
+    this.looksDisabled = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isEnabled = enabled && onTap != null;
+    final tappable = enabled && onTap != null;
+    final isEnabled = tappable && !looksDisabled;
     return GestureDetector(
-      onTap: isEnabled ? onTap : null,
+      onTap: tappable ? onTap : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: 8),

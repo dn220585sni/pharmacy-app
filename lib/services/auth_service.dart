@@ -19,10 +19,18 @@ class PharmacistInfo {
   /// Спецкористувач (`typezuser==1`) — має доступ до адмінки «Налаштування каси».
   final bool isSpecial;
 
+  /// Завідувач аптекою — `flagZA` з `GetUsersRlz` (Катерина, 07.09.2026).
+  ///
+  /// Резерви має право формувати ЛИШЕ ЗА. Під фармацевтом кнопка
+  /// «Резерв F6» лишається видимою, але неактивною на вигляд — і пояснює
+  /// причину при натисканні.
+  final bool isManager;
+
   PharmacistInfo({
     required this.user,
     required this.ipn,
     this.isSpecial = false,
+    this.isManager = false,
   });
 }
 
@@ -123,6 +131,15 @@ class AuthService {
     return response.isOk;
   }
 
+  /// Прапорець із Caché: `"1"`, `1`, `true`, `"yes"` — так; решта — ні.
+  ///
+  /// Толерантність тут не зайва: за нашими сервісами прапорці приходять то
+  /// рядком, то числом, а порожній рядок означає «немає», а не «false».
+  static bool _flag(dynamic v) {
+    final s = v?.toString().trim().toLowerCase() ?? '';
+    return s == '1' || s == 'true' || s == 'yes';
+  }
+
   /// Отримати список фармацевтів з паролями та ІПН.
   ///
   /// Caché: `GET ?ServiceName=GetUsersRlz`
@@ -145,15 +162,22 @@ class AuthService {
 
     return usersJson
         .whereType<Map<String, dynamic>>()
-        .map((u) => PharmacistInfo(
-              // `pswd` НЕ читаємо принципово (A6): навіть якщо сервіс його
-              // поверне, пароль не має жити в пам'яті клієнта.
-              user: u['user']?.toString() ?? '',
-              ipn: u['ipn']?.toString() ?? '',
-              isSpecial: u['typezuser']?.toString() == '1',
-            ))
+        .map(userFromJson)
         .toList();
   }
+
+  /// Один користувач із відповіді `GetUsersRlz`.
+  @visibleForTesting
+  static PharmacistInfo userFromJson(Map<String, dynamic> u) => PharmacistInfo(
+        // `pswd` НЕ читаємо принципово (A6): навіть якщо сервіс його
+        // поверне, пароль не має жити в пам'яті клієнта.
+        user: u['user']?.toString() ?? '',
+        ipn: u['ipn']?.toString() ?? '',
+        isSpecial: u['typezuser']?.toString() == '1',
+        // Толерантно до форми: сервіс може віддати "1", 1 або true.
+        // Порожнє чи "0" — не завідувач.
+        isManager: _flag(u['flagZA']),
+      );
 
   // ---------------------------------------------------------------------------
   // Mock

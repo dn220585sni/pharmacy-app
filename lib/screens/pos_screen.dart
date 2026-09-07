@@ -2334,6 +2334,18 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final r = await DrugService.getStockAndPrices('', barcode: barcode);
     if (!mounted) return;
     if (!r.found) {
+      // Юлія 07.09: скан у порожній кошик дав «Товар не знайдено (S26122031)».
+      // «S» + 8 цифр — це форма нашого s-коду, тобто AnalizBarCode, схоже,
+      // розпізнав скан як S-КОД, а ми далі шукаємо товар ПО ШТРИХКОДУ
+      // (`GetSKUprice` s-код не приймає — про це є примітка вище). Тоді
+      // «не знайдено» закономірне.
+      //
+      // Досі вся відповідь AnalizBarCode йшла лише в `debugPrint`, якого в
+      // релізі не видно, тож перевірити гіпотезу не було на чому. Пишемо в
+      // журнал саме на невдачі — на кожному скані це був би шум.
+      FiscalLog.log('СКАН не знайдено: шукали по штрихкоду "$barcode"; '
+          'AnalizBarCode → readBC="${res.readBC}" SKod="${res.skod}" '
+          'UKod="${res.ukod}" wasscanned="${res.wasScanned}"');
       _showScanMessage('Товар не знайдено (${res.readBC})');
       return;
     }
@@ -3179,15 +3191,21 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         typeNakl: _pricingPaymentMethod == PaymentMethod.card ? '5' : '2',
       );
       if (!mounted || mySeq != _pricingRequestSeq) return;
+      // Логуємо КОЖЕН перерахунок, не лише той, що після перемикання.
+      //
+      // Привід: Юлія 07.09 — при першій появі екрана розрахунку готівка
+      // показує суму БЕЗ округлення, і воно зʼявляється лише після ручного
+      // перемикання картка→готівка. За кодом такого бути не мало б:
+      // `_pricingPaymentMethod` стартує з `cash`, отже перший виклик іде з
+      // TypeNakl=2. Але саме ПЕРШОГО виклику в журналі й не було — логувалась
+      // тільки зміна. Тепер видно кожен, разом із тим, що його спричинило.
       final logFor = _pendingPricingLog;
-      if (logFor != null) {
-        _pendingPricingLog = null;
-        FiscalLog.log('GetSumSkid після зміни типу оплати: '
-            'TypeNakl=${logFor == PaymentMethod.card ? "5 (картка)" : "2 (готівка)"} '
-            '→ total=${pricing.total.toStringAsFixed(2)} '
-            'округлення=${pricing.roundingDiscount.toStringAsFixed(2)} '
-            'fromServer=${pricing.fromServer}');
-      }
+      _pendingPricingLog = null;
+      FiscalLog.log('GetSumSkid ${logFor == null ? "(кошик/старт)" : "після зміни типу оплати"}: '
+          'TypeNakl=${_pricingPaymentMethod == PaymentMethod.card ? "5 (картка)" : "2 (готівка)"} '
+          '→ total=${pricing.total.toStringAsFixed(2)} '
+          'округлення=${pricing.roundingDiscount.toStringAsFixed(2)} '
+          'fromServer=${pricing.fromServer}');
       setState(() {
         _serverPricing = pricing;
         if (showLoading) _isLoadingPricing = false;

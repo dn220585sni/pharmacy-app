@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'fiscal_log.dart';
 import 'prro_service.dart';
+import 'sklad_ini.dart';
 
 /// Тека `out` — те, що можна віддати на друк.
 ///
@@ -15,9 +16,16 @@ import 'prro_service.dart';
 /// Складений `<order>_txt.pdf` двома кеглями зʼявиться окремо: він потребує
 /// рендера, `monofont` і `koef_scale`.
 ///
-/// Живе поряд із журналом, у `%ProgramData%\pharmacy_app\out` — спільна тека,
-/// а не профіль користувача: чек має лишитись доступним, навіть якщо його
-/// друкує вже інша зміна. Термін зберігання — 7 днів (Андрій, 03.09.2026).
+/// **Тека — не наша.** Андрій уточнив 04.09.2026: шлях читається з
+/// `sklad.ini`, ключ `[Sklad] → LocalOut` (на тестовій касі `v:\out`), а імʼя
+/// файлу — фіскальний номер чека, поле `ordernum` у відповіді. Туди ж пише
+/// роздріб, і звідти ж він відкриває чек фармацевту на перегляд; якщо файлу
+/// вже немає (минуло понад 7 календарних днів), роздріб тягне чек з
+/// особистого кабінету. Найчастіше цим користуються, щоб зʼясувати, як
+/// виглядав чек по проблемній накладній у момент реєстрації в податковій.
+///
+/// Якщо `sklad.ini` не знайдено — падаємо на `%ProgramData%\pharmacy_app\out`,
+/// щоб чеки бодай десь лишались.
 ///
 /// Усе best-effort: збій запису не має валити продаж, який уже
 /// зафіскалізовано.
@@ -26,6 +34,19 @@ class ReceiptOutbox {
 
   /// Скільки тримаємо файли. Андрій Попов, 03.09.2026.
   static const keep = Duration(days: 7);
+
+  /// Що саме нам можна прибирати.
+  ///
+  /// ⚠️ `LocalOut` — СПІЛЬНА тека роздрібу, і там лежить не лише наше. На
+  /// тестовій касі поруч із чеками знайшлись вивантаження
+  /// `01.09.26_ООО…_AllWorkCash_1.xls` і звіт `15042026_Звіт приоритетні
+  /// фарм заміни….xlsx` віком у пʼять місяців. Чистка «все, старше за 7 днів»
+  /// винесла б їх усі.
+  ///
+  /// Тому прибираємо ЛИШЕ файли, названі фіскальним номером: самі цифри плюс
+  /// наше розширення. Під цей шаблон не підпадає жодне зі знайдених чужих
+  /// імен.
+  static final _ours = RegExp(r'^\d{1,20}\.(pdf|txt|png)$', caseSensitive: false);
 
   /// Підміна теки в тестах.
   @visibleForTesting
@@ -42,6 +63,14 @@ class ReceiptOutbox {
     if (folderOverride != null) return folderOverride;
     if (kIsWeb) return null;
     try {
+      // Спершу — тека роздрібу зі sklad.ini: саме звідти він читає чеки.
+      final localOut = await SkladIni.localOut();
+      if (localOut != null && localOut.trim().isNotEmpty) {
+        final dir = Directory(localOut.trim());
+        if (await dir.exists()) return dir;
+        FiscalLog.log('out: LocalOut="$localOut" недоступна — '
+            'пишемо в ProgramData');
+      }
       final programData = Platform.environment['ProgramData'];
       final base = (programData != null && programData.isNotEmpty)
           ? Directory('$programData${Platform.pathSeparator}pharmacy_app')
@@ -116,6 +145,8 @@ class ReceiptOutbox {
     try {
       await for (final e in dir.list(followLinks: false)) {
         if (e is! File) continue;
+        // Чуже не чіпаємо — див. `_ours`.
+        if (!_ours.hasMatch(e.uri.pathSegments.last)) continue;
         try {
           if ((await e.lastModified()).isBefore(cutoff)) {
             await e.delete();

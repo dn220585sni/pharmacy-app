@@ -794,7 +794,9 @@ class PrroService {
         final result = PrroResult(
           success: true,
           checkId: json['uuid']?.toString(),
-          orderNum: json['ORDERNUM']?.toString() ?? json['order_num']?.toString(),
+          orderNum: json['ORDERNUM']?.toString() ??
+              json['ordernum']?.toString() ??
+              json['order_num']?.toString(),
           orderDate: json['ORDERDATE']?.toString(),
           orderTime: json['ORDERTIME']?.toString(),
           qrData: json['qr_data']?.toString(),
@@ -910,7 +912,9 @@ class PrroService {
         final result = PrroResult(
           success: true,
           checkId: json['uuid']?.toString(),
-          orderNum: json['ORDERNUM']?.toString() ?? json['order_num']?.toString(),
+          orderNum: json['ORDERNUM']?.toString() ??
+              json['ordernum']?.toString() ??
+              json['order_num']?.toString(),
           orderDate: json['ORDERDATE']?.toString(),
           orderTime: json['ORDERTIME']?.toString(),
           qrData: json['qr_data']?.toString(),

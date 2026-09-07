@@ -114,35 +114,70 @@ void main() {
     }
 
     test('прибирає старше за 7 днів, свіже лишає', () async {
-      touch('old.pdf', const Duration(days: 8));
-      touch('edge.pdf', const Duration(days: 7, hours: 1));
-      touch('fresh.pdf', const Duration(days: 6, hours: 23));
-      touch('today.pdf', Duration.zero);
+      touch('900000001.pdf', const Duration(days: 8));
+      touch('900000002.pdf', const Duration(days: 7, hours: 1));
+      touch('900000003.pdf', const Duration(days: 6, hours: 23));
+      touch('900000004.pdf', Duration.zero);
 
       final removed = await ReceiptOutbox.prune();
 
       expect(removed, 2);
-      expect(names(), ['fresh.pdf', 'today.pdf']);
+      expect(names(), ['900000003.pdf', '900000004.pdf']);
     });
 
     test('рівно 7 днів ще лишається — межа не рубає зайвого', () async {
-      touch('boundary.pdf', const Duration(days: 7) - const Duration(minutes: 1));
+      touch('900000005.pdf',
+          const Duration(days: 7) - const Duration(minutes: 1));
       expect(await ReceiptOutbox.prune(), 0);
-      expect(names(), ['boundary.pdf']);
+      expect(names(), ['900000005.pdf']);
     });
 
     test('порожня тека — нуль, без винятку', () async {
       expect(await ReceiptOutbox.prune(), 0);
     });
 
-    test('перший save прибирає старе, наступні вже не ходять по теці', () async {
-      touch('old.pdf', const Duration(days: 30));
-      await ReceiptOutbox.save(_ok(order: 'A1', txt: _b64('перший')));
-      expect(names(), ['A1.txt']);
+    test('ЧУЖІ файли не чіпаємо, хоч би які старі', () async {
+      // LocalOut — спільна тека роздрібу. На тестовій касі поруч із чеками
+      // лежали вивантаження AllWorkCash і звіт віком у пʼять місяців; чистка
+      // «все, старше за 7 днів» винесла б їх усі.
+      touch('01.09.26_ОООАптека-Магнолия_AllWorkCash_1.xls',
+          const Duration(days: 200));
+      touch('15042026_Звіт приоритетні фарм заміни.xlsx',
+          const Duration(days: 150));
+      touch('.~lock.15042026_Звіт.xlsx#', const Duration(days: 150));
+      touch('logInvoice_06012021.log', const Duration(days: 2000));
+      // А наш чек — прибираємо.
+      touch('2900664544.pdf', const Duration(days: 30));
 
-      touch('old2.pdf', const Duration(days: 30));
-      await ReceiptOutbox.save(_ok(order: 'A2', txt: _b64('другий')));
-      expect(names(), ['A1.txt', 'A2.txt', 'old2.pdf']);
+      expect(await ReceiptOutbox.prune(), 1);
+      expect(names(), [
+        '.~lock.15042026_Звіт.xlsx#',
+        '01.09.26_ОООАптека-Магнолия_AllWorkCash_1.xls',
+        '15042026_Звіт приоритетні фарм заміни.xlsx',
+        'logInvoice_06012021.log',
+      ]);
+    });
+
+    test('прибираємо лише наші розширення', () async {
+      touch('2900664544.pdf', const Duration(days: 30));
+      touch('2900664544.txt', const Duration(days: 30));
+      touch('2900664544.png', const Duration(days: 30));
+      // Той самий номер, але чуже розширення — не наше.
+      touch('2900664544.xls', const Duration(days: 30));
+
+      expect(await ReceiptOutbox.prune(), 3);
+      expect(names(), ['2900664544.xls']);
+    });
+
+    test('перший save прибирає старе, наступні вже не ходять по теці', () async {
+      touch('900000010.pdf', const Duration(days: 30));
+      await ReceiptOutbox.save(_ok(order: '800000001', txt: _b64('перший')));
+      expect(names(), ['800000001.txt']);
+
+      touch('900000011.pdf', const Duration(days: 30));
+      await ReceiptOutbox.save(_ok(order: '800000002', txt: _b64('другий')));
+      expect(names(),
+          ['800000001.txt', '800000002.txt', '900000011.pdf']);
     });
   });
 }

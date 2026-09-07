@@ -3,6 +3,17 @@ import 'package:pharmacy_app/services/card_check_service.dart';
 
 void main() {
   group('CardCheckResult', () {
+    test('canPay — жорсткий гейт: є PAN, значить платимо', () {
+      // Катерина, 04.09: «якщо мій метод поверне PAN у відповіді, то
+      // можна платити, інакше — ні, в Result причина чому ні».
+      const ok = CardCheckResult(pan: '4054248631234567', result: 'ок');
+      const no = CardCheckResult(pan: '', result: 'Товар не з переліку');
+      expect(ok.canPay, isTrue);
+      expect(no.canPay, isFalse);
+      // Причину показуємо дослівно — вона належить серверу.
+      expect(no.result, 'Товар не з переліку');
+    });
+
     test('успіх — саме за наявністю PAN, а не за Status', () {
       // Катерина, 03.09: «якщо все ок PAN є у відповіді, інакше пусто і
       // Result пише причину». Status=OK буває й у відмові, тож на нього

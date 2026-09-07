@@ -257,20 +257,33 @@ class CashExpensesService {
   /// може прийти по резерв або з поверненням не на ту касу, де його
   /// обслуговували, тож панель дає обрати будь-яку касу аптеки зі списку
   /// `GetKlient` (Задача 25).
+  /// [poisk] — серверний пошук (`Poisk`, Катерина 07.09).
+  ///
+  /// ⚠️ Поки НЕ використовується екраном, бо невідомо, по яких полях сервер
+  /// шукає. Пошук по товарах нам від сервера й не потрібен на коротких
+  /// періодах: `GetNaklKas` повертає `items` у кожній накладній, і панель
+  /// фільтрує їх локально — миттєво й без навантаження на Caché.
+  ///
+  /// Серверний пошук потрібен для ІНШОГО: коли період широкий (місяць,
+  /// квартал) і тягнути всі накладні з позиціями задорого. Тобто цінність
+  /// `Poisk` — звузити вибірку ДО передачі, а не замінити локальний фільтр.
   static Future<List<CashExpense>> fetch({
     required DateTime from,
     required DateTime to,
     String? kodKli,
+    String? poisk,
   }) async {
     if (ApiConfig.useMock) return const [];
     final register = (kodKli == null || kodKli.trim().isEmpty)
         ? ApiConfig.ekkKodKli
         : kodKli.trim();
+    final query = poisk?.trim() ?? '';
     try {
       final r = await CacheApiClient().call('GetNaklKas', params: {
         'dateFrom': _fmt(from),
         'dateTo': _fmt(to),
         'KodKli': register,
+        if (query.isNotEmpty) 'Poisk': query,
       });
       if (!r.isOk) {
         FiscalLog.log('GetNaklKas FAIL (${_fmt(from)}–${_fmt(to)}, '

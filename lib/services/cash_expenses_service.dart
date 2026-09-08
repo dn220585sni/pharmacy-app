@@ -189,6 +189,7 @@ class CashExpensesService {
       insuredName: _orNull(j['FIOInsur']),
       orderId: _orNull(j['idorder']),
       unionInvoice: _orNull(j['UnionIZ']),
+      fiscalId: _orNull(j['FNRRO']),
     );
   }
 

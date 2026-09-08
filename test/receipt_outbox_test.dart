@@ -200,4 +200,39 @@ void main() {
       ]);
     });
   });
+
+  group('findReceiptPdf', () {
+    test('фіскальний id має пріоритет над номером накладної', () async {
+      File('${tmp.path}${Platform.pathSeparator}4HzVgFpPpv8.pdf')
+          .writeAsStringSync('x');
+      File('${tmp.path}${Platform.pathSeparator}2900664544.pdf')
+          .writeAsStringSync('x');
+      final path =
+          await ReceiptOutbox.findReceiptPdf(['4HzVgFpPpv8', '2900664544']);
+      expect(path, endsWith('4HzVgFpPpv8.pdf'));
+    });
+
+    test('падаємо на NumNakl, якщо за фіскальним нічого немає', () async {
+      File('${tmp.path}${Platform.pathSeparator}2900664544.pdf')
+          .writeAsStringSync('x');
+      final path =
+          await ReceiptOutbox.findReceiptPdf(['4HzVgFpPpv8', '2900664544']);
+      expect(path, endsWith('2900664544.pdf'));
+    });
+
+    test('PDF від ПРРО важливіший за наш складений _txt.pdf', () async {
+      File('${tmp.path}${Platform.pathSeparator}777_txt.pdf')
+          .writeAsStringSync('x');
+      expect(await ReceiptOutbox.findReceiptPdf(['777']), endsWith('777_txt.pdf'));
+      // Зʼявився офіційний — беремо його.
+      File('${tmp.path}${Platform.pathSeparator}777.pdf')
+          .writeAsStringSync('x');
+      expect(await ReceiptOutbox.findReceiptPdf(['777']), endsWith('777.pdf'));
+    });
+
+    test('нічого немає — null; порожні id пропускаємо', () async {
+      expect(await ReceiptOutbox.findReceiptPdf(['777']), isNull);
+      expect(await ReceiptOutbox.findReceiptPdf([null, '', '  ']), isNull);
+    });
+  });
 }

@@ -95,6 +95,42 @@ class ReceiptOutbox {
     return safe.isEmpty ? 'check' : safe;
   }
 
+  /// Знайти PDF раніше проведеного чека в теці `out`.
+  ///
+  /// Андрій описав саме цей сценарій (04.09): щоб подивитись, як виглядав чек
+  /// по проблемній накладній у момент реєстрації в податковій, роздріб
+  /// спершу шукає файл тут, а якщо його вже прибрали (понад 7 днів) — тягне
+  /// з особистого кабінету.
+  ///
+  /// ⚠️ Проблема ідентифікатора. Файли названі ФІСКАЛЬНИМ номером
+  /// (`ordernum`), а `GetNaklKas` віддає `NumNakl` — номер накладної, інше
+  /// число — і `FNRRO`. Чи є `FNRRO` тим самим `ordernum`, ще не доведено,
+  /// тож пробуємо обидва й пишемо в журнал, що спрацювало. Живі дані
+  /// закриють це питання швидше за листування.
+  ///
+  /// Порядок розширень свідомий: спершу `<id>.pdf` від ПРРО (його верстка
+  /// офіційна), потім наш складений `<id>_txt.pdf`.
+  static Future<String?> findReceiptPdf(Iterable<String?> ids) async {
+    final dir = await _folder();
+    if (dir == null) return null;
+    final tried = <String>[];
+    for (final raw in ids) {
+      final id = raw?.trim() ?? '';
+      if (id.isEmpty) continue;
+      for (final name in ['$id.pdf', '${id}_txt.pdf']) {
+        tried.add(name);
+        final f = File('${dir.path}${Platform.pathSeparator}$name');
+        if (await f.exists()) {
+          FiscalLog.log('out: чек знайдено — $name');
+          return f.path;
+        }
+      }
+    }
+    FiscalLog.log('out: чека немає в ${dir.path} '
+        '(шукали: ${tried.join(", ")}) — імовірно, минуло понад 7 днів');
+    return null;
+  }
+
   /// Зібрати `<order>_txt.pdf` із того, що прислав ПРРО.
   ///
   /// `text_print` і `qr` приходять у base64; декодуємо й віддаємо в рендер.

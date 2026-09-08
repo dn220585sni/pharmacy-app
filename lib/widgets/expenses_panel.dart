@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import '../models/money.dart';
@@ -7,6 +8,8 @@ import '../models/cash_register.dart';
 import '../data/mock_expenses.dart';
 import '../services/api_config.dart';
 import '../services/cash_expenses_service.dart';
+import '../services/receipt_outbox.dart';
+import '../services/receipt_printer.dart';
 import '../services/registers_service.dart';
 import 'hover_icon_button.dart';
 import 'callback_request_dialog.dart';
@@ -885,6 +888,55 @@ class ExpensesPanelState extends State<ExpensesPanel> {
     );
   }
 
+  // ── Меню «Друк ▾» ─────────────────────────────────────────────────────────
+
+  /// Позиції меню «Друк». `_PopupActionButton` віддає ІНДЕКС, а не назву,
+  /// тож тримаємо їх названими поруч зі списком: інакше додана колись
+  /// посередині позиція мовчки зсуне всі дії.
+  static const _printReceipt = 0;      // Надрукувати чек
+  static const _printInvoice = 1;      // Надрукувати т. накладну
+  static const _openReceiptPdf = 2;    // Відкрити чек PDF (ПРРО)
+  // 3 — email, 4 — термінальний чек, 5 — чек з лікомату: ще не реалізовані.
+
+  /// Ідентифікатори, під якими чек може лежати в теці `out`.
+  /// Фіскальний іде першим: саме ним названо файли.
+  List<String?> _receiptIds(CashExpense e) => [e.fiscalId, e.receiptNumber];
+
+  Future<void> _onPrintAction(int index, CashExpense expense) async {
+    if (index != _printReceipt && index != _openReceiptPdf) {
+      _toast(index == _printInvoice
+          ? 'Друк товарної накладної ще не підключено'
+          : 'Ця дія ще не підключена');
+      return;
+    }
+    final path = await ReceiptOutbox.findReceiptPdf(_receiptIds(expense));
+    if (!mounted) return;
+    if (path == null) {
+      // Андрій: якщо файла вже немає, роздріб тягне чек з особистого
+      // кабінету. Ми цього поки не вміємо, тож кажемо як є — мовчазна
+      // відсутність виглядала б як поламана кнопка.
+      _toast('Чек не знайдено у теці out — імовірно, минуло понад 7 днів');
+      return;
+    }
+    final ok = index == _printReceipt
+        ? await ReceiptPrinter.printPdf(
+            await File(path).readAsBytes(),
+            name: 'Чек ${expense.receiptNumber}')
+        : await ReceiptPrinter.openPdf(path);
+    if (!mounted || ok) return;
+    _toast(index == _printReceipt
+        ? 'Не вдалося надрукувати — подробиці у журналі'
+        : 'Не вдалося відкрити PDF — подробиці у журналі');
+  }
+
+  void _toast(String text) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(text),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFFB45309),
+        ),
+      );
+
   Widget _buildDetailFooter(CashExpense expense) {
     final formattedAmount =
         expense.amount.asMoney;
@@ -1057,9 +1109,7 @@ class ExpensesPanelState extends State<ExpensesPanel> {
                     label: 'Чек з лікомату',
                   ),
                 ],
-                onSelected: (_) {
-                  // TODO: handle print action
-                },
+                onSelected: (i) => _onPrintAction(i, expense),
               ),
               const SizedBox(width: 6),
               // ⋮ Ще

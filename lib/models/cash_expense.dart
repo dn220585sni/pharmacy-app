@@ -58,6 +58,7 @@ class CashExpense {
     this.insuredName,
     this.orderId,
     this.unionInvoice,
+    this.fiscalId,
   });
 
   final String id;
@@ -95,6 +96,14 @@ class CashExpense {
 
   /// `UnionIZ` — основна накладна при обʼєднанні кількох ІЗ.
   final String? unionInvoice;
+
+  /// `FNRRO` — фіскальна ознака чека («4HzVgFpPpv8»).
+  ///
+  /// Потрібна, щоб знайти чек у теці `out`: файли там названі ФІСКАЛЬНИМ
+  /// номером (`ordernum`), а `NumNakl` — це номер накладної, інше число.
+  /// Чи збігається `FNRRO` з `ordernum`, ще не доведено — пошук пробує обидва
+  /// й пише в журнал, що спрацювало.
+  final String? fiscalId;
 
   bool get isReserve => status == ExpenseStatus.reserved;
 

@@ -307,6 +307,14 @@ class CashExpensesService {
         FiscalLog.log('GetNaklKas: ${raw.length - parsed.length} з '
             '${raw.length} накладних не розібрано (немає дати або номера)');
       }
+      // Порожню відповідь теж фіксуємо. 08.09 панель не показала чеків, а в
+      // журналі за день не було ЖОДНОГО рядка про GetNaklKas — бо маркери
+      // писались лише за непорожньої вибірки. «Порожньо» й «не викликалось»
+      // виглядали однаково, і причину не було з чого встановити.
+      if (raw.isEmpty) {
+        FiscalLog.log('GetNaklKas ${_fmt(from)}–${_fmt(to)} KodKli=$register: '
+            'накладних НЕМАЄ (сервіс відповів OK)');
+      }
       _logMarkers(raw, parsed, from, to);
       debugPrint('GetNaklKas ${_fmt(from)}–${_fmt(to)} KodKli=$register: '
           '${parsed.length} накладних');

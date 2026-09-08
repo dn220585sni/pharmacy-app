@@ -15,14 +15,43 @@ import 'prro_service.dart';
 ///     чек кеглем 5;
 ///   • шрифт із реєстру (`monofont`, типово Arial). Андрій: Arial обраний
 ///     свідомо саме для кегля 5 — читабельність важливіша за моноширинність;
-///   • QR лягає на полотно 350×350, помножене на `1 + koef_scale`.
+///   • QR: `koef_scale` масштабує полотно растра, тобто роздільність. Розмір
+///     на папері беремо від ширини стрічки — узяті в PDF-пунктах числа опису
+///     давали QR на дві третини аркуша (видно на живому чеку 08.09).
+///
+/// ⚠️ Дослівні числа опису (кеглі 5/8, полотно 350) — з іншої системи
+/// координат, не з PDF-пунктів. Зберігаємо їхні СПІВВІДНОШЕННЯ, а розміри
+/// рахуємо від ширини стрічки.
 class ReceiptPdf {
-  /// Базовий бік полотна QR у пунктах, до масштабування.
-  static const qrBaseSide = 350.0;
 
-  /// Кеглі за описом.
+  /// Кеглі за описом Андрія.
+  ///
+  /// ⚠️ Взяті дослівно, вони не працюють: на першому живому чеку (08.09)
+  /// кегль 5 у пунктах PDF дав текст на ~третину ширини стрічки 80 мм, а
+  /// решта лишилась порожньою. Числа Андрія — з ЙОГО системи координат, не з
+  /// PDF-пунктів. Тому зберігаємо їх СПІВВІДНОШЕННЯ (8/5 = 1.6×), а сам
+  /// розмір рахуємо від ширини стрічки — див. [fontSizeFor].
   static const fontSmall = 5.0;
   static const fontLarge = 8.0;
+
+  /// У скільки разів блок лояльності більший за основний текст.
+  static const largeRatio = fontLarge / fontSmall;
+
+  /// Кегль, за якого [chars] символів заповнять [widthPt] пунктів.
+  ///
+  /// Множник 0.6 — типове відношення ширини гліфа до кегля для моноширинних
+  /// і напівширокі цифри Arial. Точність тут не критична: важливо, щоб чек
+  /// заповнював стрічку, а не тулився в кутку.
+  ///
+  /// Ширину беремо з `print_width`, бо саме стільки символів у рядку віддає
+  /// ПРРО (на тестовій касі — 32).
+  @visibleForTesting
+  static double fontSizeFor(double widthPt, int chars) {
+    if (chars <= 0) return fontSmall;
+    final size = widthPt / (chars * 0.6);
+    // Межі здорового глузду: нижче 4 не читається, вище 14 чек рветься.
+    return size.clamp(4.0, 14.0);
+  }
 
   /// Розділити текст чека на дві частини за рядком лояльності.
   ///
@@ -37,12 +66,24 @@ class ReceiptPdf {
   ///
   /// Сам рядок-маркер лишається у ВЕЛИКІЙ частині: він відкриває блок
   /// лояльності, а не завершує попередній.
+  static const _loyaltyRoot = 'ЛОЯЛЬНОСТ';
+
+  /// Прибрати те, для чого у шрифті немає гліфів.
+  ///
+  /// ПРРО віддає текст із `CRLF`. Ділили ми по `\n`, а `\r` лишався в кінці
+  /// кожного рядка — і Arial малював його чорним прямокутником «немає гліфа».
+  /// На першому ж живому чеку (08.09) такий квадрат стояв у кінці КОЖНОГО
+  /// рядка. Заразом прибираємо решту керівних символів, окрім самого переносу.
+  @visibleForTesting
+  static String stripControl(String text) =>
+      text.replaceAll(RegExp(r'[\x00-\x09\x0B-\x1F\x7F]'), '');
+
   @visibleForTesting
   static (String head, String tail) splitAtLoyalty(String text) {
-    final lines = text.split('\n');
+    final lines = stripControl(text).split('\n');
     final at = lines.indexWhere(
-        (l) => l.toUpperCase().contains('ЛОЯЛЬНОСТ'));
-    if (at < 0) return (text, '');
+        (l) => l.toUpperCase().contains(_loyaltyRoot));
+    if (at < 0) return (stripControl(text), '');
     return (lines.take(at).join('\n'), lines.skip(at).join('\n'));
   }
 
@@ -118,8 +159,21 @@ class ReceiptPdf {
 
     final font = await _loadFont(fontName ?? PrroConfig.monoFont);
     final scale = qrScale ?? PrroConfig.qrScale;
-    final side = qrBaseSide * (1 + scale);
     final (head, tail) = splitAtLoyalty(text);
+
+    const margin = 4.0;
+    final usableWidth = PdfPageFormat.roll80.width - margin * 2;
+
+    // Кегль — від ширини стрічки, а не з константи: див. [fontSizeFor].
+    final small = fontSizeFor(usableWidth, PrroConfig.printWidth);
+    final large = small * largeRatio;
+
+    // QR: `koef_scale` збільшує ПОЛОТНО растра (Андрій, 04.09), тобто впливає
+    // на роздільність, а не на розмір на папері. Фізичний бік беремо від
+    // ширини стрічки — і обмежуємо нею. Без цього виходило 612 пунктів
+    // (≈216 мм, формат A4) на 80-міліметровому чеку: QR займав дві третини
+    // аркуша, що й було видно на першому живому чеку.
+    final side = (usableWidth * (0.5 + scale * 0.2)).clamp(40.0, usableWidth);
 
     final doc = pw.Document();
     pw.TextStyle style(double size) => pw.TextStyle(
@@ -134,12 +188,12 @@ class ReceiptPdf {
         // фіксована сторінкою: чек, що не влазить, краще обрізати видимо, ніж
         // мовчки згорнути.
         pageFormat: PdfPageFormat.roll80,
-        margin: const pw.EdgeInsets.all(4),
+        margin: const pw.EdgeInsets.all(margin),
         build: (_) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            if (head.isNotEmpty) pw.Text(head, style: style(fontSmall)),
-            if (tail.isNotEmpty) pw.Text(tail, style: style(fontLarge)),
+            if (head.isNotEmpty) pw.Text(head, style: style(small)),
+            if (tail.isNotEmpty) pw.Text(tail, style: style(large)),
             if (qrPng != null) ...[
               pw.SizedBox(height: 6),
               pw.Center(

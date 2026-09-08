@@ -109,13 +109,20 @@ class ExpensesPanelState extends State<ExpensesPanel> {
       final today = DateTime.now();
       _dateFrom = today;
       _dateTo = today;
-      _load();
-      _loadRegisters();
+      // Накладні спершу, список кас — ПІСЛЯ них, а не паралельно.
+      //
+      // 08.09 `GetKlient` почав валитись помилкою всередині сервісу
+      // (`<UNDEFINED>ServiceNewRlz+1276^KabServiceRlz *prim`), і того ж дня
+      // панель перестала показувати чеки. Прямого звʼязку не доведено, але
+      // обидва запити йшли одночасно однією CSP-сесією, а помилка рівня
+      // <UNDEFINED> цілком може її зіпсувати. Список кас — прикраса, накладні
+      // — суть екрана, тож суть іде першою й наодинці.
+      _load().whenComplete(_loadRegisters);
     }
   }
 
-  /// Список кас аптеки — разово, паралельно з накладними. Збій не заважає
-  /// роботі: без списку лишається своя каса.
+  /// Список кас аптеки — разово. Збій не заважає роботі: без списку лишається
+  /// своя каса, а випадайка просто не показується.
   Future<void> _loadRegisters() async {
     final list = await RegistersService.pharmacyRegisters();
     if (!mounted || list.isEmpty) return;

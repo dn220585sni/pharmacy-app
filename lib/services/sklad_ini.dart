@@ -86,7 +86,16 @@ class SkladIni {
         final f = File(p);
         if (!await f.exists()) continue;
         _cachedPath = p;
-        _cachedLocalOut = value(await f.readAsString(), 'Sklad', 'LocalOut');
+        // ⚠️ Файл НЕ в UTF-8. 07.09 читання падало з
+        // «Failed to decode data using encoding 'utf-8'», і ми мовчки писали
+        // чеки в ProgramData замість LocalOut. Кирилиця там у cp1251, але нам
+        // потрібні лише ключі й шляхи — вони ASCII, тож latin1 їх передає
+        // байт у байт і, головне, НІКОЛИ не кидає виняток. Кириличні коментарі
+        // перетворяться на мотлох, і це нормально: ми їх не читаємо.
+        _cachedLocalOut = value(
+            latin1.decode(await f.readAsBytes(), allowInvalid: true),
+            'Sklad',
+            'LocalOut');
         FiscalLog.log('sklad.ini: $p → LocalOut='
             '${_cachedLocalOut ?? "(ключа немає)"}');
         return _cachedLocalOut;

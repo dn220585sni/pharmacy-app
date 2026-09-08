@@ -37,6 +37,12 @@ void main() {
     if (tmp.existsSync()) tmp.deleteSync(recursive: true);
   });
 
+  void touch2(String name, Duration age) {
+    final f = File('${tmp.path}${Platform.pathSeparator}$name')
+      ..writeAsStringSync('x');
+    f.setLastModifiedSync(DateTime.now().subtract(age));
+  }
+
   List<String> names() => tmp
       .listSync()
       .whereType<File>()
@@ -233,6 +239,33 @@ void main() {
     test('нічого немає — null; порожні id пропускаємо', () async {
       expect(await ReceiptOutbox.findReceiptPdf(['777']), isNull);
       expect(await ReceiptOutbox.findReceiptPdf([null, '', '  ']), isNull);
+    });
+  });
+
+  group('реальні імена фіскальних чеків', () {
+    test('ordernum — base62, а не число: прибираємо й такі', () async {
+      // З журналу 07.09: наші чеки лягли як rHUYBrSk4W8 і Bznn1b6HCAU.
+      // Перший шаблон вимагав самих цифр — не прибиралося б нічого.
+      touch2('rHUYBrSk4W8.pdf', const Duration(days: 30));
+      touch2('rHUYBrSk4W8.txt', const Duration(days: 30));
+      touch2('rHUYBrSk4W8.png', const Duration(days: 30));
+      touch2('rHUYBrSk4W8_txt.pdf', const Duration(days: 30));
+      touch2('Bznn1b6HCAU.pdf', const Duration(days: 30));
+
+      expect(await ReceiptOutbox.prune(), 5);
+      expect(names(), isEmpty);
+    });
+
+    test('чужі імена не підпадають і під розширений шаблон', () async {
+      touch2('01.09.26_ОООАптека_AllWorkCash_1.xls', const Duration(days: 200));
+      touch2('logInvoice_06012021.log', const Duration(days: 2000));
+      // Підкреслення всередині — не наше (наше лише в суфіксі `_txt`).
+      touch2('report_2026.pdf', const Duration(days: 200));
+      // Крапка всередині імені — теж не наше.
+      touch2('01.09.26.pdf', const Duration(days: 200));
+
+      expect(await ReceiptOutbox.prune(), 0);
+      expect(names(), hasLength(4));
     });
   });
 }

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pharmacy_app/services/sklad_ini.dart';
 
@@ -84,6 +86,21 @@ LocalOut=V:\skladlocal\
     test('інший неймспейс підставляється в шлях', () {
       expect(SkladIni.candidates(nameSpace: 'FARM').first,
           r'D:\CacheSys\Mgr\FARM\sklad.ini');
+    });
+  });
+
+  group('кодування файлу', () {
+    test('cp1251 не валить читання — саме на цьому воно падало 07.09', () {
+      // Реальна помилка: «Failed to decode data using encoding utf-8».
+      // Кирилиця в коментарях перетворюється на мотлох, але ключ і шлях —
+      // ASCII, і вони доходять цілими.
+      final bytes = <int>[
+        ...'[Sklad]\n'.codeUnits,
+        ...';'.codeUnits, 0xCA, 0xEE, 0xEC, 0xE5, 0xED, 0xF2, // «Комент» cp1251
+        ...'\nLocalOut=v:\\out\n'.codeUnits,
+      ];
+      final text = latin1.decode(bytes, allowInvalid: true);
+      expect(SkladIni.value(text, 'Sklad', 'LocalOut'), r'v:\out');
     });
   });
 }

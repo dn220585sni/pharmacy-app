@@ -2464,6 +2464,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           cardNo: result.cardNo ?? cardNo,
           firstName: result.firstName,
           lastName: result.lastName,
+          cashReceipt: result.cashReceipt,
         );
         _isLoadingLoyalty = false;
       });
@@ -3384,6 +3385,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           cardNo: result.cardNo,
           firstName: result.firstName,
           lastName: result.lastName,
+          cashReceipt: result.cashReceipt,
         );
         _isLoadingLoyalty = false;
       });

@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'fiscal_log.dart';
 import 'prro_service.dart';
+import 'receipt_pdf.dart';
 import 'sklad_ini.dart';
 
 /// Тека `out` — те, що можна віддати на друк.
@@ -13,8 +14,8 @@ import 'sklad_ini.dart';
 /// Складається з готового, що вже прийшло від ПРРО у відповіді на `/check/sale`:
 /// `<order>.pdf` (`pdf`), `<order>.txt` (`text_print`) і `<order>.png`
 /// (`qr` — ПРРО віддає QR готовим зображенням, ми його не малюємо).
-/// Складений `<order>_txt.pdf` двома кеглями зʼявиться окремо: він потребує
-/// рендера, `monofont` і `koef_scale`.
+/// Плюс `<order>_txt.pdf` — наш складений текстовий чек двома кеглями
+/// (`ReceiptPdf`): єдиний із чотирьох, який ми рендеримо самі.
 ///
 /// **Тека — не наша.** Андрій уточнив 04.09.2026: шлях читається з
 /// `sklad.ini`, ключ `[Sklad] → LocalOut` (на тестовій касі `v:\out`), а імʼя
@@ -46,7 +47,8 @@ class ReceiptOutbox {
   /// Тому прибираємо ЛИШЕ файли, названі фіскальним номером: самі цифри плюс
   /// наше розширення. Під цей шаблон не підпадає жодне зі знайдених чужих
   /// імен.
-  static final _ours = RegExp(r'^\d{1,20}\.(pdf|txt|png)$', caseSensitive: false);
+  static final _ours =
+      RegExp(r'^\d{1,20}(_txt)?\.(pdf|txt|png)$', caseSensitive: false);
 
   /// Підміна теки в тестах.
   @visibleForTesting
@@ -93,6 +95,40 @@ class ReceiptOutbox {
     return safe.isEmpty ? 'check' : safe;
   }
 
+  /// Зібрати `<order>_txt.pdf` із того, що прислав ПРРО.
+  ///
+  /// `text_print` і `qr` приходять у base64; декодуємо й віддаємо в рендер.
+  /// `null` — друкувати нема чого (відновлений чек A1 приходить без обох).
+  static Future<Uint8List?> buildTextPdf(PrroResult result) async {
+    String? decodeText(String? b64) {
+      if (b64 == null || b64.trim().isEmpty) return null;
+      try {
+        return utf8.decode(base64Decode(b64.trim()), allowMalformed: true);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    Uint8List? decodeBytes(String? b64) {
+      if (b64 == null || b64.trim().isEmpty) return null;
+      try {
+        return base64Decode(b64.trim());
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final text = decodeText(result.textPrint) ?? '';
+    final qr = decodeBytes(result.qrBase64);
+    if (text.trim().isEmpty && qr == null) return null;
+    try {
+      return await ReceiptPdf.build(text: text, qrPng: qr);
+    } catch (e) {
+      FiscalLog.log('out: рендер _txt.pdf не вдався: $e');
+      return null;
+    }
+  }
+
   /// Викласти чек у `out`. Повертає шляхи записаних файлів.
   ///
   /// Порожні або відсутні частини просто пропускаємо: відновлений чек (A1)
@@ -120,6 +156,20 @@ class ReceiptOutbox {
     await put('pdf', result.pdfBase64);
     await put('txt', result.textPrint);
     await put('png', result.qrBase64);
+
+    // `<order>_txt.pdf` — наш складений текстовий чек двома кеглями. На
+    // відміну від трьох файлів вище, він не приходить готовим: ми його
+    // рендеримо з `text_print` і QR.
+    final txtPdf = await buildTextPdf(result);
+    if (txtPdf != null) {
+      try {
+        final f = File('${dir.path}${Platform.pathSeparator}${base}_txt.pdf');
+        await f.writeAsBytes(txtPdf, flush: true);
+        written.add(f.path);
+      } catch (e) {
+        FiscalLog.log('out: ${base}_txt.pdf не записано: $e');
+      }
+    }
 
     if (written.isEmpty) {
       FiscalLog.log('out: чек $base — нічого викладати '

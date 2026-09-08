@@ -99,9 +99,23 @@ void main() {
     test('той самий номер перезаписує, а не множить файли', () async {
       await ReceiptOutbox.save(_ok(txt: _b64('перший')));
       await ReceiptOutbox.save(_ok(txt: _b64('другий')));
-      expect(names(), ['12345.txt']);
+      expect(names(), ['12345.txt', '12345_txt.pdf']);
       final f = File('${tmp.path}${Platform.pathSeparator}12345.txt');
       expect(utf8.decode(f.readAsBytesSync()), 'другий');
+    });
+
+    test('із text_print складається ще й <order>_txt.pdf', () async {
+      // Єдиний із чотирьох файлів, який ми рендеримо самі, а не отримуємо
+      // готовим від ПРРО.
+      await ReceiptOutbox.save(_ok(txt: _b64('ФIСКАЛЬНИЙ ЧЕК\nТОВАР 100.00')));
+      final pdf = File('${tmp.path}${Platform.pathSeparator}12345_txt.pdf');
+      expect(pdf.existsSync(), isTrue);
+      expect(String.fromCharCodes(pdf.readAsBytesSync().take(5)), '%PDF-');
+    });
+
+    test('без text_print і QR складати нічого', () async {
+      await ReceiptOutbox.save(_ok(pdf: _b64('%PDF-від-ПРРО')));
+      expect(names(), ['12345.pdf']);
     });
   });
 
@@ -162,22 +176,28 @@ void main() {
       touch('2900664544.pdf', const Duration(days: 30));
       touch('2900664544.txt', const Duration(days: 30));
       touch('2900664544.png', const Duration(days: 30));
+      touch('2900664544_txt.pdf', const Duration(days: 30));
       // Той самий номер, але чуже розширення — не наше.
       touch('2900664544.xls', const Duration(days: 30));
 
-      expect(await ReceiptOutbox.prune(), 3);
+      expect(await ReceiptOutbox.prune(), 4);
       expect(names(), ['2900664544.xls']);
     });
 
     test('перший save прибирає старе, наступні вже не ходять по теці', () async {
       touch('900000010.pdf', const Duration(days: 30));
       await ReceiptOutbox.save(_ok(order: '800000001', txt: _b64('перший')));
-      expect(names(), ['800000001.txt']);
+      expect(names(), ['800000001.txt', '800000001_txt.pdf']);
 
       touch('900000011.pdf', const Duration(days: 30));
       await ReceiptOutbox.save(_ok(order: '800000002', txt: _b64('другий')));
-      expect(names(),
-          ['800000001.txt', '800000002.txt', '900000011.pdf']);
+      expect(names(), [
+        '800000001.txt',
+        '800000001_txt.pdf',
+        '800000002.txt',
+        '800000002_txt.pdf',
+        '900000011.pdf',
+      ]);
     });
   });
 }

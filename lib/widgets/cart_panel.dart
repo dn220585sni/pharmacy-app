@@ -22,6 +22,8 @@ import '../services/prro_queue.dart';
 import '../services/prro_service.dart';
 import '../services/receipt_archive.dart';
 import '../services/receipt_outbox.dart';
+import '../services/receipt_print_rule.dart';
+import '../services/receipt_printer.dart';
 import '../services/sale_journal.dart';
 import '../services/session_service.dart';
 import '../services/sparta_service.dart';
@@ -585,6 +587,39 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     widget.onPaymentMethodChanged?.call(method);
   }
 
+  // ── Друк чека ─────────────────────────────────────────────────────────────
+
+  /// Надрукувати чек, якщо цього вимагає правило.
+  ///
+  /// Рішення — `ReceiptPrintRule` (див. його докblock). Коротко: друк це
+  /// ВИНЯТОК, 62–64% чеків не друкуються. Тому мовчазне «не надрукувалось»
+  /// тут нормальний стан, а не збій, і повідомляти про нього фармацевту не
+  /// треба.
+  ///
+  /// ⚠️ Ознака ІЗ поки завжди `false`: продаж із кошика — це не інтернет-
+  /// замовлення, а видача ІЗ іде іншим шляхом. Коли той шлях підключать до
+  /// друку, сюди треба передати справжнє значення, інакше чеки по ІЗ
+  /// друкуватимуться зайвий раз.
+  Future<void> _printIfNeeded(PrroResult result) async {
+    final decision = ReceiptPrintRule.decide(
+      mandatoryProgram: widget.isPakunokMode || _selectedSocialProject != null,
+      internetOrder: false,
+      customerGetsElectronic:
+          ReceiptPrintRule.electronicFromAnketa(widget.loyalty?.cashReceipt),
+    );
+    FiscalLog.log('Друк чека ${result.orderNum ?? "?"}: '
+        '${decision.shouldPrint ? "ДРУКУЄМО" : "електронний"} — '
+        '${decision.reason.label}');
+    if (!decision.shouldPrint) return;
+
+    final pdf = await ReceiptOutbox.buildTextPdf(result);
+    if (pdf == null) {
+      FiscalLog.log('Друк чека ${result.orderNum ?? "?"}: нічого рендерити');
+      return;
+    }
+    await ReceiptPrinter.printPdf(pdf, name: 'Чек ${result.orderNum ?? ""}');
+  }
+
   // ── Резерв ────────────────────────────────────────────────────────────────
 
   /// Резерви формує лише завідувач аптекою (`flagZA` з `GetUsersRlz`,
@@ -1067,9 +1102,12 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       // Зберегти PDF чека в архів (папка receipts) — той самий контент, що у
       // вікні. Best-effort, у фоні, не блокує показ.
       unawaited(ReceiptArchive.savePdf(result));
-      // Тека `out`: pdf + txt + QR-png під номером чека, звідки чек
-      // можна дістати й роздрукувати руками. Живе 7 днів.
+      // Тека `out`: pdf + txt + QR-png + складений _txt.pdf під номером чека,
+      // звідки чек можна дістати й роздрукувати руками. Живе 7 днів.
       unawaited(ReceiptOutbox.save(result));
+      // Друк — за правилом (анкета / програмний чек / ІЗ). У фоні: чек уже
+      // зафіскалізовано, і збій принтера не має відкочувати продаж.
+      unawaited(_printIfNeeded(result));
       if (!mounted) return true;
       if (result.recovered) {
         // A1: чек знайдено в зміні після обриву — вікна з QR/PDF немає (X-звіт

@@ -10,6 +10,8 @@ import '../data/mock_drugs.dart';
 import '../models/payment_method.dart';
 import '../models/social_project.dart';
 import '../models/stop_price_action.dart';
+import '../services/prro_service.dart';
+import '../services/receipt_printer.dart';
 import '../services/auth_service.dart';
 import '../services/cart_price_service.dart';
 import '../services/drug_service.dart';
@@ -1028,7 +1030,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                     style: TextStyle(fontSize: 13)),
                 onTap: () => Navigator.of(ctx).pop('open_shift'),
               )
-            else
+            else ...[
+              // X-звіт — проміжний стан зміни, БЕЗ її закриття. Відкривається
+              // на перегляд, не друкується (Андрій, 03.09).
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.receipt_long_outlined,
+                    size: 20, color: Color(0xFF1E7DC8)),
+                title: const Text('X-звіт (перегляд)',
+                    style: TextStyle(fontSize: 13)),
+                onTap: () => Navigator.of(ctx).pop('x_report'),
+              ),
               ListTile(
                 dense: true,
                 leading: const Icon(Icons.lock_clock_rounded,
@@ -1037,6 +1049,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                     style: TextStyle(fontSize: 13, color: Color(0xFFB91C1C))),
                 onTap: () => Navigator.of(ctx).pop('close_shift'),
               ),
+            ],
             // Change pharmacist
             ListTile(
               dense: true,
@@ -1073,6 +1086,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         await _openShiftFromMenu();
         return;
       }
+      if (action == 'x_report') {
+        await _showXReport();
+        return;
+      }
       if (action == 'close_shift') {
         await _closeShiftFromMenu();
         return;
@@ -1087,6 +1104,24 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
       }
     });
+  }
+
+  /// X-звіт: проміжний стан зміни, БЕЗ закриття. Відкривається переглядачем
+  /// PDF за асоціацією Windows — так само, як це робить роздріб.
+  ///
+  /// Про невдачу кажемо вголос: фармацевт натиснув свідомо й чекає вікна, а
+  /// не тиші. Це відрізняє X від друку чека, де «не надрукувалось» —
+  /// звичайний випадок.
+  Future<void> _showXReport() async {
+    final x = await PrroService.xReport(includeChecks: false);
+    if (!mounted) return;
+    final ok = x != null && await ReceiptPrinter.previewXReport(x);
+    if (!mounted || ok) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Не вдалося отримати X-звіт — подробиці у журналі'),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: Color(0xFFB45309),
+    ));
   }
 
   /// «Відкрити зміну» з меню фармацевта: діалог службового внесення

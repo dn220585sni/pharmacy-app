@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -5,6 +6,7 @@ import 'package:printing/printing.dart';
 
 import 'fiscal_log.dart';
 import 'prro_service.dart';
+import 'receipt_pdf.dart';
 
 /// Друк чеків і звітів.
 ///
@@ -66,6 +68,73 @@ class ReceiptPrinter {
       return ok;
     } catch (e) {
       FiscalLog.log('друк "$name" на "${printer.name}" ПОМИЛКА: $e');
+      return false;
+    }
+  }
+
+  /// Взяти PDF звіту: готовий від ПРРО, а якщо його немає — зібрати з тексту.
+  ///
+  /// ПРРО повертає `pdf` для Z і X, і саме його краще друкувати: там уже його
+  /// власна верстка. Рендер із `text_print` — запасний шлях на випадок, коли
+  /// PDF не прийшов (буває при `no_pdf` або обриві).
+  @visibleForTesting
+  static Future<Uint8List?> resolvePdf({
+    String? pdfBase64,
+    String? textPrint,
+  }) async {
+    if (pdfBase64 != null && pdfBase64.trim().isNotEmpty) {
+      try {
+        return base64Decode(pdfBase64.trim());
+      } catch (e) {
+        FiscalLog.log('звіт: PDF від ПРРО не розібрано ($e) — рендеримо самі');
+      }
+    }
+    if (textPrint == null || textPrint.trim().isEmpty) return null;
+    try {
+      final text = utf8.decode(base64Decode(textPrint.trim()),
+          allowMalformed: true);
+      return ReceiptPdf.build(text: text);
+    } catch (e) {
+      FiscalLog.log('звіт: текст не розібрано: $e');
+      return null;
+    }
+  }
+
+  /// Z-звіт — **друкуємо завжди** (Андрій, 03.09). Це не рішення правила:
+  /// звіт про закриття зміни має лишитись на папері незалежно від того, як
+  /// клієнти отримують свої чеки.
+  static Future<bool> printZReport(PrroResult z) async {
+    final pdf = await resolvePdf(
+        pdfBase64: z.pdfBase64, textPrint: z.textPrint);
+    if (pdf == null) {
+      FiscalLog.log('Z-звіт: друкувати нема чого — ПРРО не дав ні pdf, '
+          'ні text_print');
+      return false;
+    }
+    return printPdf(pdf, name: 'Z-звіт');
+  }
+
+  /// X-звіт — **на перегляд**, не на друк (Андрій, 03.09). Кладемо у тимчасову
+  /// теку, а не в `out`: там живуть чеки роздрібу з чистилкою за іменами, і
+  /// класти туди сторонній файл — напрошуватись на проблеми.
+  static Future<bool> previewXReport(PrroXReport x) async {
+    final pdf =
+        await resolvePdf(pdfBase64: x.pdfBase64, textPrint: x.textPrint);
+    if (pdf == null) {
+      FiscalLog.log('X-звіт: показувати нема чого — ПРРО не дав ні pdf, '
+          'ні text_print');
+      return false;
+    }
+    try {
+      final dir = Directory(
+          '${Directory.systemTemp.path}${Platform.pathSeparator}pharmacy_app');
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final path = '${dir.path}${Platform.pathSeparator}x_report_$ts.pdf';
+      await File(path).writeAsBytes(pdf, flush: true);
+      return openPdf(path);
+    } catch (e) {
+      FiscalLog.log('X-звіт: не вдалося зберегти для перегляду: $e');
       return false;
     }
   }

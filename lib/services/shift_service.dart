@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import '../models/cash_operation.dart';
 import '../models/money.dart';
@@ -8,6 +10,7 @@ import 'cache_api_client.dart';
 import 'cash_service.dart';
 import 'fiscal_log.dart';
 import 'prro_service.dart';
+import 'receipt_printer.dart';
 
 /// Результат перевірки потреби службового внесення (ProvSumZOtchet).
 class ServiceDepositCheck {
@@ -267,7 +270,12 @@ class ShiftService {
         FiscalLog.log('startShift: зміна з попередньої доби '
             '(відкрита $openedAt) → авто-Z і повторне відкриття');
         final autoZ = await PrroService.zReport();
-        if (autoZ.success) await _fixZReportInDb();
+        if (autoZ.success) {
+          // Автоматичний Z за вчора — теж на папір. Він так само закриває
+          // зміну, і те, що його ніхто не замовляв, нічого не міняє.
+          unawaited(ReceiptPrinter.printZReport(autoZ));
+          await _fixZReportInDb();
+        }
         open = await PrroService.openShift();
       } else {
         debugPrint('ShiftService: зміна вже відкрита сьогодні — без Z, '
@@ -354,6 +362,10 @@ class ShiftService {
       }
       _state = const ShiftState(isOpen: false);
       _lastZAt = DateTime.now();
+      // Z друкуємо ЗАВЖДИ (Андрій, 03.09) — і у фоні: звіт уже фіскально
+      // відбувся, тож збій принтера не має ні скасовувати його, ні тримати
+      // фармацевта біля екрана.
+      unawaited(ReceiptPrinter.printZReport(r));
       // Z уже фіскально відбувся. Далі — лише запис у Caché; його провал НЕ
       // скасовує звіт, але й ховати його не можна (див. ShiftCloseResult).
       final fixed = await _fixZReportInDb();

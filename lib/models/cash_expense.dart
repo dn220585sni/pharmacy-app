@@ -74,7 +74,13 @@ class CashExpense {
   final String? customerPhone;
   final List<ExpenseItem> items;
 
-  /// `blok` — чек міняти НЕ можна, тут причина (Катерина, 04.09.2026).
+  /// `blok` — НАКЛАДНУ змінювати не можна, тут причина.
+  ///
+  /// Катерина уточнила 08.09.2026: це блокування змін самої накладної, а НЕ
+  /// заборона повернення. Повернення створює окремий документ
+  /// (`NumNaklForReturn` вказує на початковий), тож на нього `blok` не
+  /// впливає — я був вирішив інакше й гасив кнопку «Повернення».
+  ///
   /// `null` — обмежень немає.
   final String? blockReason;
 
@@ -92,7 +98,7 @@ class CashExpense {
 
   bool get isReserve => status == ExpenseStatus.reserved;
 
-  /// Чи заборонено змінювати цей чек (повернення, коригування тощо).
+  /// Чи закрита накладна для змін. На можливість ПОВЕРНЕННЯ не впливає.
   bool get isBlocked => (blockReason ?? '').trim().isNotEmpty;
 
   String get statusLabel {

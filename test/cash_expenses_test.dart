@@ -230,11 +230,11 @@ void _tNaklRTests() {
     });
   });
 
-  group('blok — заборона змінювати чек', () {
+  group('blok — накладна закрита для змін', () {
     test('непорожнє значення блокує й несе причину', () {
-      final e = parse({'blok': 'Чек передано в податкову'});
+      final e = parse({'blok': 'Накладна вже проведена'});
       expect(e.isBlocked, isTrue);
-      expect(e.blockReason, 'Чек передано в податкову');
+      expect(e.blockReason, 'Накладна вже проведена');
     });
 
     test('порожнє або відсутнє — обмежень немає', () {
@@ -242,6 +242,14 @@ void _tNaklRTests() {
       expect(parse({'blok': '   '}).isBlocked, isFalse);
       expect(parse({}).isBlocked, isFalse);
       expect(parse({}).blockReason, isNull);
+    });
+
+    test('blok не робить документ поверненням і не міняє статус', () {
+      // Катерина, 08.09: blok блокує зміни САМОЇ накладної, а не повернення.
+      // Повернення — окремий документ, тож ані тип, ані статус не зачіпає.
+      final e = parse({'blok': 'Накладна вже проведена', 'flagRRO': '1'});
+      expect(e.type, ExpenseType.receipt);
+      expect(e.status, ExpenseStatus.completed);
     });
   });
 

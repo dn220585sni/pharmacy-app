@@ -16,6 +16,18 @@ import 'widgets/shift_end_dialog.dart';
 /// закриття вікна (де немає звичайного BuildContext).
 final navigatorKey = GlobalKey<NavigatorState>();
 
+/// Хрестик вікна приходить сюди з раннера (`windows/runner/flutter_window.cpp`),
+/// а НЕ через `didRequestAppExit`.
+///
+/// Двигун Flutter на Windows передає запит на закриття у фреймворк лише тоді,
+/// коли вікно — ОСТАННЄ верхнього рівня в процесі (`IsLastWindowOfProcess`,
+/// рахує й приховані). 10.09 після першого друку чека в процесі зʼявлялось
+/// невидиме вікно (найімовірніше, від драйвера принтера, перенаправленого
+/// через RDP), і двигун мовчки закривав касу — діалог Z не показувався, а
+/// зміна лишалась відкритою. Тепер раннер перехоплює `WM_CLOSE` сам і питає
+/// нас; ми відповідаємо 'exit' або 'cancel'.
+const _windowChannel = MethodChannel('pharmacy/window');
+
 void main() {
   final binding = WidgetsFlutterBinding.ensureInitialized();
 
@@ -30,7 +42,15 @@ void main() {
   );
 
   // Logout active session when the app window is closed
-  binding.addObserver(_AppCloseObserver());
+  final closeObserver = _AppCloseObserver();
+  binding.addObserver(closeObserver);
+  // Хрестик — через канал раннера (див. `_windowChannel`). Реєструємо до
+  // `runApp`: якщо відповіді немає, раннер закриває вікно без питань.
+  _windowChannel.setMethodCallHandler((call) async {
+    if (call.method != 'closeRequested') throw MissingPluginException();
+    final r = await closeObserver.requestClose('хрестик');
+    return r == AppExitResponse.exit ? 'exit' : 'cancel';
+  });
 
   // ПРРО: підняти кешований токен і чергу відкладених чеків.
   // Спроба flush у фоні — якщо мережа є, відкладені чеки відразу пушнуться.
@@ -59,18 +79,25 @@ class _AppCloseObserver extends WidgetsBindingObserver {
   /// коли завершить.
   bool _exiting = false;
 
-  @override
-  Future<AppExitResponse> didRequestAppExit() async {
+  /// Обробити запит на закриття з будь-якого джерела — хрестик через канал
+  /// раннера чи системний запит двигуна. Один захист від повторного кліку на
+  /// обидва шляхи: інакше вони могли б запитати Z двічі.
+  Future<AppExitResponse> requestClose(String source) async {
     if (_exiting) return AppExitResponse.cancel;
     _exiting = true;
     try {
-      return await _handleExit();
+      return await _handleExit(source);
     } finally {
       _exiting = false;
     }
   }
 
-  Future<AppExitResponse> _handleExit() async {
+  /// Системний шлях. Хрестик сюди більше не доходить (його перехоплює
+  /// раннер), але інші запити на вихід від двигуна лишаються.
+  @override
+  Future<AppExitResponse> didRequestAppExit() => requestClose('двигун');
+
+  Future<AppExitResponse> _handleExit(String source) async {
     // Свіжо перевірити РРО, чи зміна відкрита (локальний стан міг застаріти
     // після рестарту з відновленою зміною) — інакше при виході не пропонувався
     // Z для реально відкритої зміни.
@@ -80,7 +107,7 @@ class _AppCloseObserver extends WidgetsBindingObserver {
     // зʼявилось, а журнал мовчав на всіх трьох можливих шляхах — обробник не
     // викликався, ПРРО сказав «закрита», чи не знайшовся контекст для
     // діалогу. Тепер кожен із них лишає слід.
-    await FiscalLog.log('Вихід: отримано запит на закриття вікна');
+    await FiscalLog.log('Вихід: запит на закриття ($source)');
     final open = await ShiftService.isShiftOpenOnServer();
     await FiscalLog.log('Вихід: зміна ${open ? "відкрита → пропонуємо Z" : "закрита → виходимо без Z"}');
     if (open) {

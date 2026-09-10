@@ -1161,6 +1161,14 @@ class PrroService {
   // X-звіт
   // ---------------------------------------------------------------------------
 
+  /// Чому останній `xReport` не вдався — словами ПРРО. `null` після успіху.
+  ///
+  /// Метод повертає `null` на будь-яку відмову, а причина важлива: 10.09
+  /// ПРРО відповів «Виконується попередній запит… Повторіть через 5-30
+  /// секунд» — це тимчасово, варто почекати. «Немає звʼязку» — ні, там
+  /// повтор лише затягне старт. Без причини ці два випадки не розрізнити.
+  static String? lastXReportFailure;
+
   /// X-звіт: поточний стан зміни без закриття.
   /// [includeChecks] — включати список чеків зміни.
   /// [timeout] — 30 с як у cash_uft.dll; коротший беруть перевірки дублікатів
@@ -1193,9 +1201,10 @@ class PrroService {
       ).timeout(timeout);
 
       if (response.statusCode != 200 && response.statusCode != 201) {
+        final text = utf8.decode(response.bodyBytes);
         FiscalLog.log('xReport FAIL: HTTP ${response.statusCode} '
-            '${utf8.decode(response.bodyBytes).substring(0,
-                utf8.decode(response.bodyBytes).length.clamp(0, 120))}');
+            '${text.substring(0, text.length.clamp(0, 120))}');
+        lastXReportFailure = explainPrroBody(text);
         return null;
       }
 
@@ -1216,9 +1225,11 @@ class PrroService {
       debugPrint('PRRO xReport: shiftOpen=${report.shiftOpen} '
           'cashInBox=${report.cashInBox} cashInBoxStart=${report.cashInBoxStart} '
           'serviceInput=${report.serviceInput} openedAt=${report.openedAt}');
+      lastXReportFailure = null;
       return report;
     } catch (e) {
       FiscalLog.log('xReport ERROR: $e');
+      lastXReportFailure = 'Немає звʼязку з ПРРО: $e';
       return null;
     }
   }

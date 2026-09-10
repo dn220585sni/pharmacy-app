@@ -59,7 +59,10 @@ class ShiftService {
   static Future<void> _restoreFromServer() async {
     if (ApiConfig.useMock) return;
     try {
-      final x = await PrroService.xReport(includeChecks: false);
+      // Терпляче: 10.09 відновлення стану й відновлення A3 смикнули xReport
+      // одночасно, ПРРО відповів другому «виконується попередній запит», і
+      // зміну, відкриту на ПРРО, ми прийняли за закриту.
+      final x = await _xReportPatient();
       if (x == null || !x.shiftOpen) {
         _state = const ShiftState(isOpen: false);
         return;
@@ -88,6 +91,47 @@ class ShiftService {
     } catch (e) {
       debugPrint('ShiftService restore ERROR: $e');
     }
+  }
+
+  /// Відмова `OPEN_SHIFT` означає, що зміна на ПРРО вже відкрита.
+  ///
+  /// ⚠️ ПРРО пише **«Зміна відкрита»** — без «вже». Звірка шукала лише
+  /// «вже відкрита» / «не закрили зміну», тож гілка відновлення (з'ясувати,
+  /// з якого дня зміна, і зробити авто-Z або прийняти її) не спрацювала
+  /// ЖОДНОГО разу. 09.09 Кудрявська п'ять разів поспіль не змогла відкрити
+  /// зміну, 10.09 — те саме в user. Старі формулювання лишаємо: вони нікому
+  /// не заважають.
+  @visibleForTesting
+  static bool isShiftAlreadyOpenError(String error) {
+    final e = error.trim().toLowerCase();
+    if (e.isEmpty) return false;
+    return e.contains('зміна відкрита') ||
+        e.contains('вже відкрита') ||
+        e.contains('не закрили зміну');
+  }
+
+  /// ПРРО зайнятий попереднім запитом — тимчасово, варто повторити.
+  @visibleForTesting
+  static bool isPrroBusy(String error) =>
+      error.toLowerCase().contains('виконується попередній запит');
+
+  /// `xReport` із повтором ЛИШЕ на «зайнято».
+  ///
+  /// ПРРО сам радить «повторіть через 5-30 секунд». Повторюємо до трьох разів
+  /// з паузою 6 с. На інші відмови не повторюємо: якщо ПРРО недоступний,
+  /// кожна спроба це до 30 с таймауту, і старт зміни затягнувся б на хвилини.
+  static Future<PrroXReport?> _xReportPatient() async {
+    const attempts = 3;
+    for (var i = 1; i <= attempts; i++) {
+      final x = await PrroService.xReport(includeChecks: false);
+      if (x != null) return x;
+      final why = PrroService.lastXReportFailure ?? '';
+      if (!isPrroBusy(why) || i == attempts) return null;
+      FiscalLog.log('xReport: ПРРО зайнятий попереднім запитом — повтор через '
+          '6 с (спроба $i/$attempts)');
+      await Future<void>.delayed(const Duration(seconds: 6));
+    }
+    return null;
   }
 
   static DateTime? _estimateOpenedAt(int? durationMinutes) =>
@@ -255,13 +299,11 @@ class ShiftService {
     // 1. Відкрити зміну на РРО. Якщо стара зміна висить (не закрита за вчора /
     // вже відкрита) → авто-Z і відкрити знову (старт нового дня = нова зміна).
     var open = await PrroService.openShift();
-    final err = open.error ?? '';
-    if (!open.success &&
-        (err.contains('не закрили зміну') || err.contains('вже відкрита'))) {
+    if (!open.success && isShiftAlreadyOpenError(open.error ?? '')) {
       // Зміна вже відкрита на РРО. Авто-Z ЛИШЕ якщо вона з ПОПЕРЕДНЬОЇ доби
       // (вчорашня незакрита). Якщо сьогоднішня (рестарт посеред дня) — НЕ Z-имо,
       // а приймаємо як відкриту: службове внесення вже зроблено раніше сьогодні.
-      final x = await PrroService.xReport(includeChecks: false);
+      final x = await _xReportPatient();
       final openedAt = x?.openedAt ?? _estimateOpenedAt(x?.shiftDurationMinutes);
       final fromPrevDay =
           openedAt != null && !_isSameDay(openedAt, DateTime.now());

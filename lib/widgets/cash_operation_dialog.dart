@@ -4,6 +4,7 @@ import '../models/cash_operation.dart';
 import '../models/money.dart';
 import '../services/cash_service.dart';
 import '../services/prro_service.dart';
+import '../services/shift_service.dart';
 
 /// Діалог службових операцій каси — внесення / винесення (інкасація).
 /// Напрям → причини (GetOperKassa) → сума → збереження (SaveSumDay).
@@ -73,6 +74,21 @@ class _CashOperationDialogState extends State<_CashOperationDialog> {
     final sum = Money.parse(_sumCtr.text);
     if (_reason == null || !sum.isPositive) return;
     setState(() => _saving = true);
+    // Друга лінія захисту (перша — перед відкриттям форми в pos_screen): зміна
+    // могла закритися, поки форма була відкрита. Перевіряємо ДО запису в
+    // Caché — інакше операція лягла б туди, а ПРРО мовчки відкрив би нову
+    // зміну без службового внесення.
+    if (!await ShiftService.isOpenForFiscal('Службова операція')) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Зміну закрито — операцію не проведено. '
+            'Відкрийте зміну й повторіть.'),
+        backgroundColor: Color(0xFFB45309),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
     final ok = await CashService.saveOperation(
       direction: _direction,
       reason: _reason!,

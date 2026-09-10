@@ -12,6 +12,7 @@ import '../models/social_project.dart';
 import '../models/stop_price_action.dart';
 import '../services/prro_service.dart';
 import '../services/receipt_printer.dart';
+import '../widgets/shift_required_dialog.dart';
 import '../services/auth_service.dart';
 import '../services/cart_price_service.dart';
 import '../services/drug_service.dart';
@@ -1074,6 +1075,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     ).then((action) async {
       if (action == null || !mounted) return;
       if (action == 'cash') {
+        // Службова операція теж іде в ПРРО — без відкритої зміни не пускаємо
+        // (див. `_ensureShiftForCashOp`).
+        if (!await _ensureShiftForCashOp()) return;
+        if (!mounted) return;
         showCashOperationDialog(context);
         return;
       }
@@ -1104,6 +1109,26 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
       }
     });
+  }
+
+  /// Перевірити зміну ПЕРЕД формою службової операції каси.
+  ///
+  /// Внесення / видача готівки фіскалізуються в ПРРО (`/check/service`), і з
+  /// закритою зміною ПРРО мовчки відкриває нову — без службового внесення.
+  /// Питаємо до відкриття форми, щоб касир не заповнював її даремно; після
+  /// «Відкрити зміну» форма відкривається сама. Друга перевірка стоїть у
+  /// самій формі перед записом — на випадок, якщо зміна закриється, поки
+  /// форма відкрита.
+  Future<bool> _ensureShiftForCashOp() async {
+    if (await ShiftService.isOpenForFiscal('Службова операція')) return true;
+    if (!mounted) return false;
+    final open = await askToOpenShift(context,
+        message: 'Внесення й видачу готівки можна провести лише у відкритій '
+            'зміні. Відкрийте зміну — форма операції відкриється одразу '
+            'після цього.');
+    if (!open) return false;
+    await _openShiftFromMenu();
+    return ShiftService.state.isOpen;
   }
 
   /// X-звіт: проміжний стан зміни, БЕЗ закриття. Відкривається переглядачем

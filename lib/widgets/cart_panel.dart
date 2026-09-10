@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../mixins/checkout_mixin.dart';
 import '../services/auth_service.dart';
 import '../services/shift_service.dart';
+import 'shift_required_dialog.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
 import '../models/customer_loyalty.dart';
@@ -602,34 +603,12 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   /// не глухою відмовою: пропонуємо відкрити зміну тим самим діалогом, що в
   /// меню, і після відкриття продаж іде далі сам, кошик не збирається заново.
   Future<bool> _ensureShiftOpen() async {
-    if (await ShiftService.isOpenForSale()) return true;
+    if (await ShiftService.isOpenForFiscal('Продаж')) return true;
     if (!mounted) return false;
-    final open = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        icon: const Icon(Icons.lock_clock_rounded,
-            color: Color(0xFFB45309), size: 36),
-        title: const Text('Зміну не відкрито',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-        content: const Text(
-          'Чек можна провести лише у відкритій зміні. Відкрийте зміну — '
-          'продаж продовжиться автоматично.',
-          style: TextStyle(fontSize: 13.5, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Скасувати'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Відкрити зміну'),
-          ),
-        ],
-      ),
-    );
-    if (open != true || widget.onOpenShift == null) return false;
+    final open = await askToOpenShift(context,
+        message: 'Чек можна провести лише у відкритій зміні. Відкрийте '
+            'зміну — продаж продовжиться автоматично.');
+    if (!open || widget.onOpenShift == null) return false;
     await widget.onOpenShift!();
     return ShiftService.state.isOpen;
   }

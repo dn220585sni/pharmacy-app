@@ -251,7 +251,21 @@ class ShiftService {
     if (ApiConfig.useMock) return _state.isOpen;
     try {
       final x = await PrroService.xReport(includeChecks: false);
-      if (x == null) return _state.isOpen;
+      // Кожну відповідь — у журнал, і з `await`: цей метод викликає вихід із
+      // програми, де процес закривається одразу слідом. 10.09 вікно Z при
+      // закритті хрестиком не зʼявилось, а в журналі не лишилось НІЧОГО —
+      // ні відмови, ні відповіді, — бо успіх не писався, а відмова писалась
+      // без очікування й могла не встигнути лягти у файл.
+      if (x == null) {
+        await FiscalLog.log('isShiftOpenOnServer: xReport недоступний '
+            '(${PrroService.lastXReportFailure ?? "без причини"}) — беремо '
+            'локальний стан: ${_state.isOpen ? "відкрита" : "закрита"}');
+        return _state.isOpen;
+      }
+      await FiscalLog.log('isShiftOpenOnServer: ПРРО shift_state='
+          '${x.rawShiftState ?? "(поля немає)"} → '
+          '${x.shiftOpen ? "відкрита" : "закрита"}; локально '
+          '${_state.isOpen ? "відкрита" : "закрита"}');
       if (x.shiftOpen && !_state.isOpen) {
         // ⚠️ Не воскрешати стан одразу після ПІДТВЕРДЖЕНОГО Z.
         //

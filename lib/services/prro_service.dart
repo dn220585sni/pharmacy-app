@@ -437,6 +437,13 @@ class PrroXReport {
   final String? pdfBase64;
   final String? textPrint;
 
+  /// Сире `shift_state` з відповіді, як прийшло — лише для журналу.
+  ///
+  /// 10.09 вікно Z при виході не зʼявилось, а журнал мовчав: успішну
+  /// відповідь не писали нікуди, і не було видно, чи ПРРО сказав «закрита»,
+  /// чи прислав значення, якого [shiftOpen] не розпізнає.
+  final String? rawShiftState;
+
   const PrroXReport({
     required this.shiftOpen,
     required this.cashInBox,
@@ -450,6 +457,7 @@ class PrroXReport {
     this.openedAt,
     this.pdfBase64,
     this.textPrint,
+    this.rawShiftState,
   });
 
   /// Терпиме до формату: bool `true`, `1`, `"1"`, `"true"` → true.
@@ -480,6 +488,7 @@ class PrroXReport {
     final list = (json['checks_list'] as List?) ?? const [];
     return PrroXReport(
       shiftOpen: _truthy(json['shift_state']),
+      rawShiftState: json['shift_state']?.toString(),
       // Числа — через терпимі парсери: каса подекуди віддає їх рядками, а один
       // жорсткий каст валить розбір усієї відповіді (див. utils/json_num.dart).
       cashInBox: flexDouble(json['cash_in_box']) ?? 0,

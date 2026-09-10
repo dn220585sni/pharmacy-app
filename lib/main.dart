@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'screens/pos_screen.dart';
 import 'services/auth_service.dart';
+import 'services/fiscal_log.dart';
 import 'services/prro_queue.dart';
 import 'services/prro_service.dart';
 import 'services/registry_config.dart';
@@ -73,12 +74,26 @@ class _AppCloseObserver extends WidgetsBindingObserver {
     // Свіжо перевірити РРО, чи зміна відкрита (локальний стан міг застаріти
     // після рестарту з відновленою зміною) — інакше при виході не пропонувався
     // Z для реально відкритої зміни.
-    if (await ShiftService.isShiftOpenOnServer()) {
+    //
+    // Кожен крок — у журнал і з `await`: процес закривається одразу слідом,
+    // і незачеканий запис губиться. 10.09 вікно Z при закритті хрестиком не
+    // зʼявилось, а журнал мовчав на всіх трьох можливих шляхах — обробник не
+    // викликався, ПРРО сказав «закрита», чи не знайшовся контекст для
+    // діалогу. Тепер кожен із них лишає слід.
+    await FiscalLog.log('Вихід: отримано запит на закриття вікна');
+    final open = await ShiftService.isShiftOpenOnServer();
+    await FiscalLog.log('Вихід: зміна ${open ? "відкрита → пропонуємо Z" : "закрита → виходимо без Z"}');
+    if (open) {
       // Підтягнути реальні суми (готівка/чеки) з xReport перед діалогом.
       await ShiftService.refreshTotals();
       final ctx = navigatorKey.currentContext; // свіжий контекст після await
+      if (ctx == null || !ctx.mounted) {
+        await FiscalLog.log('Вихід: ⚠️ немає контексту для діалогу — Z НЕ '
+            'запропоновано, зміна лишається відкритою');
+      }
       if (ctx != null && ctx.mounted) {
         final choice = await showShiftEndDialog(ctx);
+        await FiscalLog.log('Вихід: вибір у діалозі — $choice');
         if (choice == ShiftEndChoice.cancel) return AppExitResponse.cancel;
         if (choice == ShiftEndChoice.closeShift) {
           final r = await ShiftService.closeShift();

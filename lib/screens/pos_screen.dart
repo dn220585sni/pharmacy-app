@@ -3981,6 +3981,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         stopPrices: _cartStopPrices,
         isPakunokMode: _isPakunokMode,
         pharmacist: _currentPharmacist,
+        onOpenShift: _openShiftFromMenu,
         scannedDrugIds: _scannedDrugIds,
         onItemScanned: (id) => setState(() => _scannedDrugIds.add(id)),
         onPaymentMethodChanged: (method) {

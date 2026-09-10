@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../mixins/checkout_mixin.dart';
 import '../services/auth_service.dart';
+import '../services/shift_service.dart';
 import '../models/cart_item.dart';
 import '../models/cart_offer.dart';
 import '../models/customer_loyalty.dart';
@@ -85,6 +86,10 @@ class CartPanel extends StatefulWidget {
   /// Хто зараз працює — потрібен для прав. `null` = ще не увійшли.
   final PharmacistInfo? pharmacist;
 
+  /// Відкрити зміну (діалог службового внесення) — коли продаж упирається в
+  /// закриту зміну. Той самий шлях, що пункт меню «Відкрити зміну».
+  final Future<void> Function()? onOpenShift;
+
   const CartPanel({
     super.key,
     required this.cart,
@@ -108,6 +113,7 @@ class CartPanel extends StatefulWidget {
     this.onItemScanned,
     this.onPaymentMethodChanged,
     this.pharmacist,
+    this.onOpenShift,
   });
 
   @override
@@ -589,6 +595,45 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   // ── Друк чека ─────────────────────────────────────────────────────────────
 
+  /// Переконатися, що зміна відкрита, перш ніж фіскалізувати чек.
+  ///
+  /// 08.09 чек пройшов через 11 хвилин після Z, і ПРРО мовчки відкрив нову
+  /// зміну без службового внесення. Тепер продаж без зміни зупиняється — але
+  /// не глухою відмовою: пропонуємо відкрити зміну тим самим діалогом, що в
+  /// меню, і після відкриття продаж іде далі сам, кошик не збирається заново.
+  Future<bool> _ensureShiftOpen() async {
+    if (await ShiftService.isOpenForSale()) return true;
+    if (!mounted) return false;
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        icon: const Icon(Icons.lock_clock_rounded,
+            color: Color(0xFFB45309), size: 36),
+        title: const Text('Зміну не відкрито',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        content: const Text(
+          'Чек можна провести лише у відкритій зміні. Відкрийте зміну — '
+          'продаж продовжиться автоматично.',
+          style: TextStyle(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Скасувати'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Відкрити зміну'),
+          ),
+        ],
+      ),
+    );
+    if (open != true || widget.onOpenShift == null) return false;
+    await widget.onOpenShift!();
+    return ShiftService.state.isOpen;
+  }
+
   /// Надрукувати чек, якщо цього вимагає правило.
   ///
   /// Рішення — `ReceiptPrintRule` (див. його докblock). Коротко: друк це
@@ -739,6 +784,15 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   Future<void> _processPayment() async {
     if (!_canProcessPayment || _isProcessingPayment) return;
+
+    // Без відкритої зміни чек не проводимо — див. `_ensureShiftOpen`. На час
+    // перевірки кнопка зайнята: запит до ПРРО триває, і подвійний клік
+    // інакше проскочив би повз.
+    setState(() => _isProcessingPayment = true);
+    final shiftOk = await _ensureShiftOpen();
+    if (!mounted) return;
+    setState(() => _isProcessingPayment = false);
+    if (!shiftOk) return;
 
     // Пакунок Малюка — показати інструкцію оплати перед фіскалізацією.
     if (widget.isPakunokMode) {

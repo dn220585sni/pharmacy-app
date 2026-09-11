@@ -59,6 +59,7 @@ class CashExpense {
     this.orderId,
     this.unionInvoice,
     this.fiscalId,
+    this.isTerminal = false,
   });
 
   final String id;
@@ -104,6 +105,14 @@ class CashExpense {
   /// Чи збігається `FNRRO` з `ordernum`, ще не доведено — пошук пробує обидва
   /// й пише в журнал, що спрацювало.
   final String? fiscalId;
+
+  /// Оплата через термінал (`tNakl` = «Терминал»); інакше готівка.
+  ///
+  /// Окремого поля способу оплати сервіс не дає, але `tNakl` у живих даних
+  /// набуває лише двох значень — «Чек» і «Терминал» (журнал 03–07.09.2026),
+  /// і при картковій оплаті накладна пишеться на код банку (`KodKli`), тобто
+  /// це справді спосіб оплати.
+  final bool isTerminal;
 
   bool get isReserve => status == ExpenseStatus.reserved;
 

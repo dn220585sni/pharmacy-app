@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'screens/pos_screen.dart';
 import 'services/auth_service.dart';
 import 'services/drug_name_index.dart';
@@ -163,6 +164,16 @@ class PharmacyApp extends StatelessWidget {
       title: 'ФармаПОС',
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
+      // Українська для всього вбудованого в Material: календарі вибору дат
+      // («Витрати по касі», замовлення, рецепт), меню копіювання, підказки.
+      // Без цього showDatePicker — англійський, з неділі й «OK/Cancel».
+      locale: const Locale('uk'),
+      supportedLocales: const [Locale('uk'), Locale('en')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       // Tab НЕ переміщує фокус: це префікс скана від сканера штрихкодів.
       //
       // `WidgetsApp` за замовчуванням мапить Tab на `NextFocusIntent`, і фокус

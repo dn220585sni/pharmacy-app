@@ -22,6 +22,7 @@ import 'checkout/payment_method_toggle.dart';
 import 'order_edk_card.dart';
 import 'disbanded_orders_screen.dart';
 import 'hover_icon_button.dart';
+import 'panel_layout.dart';
 import 'likomat_dialog.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,7 +31,9 @@ import 'likomat_dialog.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Layout mode for the orders panel within the POS screen.
-enum OrdersPanelLayout { right, fullscreen }
+/// Спільний з іншими панелями (`panel_layout.dart`); стара назва лишається,
+/// щоб не чіпати всі згадки.
+typedef OrdersPanelLayout = PanelLayout;
 
 class OrdersPanel extends StatefulWidget {
   final VoidCallback onClose;

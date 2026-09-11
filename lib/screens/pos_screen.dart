@@ -52,6 +52,7 @@ import '../models/internet_order.dart';
 import '../widgets/orders_panel.dart';
 import '../widgets/pharmacist_picker_dialog.dart';
 import '../widgets/expenses_panel.dart';
+import '../widgets/panel_layout.dart';
 import '../widgets/order_success_dialog.dart';
 import '../widgets/out_of_stock_panel.dart';
 import '../widgets/reservation_success_dialog.dart';
@@ -206,6 +207,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Layout mode for orders panel (left / right / fullscreen).
   OrdersPanelLayout _ordersPanelLayout = OrdersPanelLayout.right;
+
+  /// Те саме для «Витрат по касі» — на весь екран за аналогією із ІЗ.
+  PanelLayout _expensesPanelLayout = PanelLayout.right;
 
   /// Whether the cash expenses panel is shown in the right column.
   bool _expensesOpen = false;
@@ -4101,7 +4105,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       );
     }
     if (_expensesOpen) {
-      return ExpensesPanel(key: _expensesPanelKey, onClose: _toggleExpenses);
+      return ExpensesPanel(
+        key: _expensesPanelKey,
+        onClose: _toggleExpenses,
+        layout: _expensesPanelLayout,
+        onLayoutChanged: (layout) =>
+            setState(() => _expensesPanelLayout = layout),
+      );
     }
     if (_prescriptionOpen) {
       return PrescriptionPanel(
@@ -4134,9 +4144,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   List<Widget> _buildMainContentChildren() {
     final isOrdersFullscreen =
         _ordersOpen && _ordersPanelLayout == OrdersPanelLayout.fullscreen;
+    final isExpensesFullscreen =
+        _expensesOpen && _expensesPanelLayout == PanelLayout.fullscreen;
 
-    if (isOrdersFullscreen) {
-      // Fullscreen: orders panel takes all space, table hidden
+    if (isOrdersFullscreen || isExpensesFullscreen) {
+      // Fullscreen: панель займає все місце, таблиця прихована
       return [Expanded(child: _buildDetailPanel())];
     }
 

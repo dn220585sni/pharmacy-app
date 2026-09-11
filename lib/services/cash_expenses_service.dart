@@ -190,6 +190,8 @@ class CashExpensesService {
       orderId: _orNull(j['idorder']),
       unionInvoice: _orNull(j['UnionIZ']),
       fiscalId: _orNull(j['FNRRO']),
+      // «Терминал» (рос.) або «Термінал» — обидва починаються з «терм».
+      isTerminal: tNakl.toLowerCase().startsWith('терм'),
     );
   }
 

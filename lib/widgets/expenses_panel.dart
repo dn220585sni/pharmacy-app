@@ -13,6 +13,7 @@ import '../services/receipt_printer.dart';
 import '../services/registers_service.dart';
 import 'hover_icon_button.dart';
 import 'callback_request_dialog.dart';
+import 'panel_layout.dart';
 import 'return_flow_dialog.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -20,12 +21,21 @@ import 'return_flow_dialog.dart';
 // Two-screen flow: Expense List → Expense Details.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Спосіб оплати як фільтр списку.
+enum _PayFilter { all, cash, terminal }
+
 class ExpensesPanel extends StatefulWidget {
   final VoidCallback onClose;
+
+  /// У правій колонці чи на весь екран (як у інтернет-замовленнях).
+  final PanelLayout layout;
+  final void Function(PanelLayout layout)? onLayoutChanged;
 
   const ExpensesPanel({
     super.key,
     required this.onClose,
+    this.layout = PanelLayout.right,
+    this.onLayoutChanged,
   });
 
   @override
@@ -47,20 +57,32 @@ class ExpensesPanelState extends State<ExpensesPanel> {
   /// своєю касою.
   List<CashRegister> _registers = const [];
 
-  /// `KodKli` каси, чиї накладні дивимось. `null` — своя, з реєстру.
+  /// `KodKli` каси, чиї накладні дивимось. `null` — ВСІ каси аптеки
+  /// (за замовчуванням, Микола 11.09: клієнт приходить по резерв чи з
+  /// поверненням не на ту касу, де його обслуговували).
   ///
   /// Це САМЕ параметр запиту, а не локальний фільтр: `GetNaklKas` віддає
-  /// накладні однієї каси, тож зміна вибору означає новий запит. Раніше тут
-  /// був фільтр по вже завантаженому списку — і він не міг показати нічого,
-  /// крім своєї каси, бо інших даних у ньому не бувало.
+  /// накладні однієї каси. «Всі каси» = запит по кожній касі зі списку
+  /// `GetKlient` паралельно і злиття (сервер варіанта «без KodKli» не має —
+  /// питання 3.4 у листі 03.09 лишилось без відповіді). Поки списку кас ще
+  /// немає — лише своя.
   String? _registerId;
+
+  /// Значення випадайки для «Всі каси» (`DropdownButton` не любить null).
+  static const _allRegisters = '';
+
+  _PayFilter _payFilter = _PayFilter.all;
 
   bool _loading = false;
 
   bool get _hasQuery => _searchController.text.trim().isNotEmpty;
 
-  /// Поточна каса — обрана або своя.
-  String get _activeRegisterId => _registerId ?? ApiConfig.ekkKodKli;
+  /// Каси, з яких збираємо накладні: обрана, або всі відомі, або своя.
+  List<String> get _queryRegisterIds {
+    if (_registerId != null) return [_registerId!];
+    if (_registers.length > 1) return _registers.map((r) => r.id).toList();
+    return [ApiConfig.ekkKodKli];
+  }
 
   static const _primaryFilters = [
     'Всі',
@@ -109,15 +131,12 @@ class ExpensesPanelState extends State<ExpensesPanel> {
       final today = DateTime.now();
       _dateFrom = today;
       _dateTo = today;
-      // Накладні спершу, список кас — ПІСЛЯ них, а не паралельно.
-      //
-      // 08.09 `GetKlient` почав валитись помилкою всередині сервісу
-      // (`<UNDEFINED>ServiceNewRlz+1276^KabServiceRlz *prim`), і того ж дня
-      // панель перестала показувати чеки. Прямого звʼязку не доведено, але
-      // обидва запити йшли одночасно однією CSP-сесією, а помилка рівня
-      // <UNDEFINED> цілком може її зіпсувати. Список кас — прикраса, накладні
-      // — суть екрана, тож суть іде першою й наодинці.
-      _load().whenComplete(_loadRegisters);
+      // Список кас — ПЕРШИМ і послідовно, бо за замовчуванням показуємо всі
+      // каси, а їх перелік дає лише `GetKlient`. Не паралельно: 08.09
+      // `GetKlient` валився помилкою <UNDEFINED> всередині сервісу, і того ж
+      // дня панель перестала показувати чеки — обидва запити йшли однією
+      // CSP-сесією. Якщо список не прийде, `_load` обійдеться своєю касою.
+      _loadRegisters().whenComplete(_load);
     }
   }
 
@@ -129,17 +148,22 @@ class ExpensesPanelState extends State<ExpensesPanel> {
     setState(() => _registers = list);
   }
 
-  /// Перезапит накладних із `GetNaklKas`. Фільтри (тип, каса, пошук) далі
-  /// застосовуються локально до вже завантаженого періоду.
+  /// Перезапит накладних із `GetNaklKas` — по одній касі або по всіх
+  /// паралельно зі злиттям за датою (новіші вище). Фільтри (тип, оплата,
+  /// пошук) далі застосовуються локально до вже завантаженого періоду.
   Future<void> _load() async {
     if (ApiConfig.useMock) return;
     setState(() => _loading = true);
-    final list = await CashExpensesService.fetch(
-      from: _dateFrom ?? DateTime.now(),
-      to: _dateTo ?? _dateFrom ?? DateTime.now(),
-      kodKli: _registerId,
-    );
+    final from = _dateFrom ?? DateTime.now();
+    final to = _dateTo ?? _dateFrom ?? DateTime.now();
+    final registers = _queryRegisterIds;
+    final parts = await Future.wait([
+      for (final id in registers)
+        CashExpensesService.fetch(from: from, to: to, kodKli: id),
+    ]);
     if (!mounted) return;
+    final list = parts.expand((p) => p).toList()
+      ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
     setState(() {
       _allExpenses = list;
       _loading = false;
@@ -197,6 +221,12 @@ class ExpensesPanelState extends State<ExpensesPanel> {
       }
 
       // Каса локально не фільтрується — вона параметр запиту (див. _registerId).
+
+      // Спосіб оплати
+      if (_payFilter != _PayFilter.all) {
+        final wantTerminal = _payFilter == _PayFilter.terminal;
+        list = list.where((e) => e.isTerminal == wantTerminal).toList();
+      }
 
       // Text search
       if (query.isNotEmpty) {
@@ -326,6 +356,22 @@ class ExpensesPanelState extends State<ExpensesPanel> {
             ),
           ),
           const Spacer(),
+          // На весь екран — як у інтернет-замовленнях.
+          if (widget.onLayoutChanged != null)
+            HoverIconButton(
+              icon: widget.layout == PanelLayout.fullscreen
+                  ? Icons.fullscreen_exit_rounded
+                  : Icons.fullscreen_rounded,
+              tooltip: widget.layout == PanelLayout.fullscreen
+                  ? 'Звичайний розмір'
+                  : 'На весь екран',
+              onTap: () => widget.onLayoutChanged!(
+                widget.layout == PanelLayout.fullscreen
+                    ? PanelLayout.right
+                    : PanelLayout.fullscreen,
+              ),
+            ),
+          const SizedBox(width: 2),
           HoverIconButton(
             icon: Icons.close_rounded,
             tooltip: 'Закрити',
@@ -520,9 +566,11 @@ class ExpensesPanelState extends State<ExpensesPanel> {
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
-                    value: registers.any((r) => r.id == _activeRegisterId)
-                        ? _activeRegisterId
-                        : null,
+                    value: _registerId == null
+                        ? _allRegisters
+                        : registers.any((r) => r.id == _registerId)
+                            ? _registerId
+                            : null,
                     isExpanded: true,
                     isDense: true,
                     icon: Icon(Icons.expand_more_rounded,
@@ -538,27 +586,35 @@ class ExpensesPanelState extends State<ExpensesPanel> {
                     hint: const Text('Каса',
                         style: TextStyle(
                             fontSize: 11, color: Color(0xFF6B7280))),
-                    items: registers
-                        .map((r) => DropdownMenuItem<String>(
-                              value: r.id,
-                              child: Tooltip(
-                                message: r.name,
-                                waitDuration: const Duration(milliseconds: 500),
-                                child: Text(
-                                  r.id == ApiConfig.ekkKodKli
-                                      ? '${r.shortName} — ваша'
-                                      : r.shortName,
-                                  style: const TextStyle(fontSize: 11),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                    items: [
+                      const DropdownMenuItem<String>(
+                        value: _allRegisters,
+                        child: Text('Всі каси',
+                            style: TextStyle(
+                                fontSize: 11, fontWeight: FontWeight.w600)),
+                      ),
+                      ...registers.map((r) => DropdownMenuItem<String>(
+                            value: r.id,
+                            child: Tooltip(
+                              message: r.name,
+                              waitDuration: const Duration(milliseconds: 500),
+                              child: Text(
+                                r.id == ApiConfig.ekkKodKli
+                                    ? '${r.shortName} — ваша'
+                                    : r.shortName,
+                                style: const TextStyle(fontSize: 11),
+                                overflow: TextOverflow.ellipsis,
                               ),
-                            ))
-                        .toList(),
+                            ),
+                          )),
+                    ],
                     onChanged: (value) {
-                      if (value == null || value == _activeRegisterId) return;
+                      if (value == null) return;
+                      final next = value == _allRegisters ? null : value;
+                      if (next == _registerId) return;
                       // Нова каса — новий запит: GetNaklKas віддає накладні
                       // однієї каси, локально їх не відфільтруєш.
-                      setState(() => _registerId = value);
+                      setState(() => _registerId = next);
                       unawaited(_load());
                     },
                   ),
@@ -602,6 +658,53 @@ class ExpensesPanelState extends State<ExpensesPanel> {
     );
   }
 
+  /// Чіп способу оплати: повторний клік знімає фільтр.
+  Widget _buildPayChip(String label, _PayFilter value, IconData icon) {
+    final isSelected = _payFilter == value;
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: GestureDetector(
+        onTap: () {
+          setState(() =>
+              _payFilter = isSelected ? _PayFilter.all : value);
+          _applyFilters();
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? const Color(0xFF1E7DC8)
+                : const Color(0xFFF4F5F8),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isSelected
+                  ? const Color(0xFF1E7DC8)
+                  : const Color(0xFFE5E7EB),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon,
+                  size: 13,
+                  color:
+                      isSelected ? Colors.white : const Color(0xFF6B7280)),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : const Color(0xFF6B7280),
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildFilterChips() {
     final isMoreSelected = _moreFilters.contains(_selectedFilter);
 
@@ -611,6 +714,16 @@ class ExpensesPanelState extends State<ExpensesPanel> {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
         children: [
+          // Спосіб оплати — незалежно від типу документа: резерв чи
+          // повернення теж бувають готівкою або через термінал.
+          _buildPayChip('Готівка', _PayFilter.cash, Icons.payments_outlined),
+          _buildPayChip('Термінал', _PayFilter.terminal,
+              Icons.credit_card_rounded),
+          Container(
+            width: 1,
+            margin: const EdgeInsets.fromLTRB(2, 4, 8, 4),
+            color: const Color(0xFFE5E7EB),
+          ),
           // Primary filter chips
           ..._primaryFilters.map(_buildFilterChip),
           // "Ще..." dropdown chip
@@ -718,7 +831,9 @@ class ExpensesPanelState extends State<ExpensesPanel> {
                   size: 40, color: Colors.grey.shade300),
               const SizedBox(height: 12),
               Text(
-                _hasQuery || _selectedFilter != 'Всі'
+                _hasQuery ||
+                        _selectedFilter != 'Всі' ||
+                        _payFilter != _PayFilter.all
                     ? 'Нічого не знайдено'
                     : 'Немає операцій',
                 style: const TextStyle(
@@ -742,6 +857,8 @@ class ExpensesPanelState extends State<ExpensesPanel> {
         return _ExpenseListTile(
           expense: expense,
           highlighted: _hasQuery && index == _highlightedIndex,
+          // У режимі «всі каси» без назви каси не зрозуміти, чия накладна.
+          showRegister: _registerId == null && _registers.length > 1,
           onTap: () => _selectExpense(expense),
         );
       },
@@ -1232,11 +1349,13 @@ Color _typeColor(ExpenseType type) {
 class _ExpenseListTile extends StatefulWidget {
   final CashExpense expense;
   final bool highlighted;
+  final bool showRegister;
   final VoidCallback onTap;
 
   const _ExpenseListTile({
     required this.expense,
     this.highlighted = false,
+    this.showRegister = false,
     required this.onTap,
   });
 
@@ -1350,6 +1469,12 @@ class _ExpenseListTileState extends State<_ExpenseListTile> {
                     ),
                   ],
                   const Spacer(),
+                  // Термінал — картка перед сумою; готівка без позначки.
+                  if (e.isTerminal) ...[
+                    const Icon(Icons.credit_card_rounded,
+                        size: 13, color: Color(0xFF6B7280)),
+                    const SizedBox(width: 4),
+                  ],
                   // Amount
                   Text(
                     '$amountStr ₴',
@@ -1374,6 +1499,9 @@ class _ExpenseListTileState extends State<_ExpenseListTile> {
               Padding(
                 padding: const EdgeInsets.only(left: 16),
                 child: Text(
+                  // Каса — лише в режимі «всі каси»; `register` = ekkKliName
+                  // («КАСА 1, Новокузнецька, 27»), беремо до першої коми.
+                  '${widget.showRegister ? '${e.register.split(',').first.trim()} · ' : ''}'
                   '$dateStr $timeStr · $_itemsSummary',
                   style: const TextStyle(
                     color: Color(0xFF6B7280),

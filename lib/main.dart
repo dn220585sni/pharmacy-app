@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'screens/pos_screen.dart';
 import 'services/auth_service.dart';
+import 'services/drug_name_index.dart';
 import 'services/fiscal_log.dart';
 import 'services/prro_queue.dart';
 import 'services/prro_service.dart';
@@ -66,6 +67,9 @@ Future<void> main() async {
     // пропонував Z при виході). Дедуплікується з викликом у pos_screen.
     await ShiftService.ensureRestored();
   }());
+
+  // Словник назв для виправлення одруківок у пошуку — з диска, у фоні.
+  unawaited(DrugNameIndex.instance.load());
 
   // Збережений на цьому ПК масштаб UI — до першого кадру (див. `UiZoom`).
   await UiZoom.load();

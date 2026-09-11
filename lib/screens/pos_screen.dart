@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show AppExitType;
 import '../models/money.dart';
 import '../utils/scan_keymap.dart';
+import '../utils/fuzzy_search.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../data/cart_offers.dart';
@@ -15,6 +16,7 @@ import '../services/receipt_printer.dart';
 import '../widgets/shift_required_dialog.dart';
 import '../services/auth_service.dart';
 import '../services/cart_price_service.dart';
+import '../services/drug_name_index.dart';
 import '../services/drug_service.dart';
 import '../services/fiscal_log.dart';
 import '../services/pakunok_service.dart';
@@ -114,6 +116,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   Timer? _nameSearchTimer;
   Timer? _localFilterTimer;
   bool _isServerLookup = false;
+
+  /// Запит, за яким показано результати, коли набраний повернув порожньо і
+  /// словник його виправив («цитромон» → «цитрамон»). Касир має це бачити.
+  String? _correctedQueryHint;
 
   // ── Черга відкладених чеків ПРРО (offline) ─────────────────────────────
   /// Періодичний flush + індикатор кількості в TopBar.
@@ -1532,6 +1538,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void _filterDrugs() {
     final query = _searchController.text.trim();
 
+    // Новий запит — стара підказка «показано за …» більше не про нього.
+    if (_correctedQueryHint != null) {
+      setState(() => _correctedQueryHint = null);
+    }
+
     // Empty query: apply immediately (no debounce needed)
     if (query.isEmpty) {
       _localFilterTimer?.cancel();
@@ -1570,7 +1581,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       );
     } else if (query.length >= 2) {
       // ── Server name search ────────────────────────────────────────────
-      // Send original query — Caché now searches both name and nameukr
+      // ⚠️ Caché шукає лише в УКРАЇНСЬКІЙ назві (nameukr): 11.09 «нимесил»
+      // → 0, «німесил» → 5. Російське написання рятує лише словник
+      // (DrugNameIndex) у `_searchByNameOnServer`.
       _nameSearchTimer = Timer(
         const Duration(milliseconds: 300),
         () => _searchByNameOnServer(query),
@@ -1591,12 +1604,22 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       } else {
         // Show instant results from top drugs cache while server searches
         if (existingServerDrugs.isEmpty && _topDrugsCache.isNotEmpty) {
-          final lowerQuery = query.toLowerCase();
-          final cached = _topDrugsCache
-              .where((item) =>
-                  item.name.toLowerCase().contains(lowerQuery) ||
-                  (item.nameUkr?.toLowerCase().contains(lowerQuery) ?? false))
+          // Нечітко (одруківки, и/і, дефіси — див. fuzzy_search.dart): кращі
+          // збіги вище, при рівній оцінці — популярніші (порядок GetTopDrugs).
+          final scored = <(double, int, DrugSearchItem)>[];
+          for (var i = 0; i < _topDrugsCache.length; i++) {
+            final item = _topDrugsCache[i];
+            final s = drugSearchScore(query, item.name,
+                nameUkr: item.nameUkr, manufacturer: item.manufacturer);
+            if (s > 0) scored.add((s, i, item));
+          }
+          scored.sort((a, b) {
+            final c = b.$1.compareTo(a.$1);
+            return c != 0 ? c : a.$2.compareTo(b.$2);
+          });
+          final cached = scored
               .take(30)
+              .map((e) => e.$3)
               .map((item) => Drug(
                     id: 'srv_${item.ids}',
                     name: item.nameUkr ?? item.name,
@@ -1698,6 +1721,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     DrugService.fetchTopDrugs().then((items) {
       if (!mounted) return;
       _topDrugsCache = items;
+      DrugNameIndex.instance.feed(items, top: true);
       debugPrint('TopDrugsCache: loaded ${items.length} items');
       // Гібрид: фоновий префетч стоп-цін для топ-500 (де сконцентровані акції) —
       // популярні товари показують акційну ціну в таблиці миттєво.
@@ -1707,36 +1731,130 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     });
   }
 
+  /// Обидва серверні пошуки паралельно:
+  /// - SearchByNameSKU: s-коди з цінами, терміном, comingPrice (лише в наявності)
+  /// - SearchByName: u-коди, включно з нульовим залишком
+  Future<({List<DrugSearchItem> sku, List<DrugSearchItem> u})>
+      _fetchNameSearch(String query) async {
+    final r = await Future.wait([
+      DrugService.searchByName(query),
+      DrugService.searchByNameUcodes(query),
+    ]);
+    return (sku: r[0], u: r[1]);
+  }
+
+  /// Лишити з відповіді сервера (він шукав за одним словом) лише рядки, що
+  /// відповідають усьому виправленому запиту. Якщо не лишилось нічого —
+  /// віддати як є: краще показати всі «зест», ніж порожньо.
+  ///
+  /// [strict] — порожньо так порожньо (для пошуку за початком слова: «бол»
+  /// для «болран» не має показувати всі «БОЛ…», якщо болрану немає).
+  ({List<DrugSearchItem> sku, List<DrugSearchItem> u}) _narrowToQuery(
+    ({List<DrugSearchItem> sku, List<DrugSearchItem> u}) found,
+    String fullQuery, {
+    bool strict = false,
+  }) {
+    bool ok(DrugSearchItem i) =>
+        drugSearchScore(fullQuery, i.name,
+            nameUkr: i.nameUkr, manufacturer: i.manufacturer) >
+        0;
+    final sku = found.sku.where(ok).toList();
+    final u = found.u.where(ok).toList();
+    if (sku.isEmpty && u.isEmpty && !strict) return found;
+    return (sku: sku, u: u);
+  }
+
   /// Search drugs by name on Caché server; merge results into table.
   /// [originalQuery] — original user input (for stale-check against search field).
   Future<void> _searchByNameOnServer(String query, {String? originalQuery}) async {
     if (!mounted) return;
     setState(() => _isServerLookup = true);
 
+    // Касир уже змінив запит, поки ми чекали сервер?
+    bool stale() {
+      final t = _searchController.text.trim();
+      return t != query && t != (originalQuery ?? query);
+    }
+
     try {
-      // Run both searches in parallel:
-      // - SearchByNameSKU: s-codes with prices, expiry, comingPrice (in-stock only)
-      // - SearchByName: u-codes including out-of-stock items
-      final results = await Future.wait([
-        DrugService.searchByName(query),
-        DrugService.searchByNameUcodes(query),
-      ]);
+      var found = await _fetchNameSearch(query);
       if (!mounted) return;
-
-      final skuItems = results[0]; // s-codes (in-stock with prices)
-      final uItems = results[1];   // u-codes (all, including zero stock)
-
-      // Ignore if user already changed the search query.
-      final currentText = _searchController.text.trim();
-      if (currentText != query && currentText != (originalQuery ?? query)) {
+      if (stale()) {
         setState(() => _isServerLookup = false);
         return;
       }
+
+      // Порожньо — сервер шукає лише точний підрядок. Виправляємо одруківку,
+      // розкладку чи порядок слів за локальним словником і робимо ОДИН
+      // повторний виклик найселективнішим словом; до повного запиту звужуємо
+      // самі. Без словникового збігу повторного виклику немає (DrugNameIndex).
+      String? hint;
+      if (found.sku.isEmpty && found.u.isEmpty && !ApiConfig.useMock) {
+        final fix = DrugNameIndex.instance.fix(query);
+        if (fix != null) {
+          found = await _fetchNameSearch(fix.serverQuery);
+          if (!mounted) return;
+          if (stale()) {
+            setState(() => _isServerLookup = false);
+            return;
+          }
+          found = _narrowToQuery(found, fix.fullQuery);
+          if (fix.changed && (found.sku.isNotEmpty || found.u.isNotEmpty)) {
+            hint = fix.fullQuery;
+          }
+          // У журнал, бо в Release інакше не видно, що робив пошук.
+          FiscalLog.log('ПОШУК «$query»: порожньо → виправлено '
+              '«${fix.fullQuery}» (серверу «${fix.serverQuery}») → '
+              '${found.sku.length}+${found.u.length}');
+        } else {
+          FiscalLog.log('ПОШУК «$query»: порожньо, словник не допоміг '
+              '(${DrugNameIndex.instance.length} назв)');
+        }
+
+        // Усе ще порожньо (словник слова не знає — холодний старт, або
+        // назва в базі інша: «БОЛ-РАН»). Останній хід: початок найдовшого
+        // слова — помилки на початку рідкісні. Відповідь звужуємо строго до
+        // повного запиту, а словник вона наповнює в будь-якому разі.
+        if (found.sku.isEmpty && found.u.isEmpty) {
+          final stem = stemForServer(query);
+          if (stem != null) {
+            final broad = await _fetchNameSearch(stem);
+            if (!mounted) return;
+            if (stale()) {
+              setState(() => _isServerLookup = false);
+              return;
+            }
+            DrugNameIndex.instance.feed(broad.sku);
+            DrugNameIndex.instance.feed(broad.u);
+            found = _narrowToQuery(broad, query, strict: true);
+            FiscalLog.log('ПОШУК «$query»: за початком «$stem» → '
+                '${broad.sku.length}+${broad.u.length}, після звуження → '
+                '${found.sku.length}+${found.u.length}');
+          }
+        }
+      }
+
+      final skuItems = found.sku; // s-codes (in-stock with prices)
+      final uItems = found.u;     // u-codes (all, including zero stock)
 
       if (skuItems.isEmpty && uItems.isEmpty) {
-        setState(() => _isServerLookup = false);
+        // Сервер порожній — не лишати в таблиці рядки від ПОПЕРЕДНЬОГО
+        // запиту («ни» при набраному «нимесил»): касир бачив би чужі
+        // препарати і не бачив німесилу з топ-500. Знімаємо серверні рядки
+        // й даємо слово локальному нечіткому фільтру (топ-500) — він або
+        // покаже збіги, або чесне «Нічого не знайдено».
+        setState(() {
+          _isServerLookup = false;
+          _searchResults =
+              _searchResults.where((d) => !d.id.startsWith('srv_')).toList();
+        });
+        _applyLocalFilter(query);
         return;
       }
+
+      // Кожна відповідь сервера поповнює словник назв цієї аптеки.
+      DrugNameIndex.instance.feed(skuItems);
+      DrugNameIndex.instance.feed(uItems);
 
       // Build Drug objects from s-codes (with full pricing data)
       final serverDrugs = <Drug>[];
@@ -1857,6 +1975,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
               _searchResults.isNotEmpty ? _searchResults.first : null;
         }
         _isServerLookup = false;
+        _correctedQueryHint = hint;
       });
       // Ліниво підтягнути стоп-ціни для видимих результатів (гібрид).
       _prefetchStopPriceUkods(_searchResults.map((d) => d.ukod));
@@ -4245,6 +4364,26 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             ),
           ),
         ),
+
+        // Результати не за тим, що набрано, — касир має це бачити, а не
+        // здогадуватись, чому в таблиці «цитрамон» при набраному «цитромон».
+        if (_correctedQueryHint != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 6),
+            child: Text.rich(
+              TextSpan(
+                style: const TextStyle(fontSize: 13, color: Color(0xFF92400E)),
+                children: [
+                  const TextSpan(
+                      text: 'За набраним нічого не знайдено — показано за '),
+                  TextSpan(
+                    text: '«$_correctedQueryHint»',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ),
 
         // Symptom chips + «Більше…» scroll together; cart is fixed at the right
         SizedBox(

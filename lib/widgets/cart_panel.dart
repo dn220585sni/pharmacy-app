@@ -20,7 +20,7 @@ import '../services/cart_price_service.dart';
 import '../services/ecr_terminal_client.dart';
 import '../services/fiscal_log.dart';
 import '../services/terminal_service.dart';
-import '../services/prro_queue.dart';
+import 'prro_unavailable_dialog.dart';
 import '../services/prro_service.dart';
 import '../services/receipt_archive.dart';
 import '../services/receipt_outbox.dart';
@@ -1157,45 +1157,28 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       } else {
         await PrroReceiptDialog.show(context, result);
       }
-      // Спробувати скинути попередньо відкладені чеки у фоні.
-      unawaited(PrroQueue.flush());
       return mounted;
     }
 
     if (result.errorKind == PrroErrorKind.connection) {
-      if (usedRaw) {
-        await PrroQueue.enqueueSaleRaw(
-          products: rawProducts,
-          payments: rawPayments,
-          totalSum: saleTotal,
-          localNumber: localNumber,
-          error: result.error,
-        );
-      } else {
-        await PrroQueue.enqueueSale(
-          products: fbProducts,
-          payments: fbPayments,
-          totalSum: saleTotal,
-          roundSum: roundSum,
-          localNumber: localNumber,
-          error: result.error,
-        );
-      }
-      // A3: продаж лишається незавершеним у журналі — чек ще не існує. Коли
-      // черга його проведе, відновлення на старті добʼє PutKasa за NumNakl.
-      await SaleJournal.markNote(numNakl, 'чек у черзі ПРРО');
+      // ПРРО недоступний — чека НЕМАЄ, і каса його НЕ пробиватиме сама.
+      //
+      // До 11.09.2026 тут була офлайн-черга з автопробиттям, щойно ПРРО
+      // оживе. Микола: це помилка — накладна в базі ≠ клієнт заплатив (міг
+      // піти, поки ПРРО лежав; так було з 2900664712). Накладна лишається
+      // РЕЗЕРВОМ, а рішення пробити/не пробити ухвалює фармацевт вручну у
+      // «Витратах по касі» (сервіс Каті). Тому:
+      // - з журналу A3 запис прибираємо: чека точно немає, шукати його в
+      //   зміні на старті нема чого;
+      // - кошик очищаємо (накладна вже існує — повторне «Провести» створило
+      //   б дублікат), але замість вікна з чеком — модальне попередження.
+      await SaleJournal.abort(
+          numNakl, 'ПРРО недоступний — накладна лишена резервом');
+      FiscalLog.log('ПРРО недоступний: чек НЕ пробито, накладна $numNakl '
+          'лишена резервом (Витрати по касі); ${result.error}');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'ПРРО недоступний — чек відкладено в чергу '
-              '(буде надіслано пізніше)',
-            ),
-            duration: const Duration(seconds: 3),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: const Color(0xFFB45309),
-          ),
-        );
+        await showPrroUnavailableDialog(context,
+            numNakl: numNakl, error: result.error);
       }
       return mounted;
     }

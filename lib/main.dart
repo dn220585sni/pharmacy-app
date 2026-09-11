@@ -6,7 +6,6 @@ import 'screens/pos_screen.dart';
 import 'services/auth_service.dart';
 import 'services/drug_name_index.dart';
 import 'services/fiscal_log.dart';
-import 'services/prro_queue.dart';
 import 'services/prro_service.dart';
 import 'services/registry_config.dart';
 import 'services/session_service.dart';
@@ -54,12 +53,10 @@ Future<void> main() async {
     return r == AppExitResponse.exit ? 'exit' : 'cancel';
   });
 
-  // ПРРО: підняти кешований токен і чергу відкладених чеків.
-  // Спроба flush у фоні — якщо мережа є, відкладені чеки відразу пушнуться.
+  // ПРРО: підняти кешований токен. Офлайн-черги чеків більше немає (11.09):
+  // нефіскалізована накладна — резерв, який проводить фармацевт вручну.
   unawaited(() async {
     await PrroService.loadCachedToken();
-    await PrroQueue.load();
-    if (PrroQueue.count > 0) await PrroQueue.flush();
     // A3 (відновлення обірваних продажів) свідомо НЕ тут: `PutKasa` вимагає
     // авторизованої сесії Caché, якої на цьому етапі ще немає. Викликається
     // після успішного LoginRlz — див. `AuthService.login`.

@@ -11,6 +11,7 @@ import 'services/registry_config.dart';
 import 'services/session_service.dart';
 import 'services/shift_service.dart';
 import 'widgets/shift_end_dialog.dart';
+import 'widgets/ui_zoom.dart';
 
 /// Глобальний navigator — щоб показувати попап завершення зміни з обсервера
 /// закриття вікна (де немає звичайного BuildContext).
@@ -28,7 +29,7 @@ final navigatorKey = GlobalKey<NavigatorState>();
 /// нас; ми відповідаємо 'exit' або 'cancel'.
 const _windowChannel = MethodChannel('pharmacy/window');
 
-void main() {
+Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
 
   // Per-аптека конфіг із реєстру ZSMU\Farm (baseUrl з MAddr, код каси) — до API.
@@ -65,6 +66,9 @@ void main() {
     // пропонував Z при виході). Дедуплікується з викликом у pos_screen.
     await ShiftService.ensureRestored();
   }());
+
+  // Збережений на цьому ПК масштаб UI — до першого кадру (див. `UiZoom`).
+  await UiZoom.load();
 
   runApp(const PharmacyApp());
 }
@@ -180,7 +184,8 @@ class PharmacyApp extends StatelessWidget {
           SingleActivator(LogicalKeyboardKey.tab, shift: true):
               DoNothingIntent(),
         },
-        child: child ?? const SizedBox.shrink(),
+        // Масштаб — тут, щоб накрити і діалоги (вони всередині Navigator).
+        child: UiZoom(child: child ?? const SizedBox.shrink()),
       ),
       theme: ThemeData(
         brightness: Brightness.light,

@@ -242,6 +242,29 @@ class CashExpensesService {
     for (final e in parsed) {
       byType[e.type] = (byType[e.type] ?? 0) + 1;
     }
+    // Ключі, яких ми не знаємо, — щоб нове поле (напр. дата флагу пробиття)
+    // не лишилось непоміченим. І по кожній накладній коротко ті поля, від
+    // яких залежить, де і як вона показується. Привід: 11.09 Катерина після
+    // SetFlRRO бачить 2900664712 у нас лише за 11.09, хоча dtNakl = 08.09.
+    const known = {
+      'NumNakl', 'dtNakl', 'sum', 'tNakl', 'tNaklR', 'rezerv', 'flagRRO',
+      'Receipt', 'wdservice', 'exReturn', 'exOtkaz', 'exInsur', 'blok',
+      'PrimInsur', 'FIOInsur', 'idorder', 'UnionIZ', 'FNRRO', 'ekkKliName',
+      'user', 'NumNaklForReturn', 'items',
+    };
+    final unknown = <String>{};
+    for (final j in raw) {
+      unknown.addAll(j.keys.where((k) => !known.contains(k)));
+    }
+    if (unknown.isNotEmpty) {
+      FiscalLog.log('GetNaklKas НОВІ ПОЛЯ: ${unknown.join(", ")} — приклад: '
+          '${unknown.map((k) => '$k=${raw.first[k]}').join("; ")}');
+    }
+    if (raw.length <= 15) {
+      FiscalLog.log('GetNaklKas накладні: ${raw.map((j) =>
+          '${j['NumNakl']} dt=${j['dtNakl']} flagRRO=${j['flagRRO']} '
+          'tNaklR=${j['tNaklR']} blok=${(j['blok']?.toString() ?? '').isNotEmpty ? 1 : 0}').join(" | ")}');
+    }
     FiscalLog.log('GetNaklKas ОЗНАКИ ${_fmt(from)}–${_fmt(to)}: '
         'накл=${raw.length}; '
         'tNakl: ${tNakls.entries.map((e) => "${e.key}=${e.value}").join(", ")}; '
@@ -251,6 +274,41 @@ class CashExpensesService {
         'exInsur=$insur, exReturn=$exRet, exOtkaz=$otkaz, '
         'NumNaklForReturn≠∅=$retFor, flagRRO≠1=$notFiscal; '
         'наш мапінг: ${byType.entries.map((e) => "${e.key.name}=${e.value}").join(", ")}');
+  }
+
+  /// Встановити / зняти флаг пробиття накладній — `SetFlRRO` (Катерина,
+  /// 11.09.2026): `SetFlRRO&sessionId&NumNakl=…&rezhim={un|set}&oldsmena={0|1}`.
+  ///
+  /// Це лише ФЛАГ у базі: фіскального чека не створює і не скасовує, дату
+  /// документа не змінює. Для накладних, чек яких уже є в ПРРО (черга
+  /// пробила 2900664712 08.09), або продажів, що закриваються без чека, —
+  /// там `PutKasa` не підходить. [oldShift] → `oldsmena=1`: помітка в старій
+  /// (закритій) зміні; інакше в поточній. Вибір зміни — за фармацевтом
+  /// (меню «⋮ Ще» у картці накладної), як у роздрібі.
+  ///
+  /// ⚠️ Побічний ефект сервера (11.09): після виклику `GetNaklKas` віддає в
+  /// `dtNakl` час цього виклику, не дату документа — накладна «переїжджає» на
+  /// сьогодні. Прохання виправити — у листі Катерині 11.09, п.4.
+  static Future<String?> setFiscalFlag(
+    String numNakl, {
+    required bool set,
+    required bool oldShift,
+  }) async {
+    if (ApiConfig.useMock) return null;
+    final rezhim = set ? 'set' : 'un';
+    try {
+      final r = await CacheApiClient().call('SetFlRRO', params: {
+        'NumNakl': numNakl,
+        'rezhim': rezhim,
+        'oldsmena': oldShift ? '1' : '0',
+      });
+      FiscalLog.log('SetFlRRO($numNakl, $rezhim, oldsmena=${oldShift ? 1 : 0}): '
+          '${r.isOk ? "OK" : "FAIL"} result="${r.result}"');
+      return r.isOk ? null : (r.result.isEmpty ? 'сервіс відмовив' : r.result);
+    } catch (e) {
+      FiscalLog.log('SetFlRRO($numNakl) ERROR: $e');
+      return 'немає звʼязку з базою: $e';
+    }
   }
 
   /// Накладні каси за період. Порожній список = або справді порожньо, або

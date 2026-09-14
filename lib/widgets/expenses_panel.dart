@@ -209,15 +209,23 @@ class ExpensesPanelState extends State<ExpensesPanel> {
         }).toList();
       }
 
-      // Date range filter
-      if (_dateFrom != null) {
-        final from = DateTime(_dateFrom!.year, _dateFrom!.month, _dateFrom!.day);
-        list = list.where((e) => !e.dateTime.isBefore(from)).toList();
-      }
-      if (_dateTo != null) {
-        final to = DateTime(_dateTo!.year, _dateTo!.month, _dateTo!.day)
-            .add(const Duration(days: 1));
-        list = list.where((e) => e.dateTime.isBefore(to)).toList();
+      // Період — параметр запиту `GetNaklKas`, відбір за датою робить сервер
+      // (Катерина, 14.09: «це відповідальність мого сервісу, на клієнті по
+      // датах не фільтрувати»). Локальний фільтр по `dtNakl` лише дублював
+      // його — і після `SetFlRRO`, коли в `dtNakl` приходить час позначки,
+      // викидав зі списку за 08.09 накладну, яку сервер за 08.09 віддав
+      // (2900664712). Лишається тільки для mock, де сервера немає.
+      if (ApiConfig.useMock) {
+        if (_dateFrom != null) {
+          final from =
+              DateTime(_dateFrom!.year, _dateFrom!.month, _dateFrom!.day);
+          list = list.where((e) => !e.dateTime.isBefore(from)).toList();
+        }
+        if (_dateTo != null) {
+          final to = DateTime(_dateTo!.year, _dateTo!.month, _dateTo!.day)
+              .add(const Duration(days: 1));
+          list = list.where((e) => e.dateTime.isBefore(to)).toList();
+        }
       }
 
       // Каса локально не фільтрується — вона параметр запиту (див. _registerId).
@@ -893,6 +901,143 @@ class ExpensesPanelState extends State<ExpensesPanel> {
   // SCREEN 2 — EXPENSE DETAIL
   // ═══════════════════════════════════════════════════════════════════════════
 
+  static const _kFlagCurrent = 'Пробити по касі (поточна зміна)';
+  static const _kFlagOld = 'Пробити по касі (стара зміна)';
+  static const _kUnflag = 'Зняти позначку пробивання';
+
+  /// Пункти меню «⋮ Ще» для накладної [e]. Секція КАСА — підключена
+  /// (`SetFlRRO`), решта поки заготовки з роздрібу.
+  List<_PopupActionItem> _moreItems(CashExpense e) => [
+        const _PopupActionItem(
+            icon: null, label: 'КАСА', isSectionHeader: true),
+        // Пробити — лише резерв (накладна без флагу).
+        _PopupActionItem(
+          icon: Icons.point_of_sale_outlined,
+          label: _kFlagCurrent,
+          enabled: e.isReserve,
+        ),
+        _PopupActionItem(
+          icon: Icons.history_rounded,
+          label: _kFlagOld,
+          enabled: e.isReserve,
+        ),
+        // Зняти — лише з позначеної БЕЗ фіскального номера: флаг, поставлений
+        // вручну, або чек, пробитий чергою без PutKasa (2900664712). Справжній
+        // чек із FNRRO так не «розпробити».
+        _PopupActionItem(
+          icon: Icons.remove_circle_outline,
+          label: _kUnflag,
+          enabled: !e.isReserve && e.fiscalId == null,
+        ),
+        const _PopupActionItem(
+            icon: Icons.queue_outlined, label: 'Т. накладну в чергу'),
+        const _PopupActionItem(
+            icon: null, label: 'МІТКИ', isSectionHeader: true),
+        const _PopupActionItem(
+            icon: Icons.medical_services_outlined, label: 'Рецепт Про-Фарми'),
+        const _PopupActionItem(
+            icon: Icons.local_hospital_outlined, label: 'Поліклініка / Лікар'),
+        const _PopupActionItem(
+            icon: Icons.verified_outlined, label: 'Зареєстрований у Хелсі'),
+        const _PopupActionItem(
+            icon: Icons.currency_exchange_rounded, label: 'Реімбурсація'),
+        const _PopupActionItem(
+            icon: null, label: 'ТЕРМІНАЛ', isSectionHeader: true),
+        const _PopupActionItem(
+            icon: Icons.swap_horiz_rounded, label: 'Заміна терміналу'),
+        const _PopupActionItem(
+            icon: null, label: 'ІНШЕ', isSectionHeader: true),
+        _PopupActionItem(
+          icon: Icons.bookmark_add_outlined,
+          label: 'Провести бронювання',
+          enabled: e.isReserve,
+        ),
+      ];
+
+  void _onMoreAction(String label, CashExpense e) {
+    switch (label) {
+      case _kFlagCurrent:
+        unawaited(_setFlag(e, set: true, oldShift: false));
+      case _kFlagOld:
+        unawaited(_setFlag(e, set: true, oldShift: true));
+      case _kUnflag:
+        unawaited(_setFlag(e, set: false, oldShift: false));
+      default:
+        // Решта пунктів — ще не підключені.
+        break;
+    }
+  }
+
+  /// Меню «⋮ Ще → КАСА»: `SetFlRRO` — у базі ставиться/знімається лише
+  /// ФЛАГ пробиття, фіскальний чек не створюється й не скасовується. Тому
+  /// перед викликом — явне підтвердження з поясненням, для чого це.
+  ///
+  /// [set] — встановити (`rezhim=set`) чи зняти (`un`); [oldShift] — помітка
+  /// в старій (закритій) зміні (`oldsmena=1`) чи в поточній. Вибір зміни —
+  /// за фармацевтом, як у роздрібі; каса не вгадує.
+  Future<void> _setFlag(CashExpense e,
+      {required bool set, required bool oldShift}) async {
+    final shift = oldShift ? 'у старій зміні' : 'у поточній зміні';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        icon: Icon(
+            set ? Icons.task_alt_rounded : Icons.remove_circle_outline,
+            color: set ? const Color(0xFF1E7DC8) : const Color(0xFFB45309),
+            size: 36),
+        title: Text(
+            set
+                ? 'Позначити накладну №${e.receiptNumber} пробитою $shift?'
+                : 'Зняти позначку пробиття з накладної №${e.receiptNumber}?',
+            style:
+                const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        content: Text(
+          set
+              ? 'У базі буде поставлено флаг пробиття. Фіскальний чек при '
+                  'цьому НЕ створюється.\n\n'
+                  'Робіть це, якщо чек за цією накладною вже є в ПРРО, або '
+                  'продаж закривається без чека за рішенням завідувача.'
+              : 'У базі буде знято флаг пробиття, накладна знову стане '
+                  'резервом. Фіскальний чек у ПРРО (якщо він є) при цьому '
+                  'НЕ скасовується.',
+          style: const TextStyle(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Скасувати'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(set ? 'Позначити' : 'Зняти позначку'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final error = await CashExpensesService.setFiscalFlag(e.receiptNumber,
+        set: set, oldShift: oldShift);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(error == null
+          ? (set
+              ? 'Накладну №${e.receiptNumber} позначено пробитою $shift'
+              : 'Позначку пробиття з №${e.receiptNumber} знято')
+          : 'Не вдалося: $error'),
+      backgroundColor:
+          error == null ? const Color(0xFF059669) : const Color(0xFFDC2626),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 4),
+    ));
+    if (error != null) return;
+    // Назад до списку й перезапит: статус змінився на сервері.
+    setState(() => _selectedExpense = null);
+    unawaited(_load());
+  }
+
   Widget _buildDetailScreen(CashExpense expense) {
     return Column(
       key: ValueKey('expense_detail_${expense.id}'),
@@ -1240,76 +1385,11 @@ class ExpensesPanelState extends State<ExpensesPanel> {
               _PopupActionButton(
                 icon: Icons.more_horiz_rounded,
                 label: null,
-                items: [
-                  // ── Каса ──
-                  const _PopupActionItem(
-                    icon: null,
-                    label: 'КАСА',
-                    isSectionHeader: true,
-                  ),
-                  const _PopupActionItem(
-                    icon: Icons.point_of_sale_outlined,
-                    label: 'Пробити по касі (поточна зміна)',
-                  ),
-                  const _PopupActionItem(
-                    icon: Icons.history_rounded,
-                    label: 'Пробити по касі (стара зміна)',
-                  ),
-                  const _PopupActionItem(
-                    icon: Icons.remove_circle_outline,
-                    label: 'Зняти позначку пробивання',
-                  ),
-                  const _PopupActionItem(
-                    icon: Icons.queue_outlined,
-                    label: 'Т. накладну в чергу',
-                  ),
-                  // ── Мітки ──
-                  const _PopupActionItem(
-                    icon: null,
-                    label: 'МІТКИ',
-                    isSectionHeader: true,
-                  ),
-                  const _PopupActionItem(
-                    icon: Icons.medical_services_outlined,
-                    label: 'Рецепт Про-Фарми',
-                  ),
-                  const _PopupActionItem(
-                    icon: Icons.local_hospital_outlined,
-                    label: 'Поліклініка / Лікар',
-                  ),
-                  const _PopupActionItem(
-                    icon: Icons.verified_outlined,
-                    label: 'Зареєстрований у Хелсі',
-                  ),
-                  const _PopupActionItem(
-                    icon: Icons.currency_exchange_rounded,
-                    label: 'Реімбурсація',
-                  ),
-                  // ── Термінал ──
-                  const _PopupActionItem(
-                    icon: null,
-                    label: 'ТЕРМІНАЛ',
-                    isSectionHeader: true,
-                  ),
-                  const _PopupActionItem(
-                    icon: Icons.swap_horiz_rounded,
-                    label: 'Заміна терміналу',
-                  ),
-                  // ── Інше ──
-                  const _PopupActionItem(
-                    icon: null,
-                    label: 'ІНШЕ',
-                    isSectionHeader: true,
-                  ),
-                  _PopupActionItem(
-                    icon: Icons.bookmark_add_outlined,
-                    label: 'Провести бронювання',
-                    enabled: expense.isReserve,
-                  ),
-                ],
-                onSelected: (_) {
-                  // TODO: handle action
-                },
+                items: _moreItems(expense),
+                // Індекс — позиція в списку разом із заголовками секцій,
+                // тож диспетчеризуємо за підписом, а не за номером.
+                onSelected: (i) =>
+                    _onMoreAction(_moreItems(expense)[i].label, expense),
               ),
             ],
           ),

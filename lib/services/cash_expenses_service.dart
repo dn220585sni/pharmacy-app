@@ -192,6 +192,11 @@ class CashExpensesService {
       fiscalId: _orNull(j['FNRRO']),
       // «Терминал» (рос.) або «Термінал» — обидва починаються з «терм».
       isTerminal: tNakl.toLowerCase().startsWith('терм'),
+      // Значення полів — з Google-доку Катерини (14.09.2026).
+      payer: _orNull(j['KliName']),
+      loyaltyCard: _orNull(j['SpartaCard']),
+      bonusSpent: flexDouble(j['SpisBonus']) ?? 0,
+      note: _orNull(j['Prim']),
     );
   }
 

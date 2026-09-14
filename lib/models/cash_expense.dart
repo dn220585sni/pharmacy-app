@@ -60,6 +60,10 @@ class CashExpense {
     this.unionInvoice,
     this.fiscalId,
     this.isTerminal = false,
+    this.payer,
+    this.loyaltyCard,
+    this.bonusSpent = 0,
+    this.note,
   });
 
   final String id;
@@ -113,6 +117,19 @@ class CashExpense {
   /// і при картковій оплаті накладна пишеться на код банку (`KodKli`), тобто
   /// це справді спосіб оплати.
   final bool isTerminal;
+
+  /// `KliName` — контрагент оплати: для картки банк («Приват Банк»), для
+  /// готівки — сама каса (тоді дублює [register] і в картці не показується).
+  final String? payer;
+
+  /// `SpartaCard` — картка лояльності «Спарта» клієнта.
+  final String? loyaltyCard;
+
+  /// `SpisBonus` — сума списаних бонусів Лайк.
+  final double bonusSpent;
+
+  /// `Prim` — примітка до накладної (нестача, термін, бронювання).
+  final String? note;
 
   bool get isReserve => status == ExpenseStatus.reserved;
 

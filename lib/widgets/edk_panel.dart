@@ -6,7 +6,10 @@ import '../models/edk_offer.dart';
 /// Right-panel card proposing a pharmaceutical substitution (ЄДК).
 class EdkPanel extends StatelessWidget {
   final EdkOffer offer;
-  final VoidCallback onAddPackage;
+
+  /// null — цілої упаковки в наявності немає, кнопку «Упаковку» не показуємо
+  /// (див. [EdkOffer.hasWholePackage]).
+  final VoidCallback? onAddPackage;
   final VoidCallback? onAddBlister;
   final VoidCallback onDismiss;
 
@@ -240,7 +243,25 @@ class EdkPanel extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Column(
               children: [
-                // Primary row: Блістер (optional) + Упаковку
+                // Цілої упаковки немає — пояснюємо, чому кнопки «Упаковку»
+                // нема, і скільки саше/блістерів лишилось у розпочатій.
+                if (onAddPackage == null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      offer.looseUnits != null
+                          ? 'Цілої упаковки немає — в наявності лише '
+                              '${offer.looseUnits} з ${drug.unitsPerPackage} шт'
+                          : 'Цілої упаковки в наявності немає',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFFB45309),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                // Primary row: Блістер (optional) + Упаковку (optional)
                 Row(
                   children: [
                     if (onAddBlister != null) ...[
@@ -274,8 +295,9 @@ class EdkPanel extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      if (onAddPackage != null) const SizedBox(width: 8),
                     ],
+                    if (onAddPackage != null)
                     Expanded(
                       child: GestureDetector(
                         onTap: onAddPackage,

@@ -637,33 +637,76 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     try {
       var lastRows = <DrugSearchItem>[];
       var lastQuery = '';
-      for (final query in EdkOffer.searchQueriesFor(name)) {
+      // `GetEdkOffers` віддає назви в РОСІЙСЬКОМУ написанні («РЕМЕСУЛИД»),
+      // а в довіднику товари українською («РЕМЕСУЛІД») — пошук за сирою
+      // назвою давав 0 рядків (лог 14.09: «останній запит "РЕМЕСУЛИД" → 0
+      // рядків»). Без рядка немає ні залишку, ні ціни таблиці, і `stock`
+      // падає у фолбек «1 упаковка». Тому до кожного запиту додаємо його
+      // виправлення тим самим словником, що й головний пошук, і просту
+      // заміну и→і. Зайві запити безпечні: рядок усе одно вибирається точно
+      // за s-/u-кодом.
+      final queries = <String>[];
+      for (final q in EdkOffer.searchQueriesFor(name)) {
+        for (final v in [
+          q,
+          DrugNameIndex.instance.fix(q)?.serverQuery,
+          EdkOffer.ukrainianSpelling(q),
+        ]) {
+          if (v != null && v.length >= 3 && !queries.contains(v)) queries.add(v);
+        }
+      }
+      for (final query in queries) {
         lastQuery = query;
         lastRows = await DrugService.searchByName(query);
 
-        // 1) Точний збіг за s-кодом від сервера — найнадійніше.
-        if (skodFromServer.isNotEmpty) {
-          for (final r in lastRows) {
-            if (r.ids == skodFromServer) return r;
+        // Кандидати: рядок із s-кодом сервера + усі партії з тим самим u-кодом.
+        DrugSearchItem? serverRow;
+        for (final r in lastRows) {
+          if (skodFromServer.isNotEmpty && r.ids == skodFromServer) {
+            serverRow = r;
+            break;
           }
         }
-
-        // 2) Інакше — за u-кодом; серед партій беремо першу з залишком
-        // (сервер віддає їх у порядку FEFO).
-        final sameProduct = lastRows.where((r) => r.ukod == ukod).toList();
+        final sameProduct = lastRows
+            .where((r) => r.ukod == ukod || (serverRow != null && r == serverRow))
+            .toList();
         if (sameProduct.isEmpty) continue;
-        final picked = sameProduct.firstWhere(
-          (r) => r.qty > 0,
-          orElse: () => sameProduct.first,
-        );
-        // Коли партій кілька — фіксуємо ВСІ кандидати. Підозра (Юлія, беклог):
-        // у товару є окремі рядки цілої та розпочатої упаковки з тим самим
-        // u-кодом, і ми беремо розпочату, а з нею — ціну за саше (186 → 18,60).
-        // Без цього рядка вибір партії з журналу не видно взагалі.
-        if (sameProduct.length > 1) {
+
+        // Вибір партії (Микола, 14.09): `replacementSKod` із GetEdkOffers
+        // вказував на РОЗПОЧАТУ партію Ремесуліду (0,2 уп.), тоді як у сусідній
+        // партії лежало 8 цілих. Касир у таблиці бачить «8» і не розуміє,
+        // чому «Упаковку» не додається. Тому s-код сервера має пріоритет
+        // лише коли в його партії є ціла упаковка; інакше беремо першу партію
+        // з цілою упаковкою (сервер віддає їх у порядку FEFO), і тільки якщо
+        // такої немає — партію сервера (для продажу саше/блістером).
+        DrugSearchItem? picked;
+        if (serverRow != null && serverRow.qty >= 1) picked = serverRow;
+        if (picked == null) {
+          for (final r in sameProduct) {
+            if (r.qty >= 1) {
+              picked = r;
+              break;
+            }
+          }
+        }
+        picked ??= serverRow;
+        if (picked == null) {
+          for (final r in sameProduct) {
+            if (r.qtyRaw > 0) {
+              picked = r;
+              break;
+            }
+          }
+        }
+        picked ??= sameProduct.first;
+
+        // Коли партій кілька або взяли не ту, що дав сервер — фіксуємо ВСІ
+        // кандидати, інакше вибір партії з журналу не видно взагалі.
+        if (sameProduct.length > 1 || picked != serverRow) {
           FiscalLog.log('ЄДК вибір партії для "$name": '
               'обрано ids=${picked.ids} ціна=${picked.price} '
-              'залишок=${picked.qtyRaw} упак=${picked.unitsPerPackage}; '
+              'залишок=${picked.qtyRaw} упак=${picked.unitsPerPackage}'
+              '${skodFromServer.isNotEmpty && picked.ids != skodFromServer ? " (НЕ s-код сервера $skodFromServer)" : ""}; '
               'кандидати: ${sameProduct.map((r) => "ids=${r.ids}/ц=${r.price}"
                   "/зал=${r.qtyRaw}/упак=${r.unitsPerPackage}").join(" ;; ")}');
         }
@@ -754,9 +797,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         skodFromServer: offer.replacementSKod,
       );
       if (!mounted) return;
-      // S-код від сервера авторитетний навіть тоді, коли рядка в пошуку немає.
-      final skod =
-          offer.replacementSKod.isNotEmpty ? offer.replacementSKod : (batch?.ids ?? '');
+      // Партія з таблиці має пріоритет (вона може бути іншою, ніж s-код
+      // сервера, — див. вибір у `_resolveEdkBatch`); s-код сервера — коли
+      // рядка в пошуку немає взагалі.
+      final skod = (batch?.ids.isNotEmpty ?? false)
+          ? batch!.ids
+          : offer.replacementSKod;
       final replacementDrug = Drug(
         // srv_<s-код> — той самий формат, що й у звичайних товарів: на нього
         // зав'язані резервування і матчинг цін GetSumSkid. Без s-коду лишаємо
@@ -796,7 +842,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
               '(u-код ${offer.replacementId}) → пропозицію показуємо, '
               'додавання в кошик заблоковано'
           : 'ЄДК: ${offer.replacementName} → s-код $skod '
-              '(${offer.replacementSKod.isNotEmpty ? "з GetEdkOffers" : "з пошуку"}), '
+              '(${skod == offer.replacementSKod ? "з GetEdkOffers" : offer.replacementSKod.isEmpty ? "з пошуку" : "з пошуку, GetEdkOffers давав ${offer.replacementSKod}"}), '
               '${batch != null ? "залишок ${batch.qty}, ціна таблиці ${batch.price}" : "партії в таблиці НЕ знайшли"}'
               ', ціна пропозиції ${offer.replacementPrice}'
               ', упак=${replacementDrug.unitsPerPackage ?? "?"}'
@@ -1428,9 +1474,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _addOosEdkPackage(_selectedDrug!);
         return true;
       }
-      // Standard EDK
+      // Standard EDK: Enter = те, що показано головною кнопкою — упаковка,
+      // а коли цілої немає, блістер/саше; коли немає нічого — нічого.
       if (activeEdkOffer != null) {
-        _addEdkToCart();
+        if (activeEdkOffer!.hasWholePackage) {
+          _addEdkToCart();
+        } else if (activeEdkOffer!.hasLooseUnit) {
+          _addEdkBlisterToCart();
+        }
         return true;
       }
       return false;
@@ -3023,12 +3074,80 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   bool _isEdkDonor(CartItem item, String donorId) =>
       item.drug.id == donorId || item.drug.ukod == donorId;
 
+  // ── Резервування заміни ЄДК ────────────────────────────────────────────
+
+  /// Скільки заміни вже зарезервовано під поточний кошик (0 — ще немає).
+  double _edkLockedQty(Drug replacement) {
+    final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
+    return idx >= 0 ? _cartItemLockQty(_cart[idx]) : 0.0;
+  }
+
+  /// Бажана кількість ЦІЛИХ упаковок заміни після додавання ще однієї.
+  int _edkNextPackages(Drug replacement) {
+    final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
+    return idx >= 0 ? _cart[idx].quantity + 1 : 1;
+  }
+
+  /// Бажана кількість блістерів/саше заміни після додавання ще одного.
+  int _edkNextBlisters(Drug replacement) {
+    final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
+    final current = idx >= 0 ? (_cart[idx].fractionalQty ?? 0) : 0;
+    return (current + 1).clamp(1, replacement.unitsPerPackage!);
+  }
+
+  /// Зарезервувати заміну ЄДК на сервері ДО того, як чіпати кошик і донора.
+  ///
+  /// Баг (Микола, 14.09): результат `sgVRoznSetLock` тут ігнорувався. Коли
+  /// партії заміни в таблиці не знайшли, `stock` = фолбек «1», ми клали в
+  /// кошик 1 упаковку РЕМЕСУЛІДу за 186, а сервер резервував лише наявне —
+  /// 0,2 упаковки (2 саше) — і GetSumSkid чесно рахував 0,2 × 186 = 37,20.
+  /// Касир бачив «упаковку за 37 грн». Тепер кошик змінюємо лише тоді, коли
+  /// сервер дав СТІЛЬКИ, скільки просили; інакше повертаємо резерв у
+  /// попередній стан і кажемо, скільки є насправді.
+  Future<bool> _reserveEdkReplacement(Drug replacement, double want) async {
+    final prev = _edkLockedQty(replacement);
+    final result = await _lockStock(replacement, want);
+    if (!mounted) return false;
+    final granted = result.grantedQty;
+    if (result.ok && granted + 1e-6 >= want) return true;
+
+    // Відкат: серверний резерв має збігатися з тим, що лишилось у кошику.
+    unawaited(_lockStock(replacement, prev));
+
+    final units = replacement.unitsPerPackage ?? 0;
+    final String msg;
+    if (!result.ok) {
+      msg = 'Помилка резервування: ${replacement.name}';
+    } else if (granted <= 0) {
+      msg = '${replacement.name} — залишку немає або він зарезервований '
+          'іншою касою';
+    } else if (granted < 1 && units > 1) {
+      msg = '${replacement.name} — в наявності лише '
+          '${(granted * units).round()} з $units шт, цілої упаковки немає';
+    } else {
+      msg = '${replacement.name} — доступно лише ${granted.floor()} уп.';
+    }
+    FiscalLog.log('ЄДК резерв ${replacement.name} (${replacement.id}): '
+        'просили $want, сервер дав $granted → у кошик НЕ додаємо; '
+        'резерв повернуто до $prev');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      duration: const Duration(seconds: 5),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: const Color(0xFFB45309),
+    ));
+    return false;
+  }
+
   /// Accept EDK: add 1 package of replacement, remove donor from cart.
-  void _addEdkToCart() {
+  Future<void> _addEdkToCart() async {
     if (activeEdkOffer == null) return;
     final replacement = activeEdkOffer!.drug;
     if (!_ensureEdkSellable(replacement)) return;
     final donorId = activeEdkOffer!.donorDrugId;
+    // Спершу резерв заміни; донора не чіпаємо, поки сервер не підтвердив.
+    final packages = _edkNextPackages(replacement);
+    if (!await _reserveEdkReplacement(replacement, packages.toDouble())) return;
     // Unlock donor drugs being removed
     for (final item in _cart) {
       if (_isEdkDonor(item, donorId)) _lockStock(item.drug, 0.0);
@@ -3039,26 +3158,28 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _cart.removeWhere((i) => _isEdkDonor(i, donorId));
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
-        if (_cart[idx].quantity < replacement.stock) _cart[idx].quantity++;
+        _cart[idx].quantity = packages;
       } else {
-        _cart.add(CartItem(drug: replacement, quantity: 1));
+        _cart.add(CartItem(drug: replacement, quantity: packages));
       }
       _selectedDrug = replacement;
     });
-    // Lock replacement
-    final cartItem = _cart.firstWhere((i) => i.drug.id == replacement.id);
-    _lockStock(replacement, _cartItemLockQty(cartItem));
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
 
   /// Accept EDK as blister: add 1 blister of replacement, remove donor.
-  void _addEdkBlisterToCart() {
+  Future<void> _addEdkBlisterToCart() async {
     if (activeEdkOffer == null) return;
     final replacement = activeEdkOffer!.drug;
     if (!_ensureEdkSellable(replacement)) return;
     final donorId = activeEdkOffer!.donorDrugId;
     if (!replacement.canSplitByBlister) return;
+    final blisters = _edkNextBlisters(replacement);
+    if (!await _reserveEdkReplacement(
+        replacement, blisters / replacement.unitsPerPackage!)) {
+      return;
+    }
     // Unlock donor
     for (final item in _cart) {
       if (_isEdkDonor(item, donorId)) _lockStock(item.drug, 0.0);
@@ -3069,17 +3190,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _cart.removeWhere((i) => _isEdkDonor(i, donorId));
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
-        final current = _cart[idx].fractionalQty ?? 0;
-        _cart[idx].fractionalQty =
-            (current + 1).clamp(1, replacement.unitsPerPackage!);
+        _cart[idx].fractionalQty = blisters;
         _cart[idx].quantity = 0;
       } else {
-        _cart.add(
-            CartItem(drug: replacement, quantity: 0, fractionalQty: 1));
+        _cart.add(CartItem(
+            drug: replacement, quantity: 0, fractionalQty: blisters));
       }
       _selectedDrug = replacement;
     });
-    _lockStock(replacement, _cartItemLockQty(_cart.firstWhere((i) => i.drug.id == replacement.id)));
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
@@ -3089,47 +3207,50 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   // ── OOS (Out-of-Stock) EDK actions ──────────────────────────────────────
 
   /// Add EDK replacement for an out-of-stock drug (whole package).
-  void _addOosEdkPackage(Drug oosDrug) {
+  Future<void> _addOosEdkPackage(Drug oosDrug) async {
     final offer = _edkOffers[_edkKey(oosDrug)];
     if (offer == null) return;
     final replacement = offer.drug;
     if (!_ensureEdkSellable(replacement)) return;
+    // Той самий захист, що й у [_addEdkToCart]: спершу резерв на сервері.
+    final packages = _edkNextPackages(replacement);
+    if (!await _reserveEdkReplacement(replacement, packages.toDouble())) return;
     setState(() {
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
-        if (_cart[idx].quantity < replacement.stock) _cart[idx].quantity++;
+        _cart[idx].quantity = packages;
       } else {
-        _cart.add(CartItem(drug: replacement, quantity: 1));
+        _cart.add(CartItem(drug: replacement, quantity: packages));
       }
       _selectedDrug = replacement;
     });
-    final cartItem = _cart.firstWhere((i) => i.drug.id == replacement.id);
-    _lockStock(replacement, _cartItemLockQty(cartItem));
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
 
   /// Add EDK replacement for an out-of-stock drug (1 blister).
-  void _addOosEdkBlister(Drug oosDrug) {
+  Future<void> _addOosEdkBlister(Drug oosDrug) async {
     final offer = _edkOffers[_edkKey(oosDrug)];
     if (offer == null) return;
     final replacement = offer.drug;
     if (!_ensureEdkSellable(replacement)) return;
     if (!replacement.canSplitByBlister) return;
+    final blisters = _edkNextBlisters(replacement);
+    if (!await _reserveEdkReplacement(
+        replacement, blisters / replacement.unitsPerPackage!)) {
+      return;
+    }
     setState(() {
       final idx = _cart.indexWhere((i) => i.drug.id == replacement.id);
       if (idx >= 0) {
-        final current = _cart[idx].fractionalQty ?? 0;
-        _cart[idx].fractionalQty =
-            (current + 1).clamp(1, replacement.unitsPerPackage!);
+        _cart[idx].fractionalQty = blisters;
         _cart[idx].quantity = 0;
       } else {
-        _cart.add(
-            CartItem(drug: replacement, quantity: 0, fractionalQty: 1));
+        _cart.add(CartItem(
+            drug: replacement, quantity: 0, fractionalQty: blisters));
       }
       _selectedDrug = replacement;
     });
-    _lockStock(replacement, _cartItemLockQty(_cart.firstWhere((i) => i.drug.id == replacement.id)));
     final ri = _searchResults.indexWhere((d) => d.id == replacement.id);
     if (ri >= 0) _scrollToIndex(ri);
   }
@@ -4205,11 +4326,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
               ? EdkPanel(
                   key: const ValueKey('edk'),
                   offer: activeEdkOffer!,
-                  onAddPackage: _addEdkToCart,
-                  onAddBlister:
-                      activeEdkOffer!.drug.canSplitByBlister
-                          ? _addEdkBlisterToCart
-                          : null,
+                  // Без цілої упаковки кнопки «Упаковку» немає (Микола,
+                  // 14.09): інакше касир тисне, а сервер дає лише 0,2 уп.
+                  onAddPackage: activeEdkOffer!.hasWholePackage
+                      ? _addEdkToCart
+                      : null,
+                  onAddBlister: activeEdkOffer!.hasLooseUnit
+                      ? _addEdkBlisterToCart
+                      : null,
                   onDismiss: _dismissEdk,
                 )
               : (_selectedDrug != null && _selectedDrug!.isOutOfStock)

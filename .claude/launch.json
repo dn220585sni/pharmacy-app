@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "coin-preview",
+      "runtimeExecutable": "flutter",
+      "runtimeArgs": [
+        "run",
+        "-d",
+        "web-server",
+        "-t",
+        "tool/coin_preview.dart",
+        "--web-port",
+        "8787",
+        "--no-pub"
+      ],
+      "port": 8787
+    }
+  ]
+}

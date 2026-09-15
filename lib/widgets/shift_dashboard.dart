@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'anc_coin.dart';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock shift data (will be replaced by a service layer later)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,7 +57,26 @@ class ShiftDashboard extends StatefulWidget {
   /// Total amount earned since shift start (accumulates with each payment).
   final double earnedAmount;
 
-  const ShiftDashboard({super.key, this.earnedAmount = 0.0});
+  /// Момент останнього нарахування фармацевту. Кожна зміна → монетка
+  /// обертається; якщо дашборд змонтовано одразу після оплати (нарахування
+  /// «свіже», до [_freshEarnWindow]) — обертається при появі.
+  final DateTime? lastEarnedAt;
+
+  /// Стиль монетки АНЦ у картці «Нараховано» (див. [AncCoinStyle]).
+  final AncCoinStyle coinStyle;
+
+  /// Ефект монетки при нарахуванні (див. [AncCoinEffect]).
+  final AncCoinEffect coinEffect;
+
+  const ShiftDashboard({
+    super.key,
+    this.earnedAmount = 0.0,
+    this.lastEarnedAt,
+    this.coinStyle = AncCoinStyle.flat,
+    this.coinEffect = AncCoinEffect.spin,
+  });
+
+  static const _freshEarnWindow = Duration(seconds: 5);
 
   @override
   State<ShiftDashboard> createState() => _ShiftDashboardState();
@@ -165,33 +186,24 @@ class _ShiftDashboardState extends State<ShiftDashboard>
           ),
           child: Row(
             children: [
+              // Плоска монетка стоїть сама на білому; золота — на блідій
+              // жовтій підкладці, як було.
               Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF8E1),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Center(
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Color(0xFFFFCC00),
-                    ),
-                    child: const Center(
-                      child: Text(
-                        'АНЦ',
-                        style: TextStyle(
-                          color: Color(0xFF1E7DC8),
-                          fontSize: 7,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.2,
-                          height: 1.0,
-                        ),
+                width: 54,
+                height: 54,
+                decoration: widget.coinStyle == AncCoinStyle.flat
+                    ? null
+                    : BoxDecoration(
+                        color: const Color(0xFFFFF8E1),
+                        borderRadius: BorderRadius.circular(13),
                       ),
-                    ),
+                child: Center(
+                  child: AncCoin(
+                    size: widget.coinStyle == AncCoinStyle.flat ? 48 : 44,
+                    style: widget.coinStyle,
+                    effect: widget.coinEffect,
+                    spinKey: widget.lastEarnedAt,
+                    spinOnMount: _isFreshEarn,
                   ),
                 ),
               ),
@@ -224,6 +236,13 @@ class _ShiftDashboardState extends State<ShiftDashboard>
         );
       },
     );
+  }
+
+  /// Нарахування щойно відбулося (дашборд з'явився одразу після оплати).
+  bool get _isFreshEarn {
+    final at = widget.lastEarnedAt;
+    return at != null &&
+        DateTime.now().difference(at) < ShiftDashboard._freshEarnWindow;
   }
 
   /// Format [value] as "3 200,00 ₴" (space thousands separator, comma decimal).

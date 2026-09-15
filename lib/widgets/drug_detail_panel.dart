@@ -160,6 +160,9 @@ class DrugDetailPanel extends StatefulWidget {
   /// Passed through to ShiftDashboard when drug == null.
   final double earnedAmount;
 
+  /// Момент останнього нарахування — тригер оберту монетки в дашборді.
+  final DateTime? lastEarnedAt;
+
   /// Безумовна акційна ціна зі стоп-ціни (`StopPriceService.promoPrice`). Якщо
   /// задана й нижча за роздріб — у хедері показуємо закреслену стару + нову.
   final double? promoPrice;
@@ -185,6 +188,7 @@ class DrugDetailPanel extends StatefulWidget {
     required this.onSelectAnalogue,
     this.onStorageLocationChanged,
     this.earnedAmount = 0.0,
+    this.lastEarnedAt,
     this.promoPrice,
     this.stopPriceActions = const [],
     this.isCustomerAuthorized = false,
@@ -240,7 +244,10 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
   // ── Empty state ─────────────────────────────────────────────────────────────
 
   Widget _buildEmptyState() {
-    return ShiftDashboard(earnedAmount: widget.earnedAmount);
+    return ShiftDashboard(
+      earnedAmount: widget.earnedAmount,
+      lastEarnedAt: widget.lastEarnedAt,
+    );
   }
 
   // ── Main content ────────────────────────────────────────────────────────────

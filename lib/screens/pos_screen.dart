@@ -101,6 +101,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   int _ctrlQtyBuffer = 0;
   Timer? _ctrlQtyResetTimer;
   double _totalEarned = 0.0;
+  /// Момент останнього нарахування — тригер оберту монетки АНЦ у дашборді.
+  DateTime? _lastEarnedAt;
   String _selectedSymptom = 'Всі';
 
   /// Whether the next selection change should auto-focus the qty field.
@@ -4070,6 +4072,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _searchController.addListener(_filterDrugs);
     setState(() {
       _totalEarned += earned;
+      _lastEarnedAt = DateTime.now();
       _cart.clear();
       _scannedDrugIds.clear();
       _selectedDrug = null;   // show ShiftDashboard after payment
@@ -4089,6 +4092,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     unawaited(_newClientSession());
     setState(() {
       _totalEarned += amount;
+      _lastEarnedAt = DateTime.now();
       _ordersOpen = false;
       _cart.clear();
       _scannedDrugIds.clear();
@@ -4537,6 +4541,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                       onSelectAnalogue: _selectAnalogue,
                       onStorageLocationChanged: _onStorageLocationChanged,
                       earnedAmount: _totalEarned,
+                      lastEarnedAt: _lastEarnedAt,
                       isCustomerAuthorized: _isCustomerAuthorized,
                       helpingHandRemaining: _helpingHandRemaining,
                       helpingHandPrice: _selectedDrug != null

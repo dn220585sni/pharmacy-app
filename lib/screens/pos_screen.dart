@@ -3449,14 +3449,24 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (_bonusOnServer == _bonusToSpend) return true;
     final ok = await SessionService.setBonusOpl(_bonusToSpend);
     if (ok) _bonusOnServer = _bonusToSpend;
+    // Стан сеансу після падіння SetBonusOpl невідомий (15.09: бонус у сеанс
+    // потрапляв, знижка в чеку була, а Спарта бали НЕ спалила — клієнт
+    // заплатив менше «за так»). Тому поки сервер не підтвердив суму —
+    // оплату з бонусом блокуємо; касир може прибрати списання або почати
+    // чек заново (NewClient чистить сеанс).
+    if (mounted && _bonusSyncFailed == ok) setState(() => _bonusSyncFailed = !ok);
     return ok;
   }
+
+  /// Останній `SetBonusOpl` не вдався — див. [_syncBonusToServer].
+  bool _bonusSyncFailed = false;
 
   /// `NewClient` + скинути те, що ми знаємо про бонус у сеансі: наступний
   /// чек починається з нуля і на сервері, і в нас.
   Future<bool> _newClientSession() {
     _bonusToSpend = 0;
     _bonusOnServer = 0;
+    _bonusSyncFailed = false;
     return SessionService.newClient();
   }
 
@@ -3512,7 +3522,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       final pricing = await CartPriceService.fetchTotals(
         cart: _cart,
         loyalty: _customerLoyalty,
-        bonusAmount: _bonusOnServer,
+        // Свідомо _bonusToSpend, а не _bonusOnServer: 15.09 SetBonusOpl
+        // «падав» (<UNDEFINED> …*GlobParams), але бонус у сеанс ПОТРАПЛЯВ і
+        // GetSumSkid його враховував. Розбір відповіді має знати справжню суму.
+        bonusAmount: _bonusToSpend,
         typeProject: _isPakunokMode ? PakunokService.typeProjectTag : null,
         typeNakl: _pricingPaymentMethod == PaymentMethod.card ? '5' : '2',
       );
@@ -3531,6 +3544,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           'TypeNakl=${_pricingPaymentMethod == PaymentMethod.card ? "5 (картка)" : "2 (готівка)"} '
           '→ total=${pricing.total.toStringAsFixed(2)} '
           'округлення=${pricing.roundingDiscount.toStringAsFixed(2)} '
+          '${_bonusToSpend > 0 ? "бонус=${pricing.bonusDiscount.toStringAsFixed(2)} (просили $_bonusToSpend, у сеансі $_bonusOnServer) " : ""}'
           'fromServer=${pricing.fromServer}');
       setState(() {
         _serverPricing = pricing;
@@ -4344,6 +4358,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         onOpenShift: _openShiftFromMenu,
         onBonusChanged: _onBonusChanged,
         onVerifyBonusSpend: _verifyBonusSpend,
+        bonusSyncFailed: _bonusSyncFailed,
         scannedDrugIds: _scannedDrugIds,
         onItemScanned: (id) => setState(() => _scannedDrugIds.add(id)),
         onPaymentMethodChanged: (method) {

@@ -99,6 +99,11 @@ class CartPanel extends StatefulWidget {
   /// true — підтверджено, можна платити.
   final Future<bool> Function(double bonus)? onVerifyBonusSpend;
 
+  /// Останній `SetBonusOpl` не вдався — сума бонусу в сеансі невідома, тому
+  /// оплату блокуємо (пояснення на кнопці), поки касир не прибере списання
+  /// або не почне чек заново.
+  final bool bonusSyncFailed;
+
   const CartPanel({
     super.key,
     required this.cart,
@@ -125,6 +130,7 @@ class CartPanel extends StatefulWidget {
     this.onOpenShift,
     this.onBonusChanged,
     this.onVerifyBonusSpend,
+    this.bonusSyncFailed = false,
   });
 
   @override
@@ -213,6 +219,8 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     // з самого початку, але ніде не використовувався — кнопка була активна
     // завжди.
     if (!_allCartScanned) return false;
+    // Бонус не зафіксовано в сеансі — сума в чеку може розійтися зі Спартою.
+    if (widget.bonusSyncFailed && effectiveBonusAmount > 0) return false;
     // Пакунок Малюка — тільки безготівка через термінал.
     if (widget.isPakunokMode && paymentMethod != PaymentMethod.card) {
       return false;
@@ -810,6 +818,21 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     }
   }
 
+  /// Сума числового поля по кошику GetDataSPL (напр. `amountGross`,
+  /// `discountGross`); відсутні/нечислові значення = 0.
+  static num _sumBasket(List<Map<String, dynamic>> basket, String key) {
+    num s = 0;
+    for (final b in basket) {
+      final v = b[key];
+      if (v is num) {
+        s += v;
+      } else if (v != null) {
+        s += num.tryParse(v.toString().replaceAll(',', '.')) ?? 0;
+      }
+    }
+    return (s * 100).round() / 100;
+  }
+
   // ── Payment ───────────────────────────────────────────────────────────────
 
   Future<void> _processPayment() async {
@@ -1015,6 +1038,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         splMops = const [],
         splParamsList = const [],
         splCoupons = const [];
+    num splPaidByPoints = 0, splAmountGross = 0, splDiscountGross = 0;
     final loyalty = widget.loyalty;
     // Діагностика: чому Лайк не активувався (щоб не гадати за журналом).
     if (loyalty?.cardNo == null || loyalty!.cardNo!.isEmpty) {
@@ -1036,6 +1060,18 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         splMops = spl.mops;
         splParamsList = spl.params;
         splCoupons = spl.coupons;
+        // Списані бонуси: Спарті потрібен `paidByPoints` (≤ discountGross),
+        // інакше «списано 0» і бали не згорають (прогін 15.09: знижка в чеку
+        // була, баланс лише ріс). Підсумки беремо з кошика GetDataSPL.
+        splPaidByPoints = effectiveBonusAmount;
+        splAmountGross = _sumBasket(splBasket, 'amountGross');
+        splDiscountGross = _sumBasket(splBasket, 'discountGross');
+        if (splPaidByPoints > 0) {
+          FiscalLog.log('SPL order з бонусом $splPaidByPoints: '
+              'amountGross=$splAmountGross discountGross=$splDiscountGross; '
+              'basket=${splBasket.map((b) => b.entries.map((e) => '${e.key}=${e.value}').join(' ')).join(' ;; ')}; '
+              'mops=$splMops; params=$splParamsList');
+        }
         final s = SpartaService(splParams, posCode: ApiConfig.ekkKodKli);
         final orderRes = await s.order(
           no: numNakl,
@@ -1046,6 +1082,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
           mops: splMops,
           params: splParamsList,
           coupons: splCoupons,
+          amountGross: splAmountGross,
+          discountGross: splDiscountGross,
+          paidByPoints: splPaidByPoints,
         );
         FiscalLog.log('SPL order ok=${orderRes.ok} '
             'нараховано=${orderRes.balanceEarn} списано=${orderRes.balanceBurn} '
@@ -1099,6 +1138,24 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
           '${isCard ? "картка" : "готівка"} позиції: '
           '${rawProducts.map((p) => '${p['code']}=${p['cost']}').join('; ')}');
     } else {
+      // Клієнтська збірка про бонус не знає: 15.09 GetDataRRO віддав битий
+      // JSON, fallback пробив у ПРРО 482,50 при серверній сумі 442,00 — клієнт
+      // заплатив без знижки, а бали пішли в списання. З бонусом без даних
+      // сервера чек не проводимо взагалі.
+      if (effectiveBonusAmount > 0) {
+        FiscalLog.log('SALE СТОП: GetDataRRO недоступний, а в чеку бонус '
+            '$effectiveBonusAmount — fallback його не врахує; nakl=$localNumber');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Не вдалося отримати дані чека з бонусом від сервера. '
+                'Повторіть оплату або вимкніть списання бонусів.'),
+            duration: Duration(seconds: 6),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: Color(0xFFB45309),
+          ));
+        }
+        return false;
+      }
       final fb = _buildFallbackReceipt(isCard);
       fbProducts = fb.products;
       fbPayments = fb.payments;
@@ -1182,6 +1239,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
           cashReceiptLinkUrl: urlN,
           params: splParamsList,
           coupons: splCoupons,
+          amountGross: splAmountGross,
+          discountGross: splDiscountGross,
+          paidByPoints: splPaidByPoints,
         );
         await sparta.orderStatusChange(
             orderNo: orderNo, date: orderDate, status: 'D');
@@ -3024,7 +3084,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                 Text(
                   _unscannedCount > 0
                       ? 'Скануйте товар ($_unscannedCount)'
-                      : 'Провести оплату',
+                      : (widget.bonusSyncFailed && effectiveBonusAmount > 0)
+                          ? 'Бонус не зафіксовано — вимкніть списання'
+                          : 'Провести оплату',
                   style: TextStyle(
                     color: enabled
                         ? Colors.white

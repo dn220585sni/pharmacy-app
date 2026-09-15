@@ -250,6 +250,18 @@ class CacheApiClient {
         if (fixedBody != prev) patches.add('GetDataSPL: лапка порожнього code');
         prev = fixedBody;
 
+        // Fix Caché JSON: GetDataRRO — код валюти без лапок у рядку «Програма
+        // лояльності»: "code":CH_UAH,"cost":… (15.09, чек із бонусом). Будь-яке
+        // голе слово-значення після двокрапки (крім true/false/null) — у лапки.
+        fixedBody = fixedBody.replaceAllMapped(
+            RegExp(r'":\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?=[,}\]])'), (m) {
+          final w = m[1]!;
+          if (w == 'true' || w == 'false' || w == 'null') return m[0]!;
+          return '":"$w"';
+        });
+        if (fixedBody != prev) patches.add('GetDataRRO: голе слово-значення (CH_UAH)');
+        prev = fixedBody;
+
         // Fix Caché JSON: число без нуля перед крапкою — `"amount":.5` → `0.5`
         // (значення після `:`/`,`/`[`). GetDataSPL/mops інколи так віддає →
         // парсер падав FormatException, і Лайк не реєструвався. Обмежуємось
@@ -285,6 +297,15 @@ class CacheApiClient {
         final json = jsonDecode(fixedBody) as Map<String, dynamic>;
         return CacheResponse.fromJson(json);
       } on FormatException catch (e) {
+        // Битий JSON від Caché видно лише тут; без фрагмента тіла Каті нема
+        // що показати (15.09: GetDataRRO «Unexpected character (at character
+        // 364)» після SetBonusOpl). Пишемо ±150 символів навколо помилки.
+        final off = e.offset ?? 0;
+        final src = e.source is String ? e.source as String : '';
+        final from = (off - 150).clamp(0, src.length);
+        final to = (off + 150).clamp(0, src.length);
+        FiscalLog.log('$serviceName: битий JSON @${e.offset}: '
+            '«${src.substring(from, to).replaceAll('\n', ' ')}»');
         return CacheResponse.error('Помилка формату відповіді: $e');
       } on http.ClientException catch (e) {
         if (retryAmbiguous && attempt < _maxRetries) {

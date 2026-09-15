@@ -54,6 +54,10 @@ class CartPricing {
   /// Час обчислення — для діагностики race conditions.
   final DateTime computedAt;
 
+  /// Списані бонуси, які сервер уже врахував у `total` (частина
+  /// `skidka_sumcheck`, живий прогін 15.09: 77 → SumCheck 1.00, skidka 76.00).
+  final double bonusDiscount;
+
   CartPricing({
     required this.items,
     required this.subtotal,
@@ -61,6 +65,7 @@ class CartPricing {
     required this.total,
     required this.fromServer,
     this.roundingDiscount = 0,
+    this.bonusDiscount = 0,
     DateTime? computedAt,
   }) : computedAt = computedAt ?? DateTime.now();
 
@@ -349,7 +354,8 @@ class CartPriceService {
       return _stubPricing(cart: cart);
     }
 
-    return _mapServerResponse(cart: cart, response: parsed);
+    return _mapServerResponse(
+        cart: cart, response: parsed, bonusAmount: bonusAmount);
   }
 
   /// Замапити server response → CartPricing.
@@ -357,6 +363,7 @@ class CartPriceService {
   static CartPricing _mapServerResponse({
     required List<CartItem> cart,
     required GetSumSkidResponse response,
+    double bonusAmount = 0,
   }) {
     // Ключ матчингу — серверний `skod`, тобто `drug.id` без префікса `srv_`
     // (той самий код, що йде в sgVRoznSetLock і повертається GetSumSkid).
@@ -395,12 +402,25 @@ class CartPriceService {
     final total = _round2(response.sumCheck);
     final discount = _round2((subtotal - total).clamp(0, double.infinity));
 
+    // `skidka_sumcheck` — ОДНЕ поле на всі знижки рівня чека: округлення НБУ
+    // і списані бонуси разом (прогін 15.09). Розділяємо за відомою нам сумою
+    // бонусу, бо далі вони живуть по-різному: округлення при переході на
+    // картку зникає (cart_panel додає його назад до total), а бонус — ні.
+    final skidka = _round2(response.roundingDiscount);
+    final bonusApplied = bonusAmount <= 0
+        ? 0.0
+        : _round2(bonusAmount < skidka ? bonusAmount : skidka);
+    if (bonusAmount > 0 && bonusApplied + 0.005 < bonusAmount) {
+      FiscalLog.log('GetSumSkid: у skidka_sumcheck=$skidka бонусу '
+          '$bonusAmount НЕМАЄ повністю — сервер міг не прийняти SetBonusOpl');
+    }
     return CartPricing(
       items: items,
       subtotal: subtotal,
       discount: discount,
       total: total,
-      roundingDiscount: _round2(response.roundingDiscount),
+      roundingDiscount: _round2(skidka - bonusApplied),
+      bonusDiscount: bonusApplied,
       fromServer: true,
     );
   }

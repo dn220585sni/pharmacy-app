@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'kpi_activity_ring.dart';
+import 'kpi_cumulative_chart.dart';
 import 'kpi_plan_calendar.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,6 +36,16 @@ class KpiGrowthRow {
   const KpiGrowthRow(this.label, this.my, this.peers, this.better);
 }
 
+/// Пропущена заміна бренду на ВТМ: клієнт узяв бренд, хоча в наявності був
+/// ВТМ-аналог. [potential] — скільки ВТМ додало б до плану, грн.
+class KpiVtmSwap {
+  final String brand;
+  final String vtm;
+  final int qty;
+  final double potential;
+  const KpiVtmSwap(this.brand, this.vtm, this.qty, this.potential);
+}
+
 /// Дані деталізації «Товарообіг» за ОДИН день (обраний у календарі).
 class KpiDayDetails {
   final List<KpiGrowthRow> growth;
@@ -54,9 +65,17 @@ class KpiSnapshot {
   /// [today] потрібен, щоб відрізнити сьогодні (є «зараз») від минулого дня.
   final KpiDayDetails Function(int day, DateTime today) dayDetails;
 
-  final double vtmFact;
-  final double vtmPlan;
-  final double vtmShare; // % ВТМ у товарообігу
+  final double vtmFact; // ВТМ за день, грн
+  final double vtmPlan; // план ВТМ на день = частка місячного за плановими годинами
+  final double vtmMonthPlan; // план ВТМ на місяць, грн
+  final List<double> vtmDays; // ВТМ по днях місяця, грн (індекс 0 = 1-ше)
+  final int vtmChecks; // чеків із ВТМ
+  final int vtmChecksTotal;
+
+  /// Додаткові бали за продажі препаратів за місяць (персональні; для
+  /// «Показників аптеки» — null, бонус не показуємо).
+  final int? bonusPointsMonth;
+  final List<KpiVtmSwap> vtmSwaps;
   final List<KpiTopItem> vtmTop;
 
   final double zfCur; // % частки ЗФ (накопичено з початку місяця)
@@ -81,7 +100,12 @@ class KpiSnapshot {
     required this.dayDetails,
     required this.vtmFact,
     required this.vtmPlan,
-    required this.vtmShare,
+    required this.vtmMonthPlan,
+    required this.vtmDays,
+    required this.vtmChecks,
+    required this.vtmChecksTotal,
+    this.bonusPointsMonth,
+    required this.vtmSwaps,
     required this.vtmTop,
     required this.zfCur,
     required this.zfTarget,
@@ -117,6 +141,18 @@ class KpiMockData {
     KpiTopItem('Цитрамон АНЦ №10', '44', '1 012,00'),
     KpiTopItem('Лоратадин АНЦ №10', '31', '1 457,00'),
   ];
+  // ВТМ по днях місяця, грн (мої); аптека — ×12.
+  static const List<double> _vtmDays = [
+    1500, 1350, 1600, 1750, 1400, 1650, 1800, 1550, 1700, 1900, 1450, 1600,
+    1850, 1750, 1500, 1650, 1900, 1700, 1600, 1800, 1750, 1650, 2100,
+  ];
+  static const _vtmSwaps = [
+    KpiVtmSwap('Нурофен 200 мг №12', 'Ібупрофен АНЦ 200 мг №20', 5, 96),
+    KpiVtmSwap('Но-шпа 40 мг №24', 'Дротаверин АНЦ 40 мг №20', 3, 54),
+    KpiVtmSwap('Кларитин 10 мг №10', 'Лоратадин АНЦ 10 мг №10', 2, 118),
+    KpiVtmSwap('Панадол 500 мг №12', 'Парацетамол АНЦ 500 мг №10', 4, 38),
+  ];
+
   // Базовий ряд по днях; у снімках множиться так, щоб частина днів
   // виконувала денний план (5 000 / 60 000), а частина — ні.
   static const List<double> _turnoverDays = [
@@ -225,7 +261,12 @@ class KpiMockData {
           dayDetails: _dayDetails,
           vtmFact: 2100,
           vtmPlan: 3000,
-          vtmShare: 65.6,
+          vtmMonthPlan: 22000, // мої: план місяця перекрито вже з ~14-го → бонус
+          vtmDays: _vtmDays,
+          vtmChecks: 11,
+          vtmChecksTotal: 18,
+          bonusPointsMonth: 1240,
+          vtmSwaps: _vtmSwaps,
           vtmTop: _vtmTop,
           zfCur: 13.67,
           zfTarget: 13,
@@ -246,7 +287,14 @@ class KpiMockData {
           dayDetails: _dayDetails,
           vtmFact: 26800,
           vtmPlan: 36000,
-          vtmShare: 65.0,
+          vtmMonthPlan: 720000, // аптека: 64% плану, факт нижче лінії
+          vtmDays: [for (final v in _vtmDays) v * 12],
+          vtmChecks: 148,
+          vtmChecksTotal: 236,
+          vtmSwaps: [
+            for (final s in _vtmSwaps)
+              KpiVtmSwap(s.brand, s.vtm, s.qty * 12, s.potential * 12),
+          ],
           vtmTop: _vtmTopPharmacy,
           zfCur: 12.41,
           zfTarget: 13,
@@ -760,10 +808,10 @@ class _KpiDetailState extends State<_KpiDetail> {
       KpiTrack(ratio: ratio, pace: data.monthElapsed),
       const SizedBox(height: 12),
       _Stats([
-        ('До плану',
+        _Stat('До плану',
             '${diff >= 0 ? '+' : '−'}${diff.abs().toStringAsFixed(2).replaceAll('.', ',')} п.п.'),
-        ('Чеків із ЗФ', '${data.zfChecks} / ${data.zfChecksTotal}'),
-        ('Пройшло місяця', kpiPct(data.monthElapsed * 100, 0)),
+        _Stat('Чеків із ЗФ', '${data.zfChecks} / ${data.zfChecksTotal}'),
+        _Stat('Пройшло місяця', kpiPct(data.monthElapsed * 100, 0)),
       ]),
       const SizedBox(height: 12),
       _SectionLabel('Динаміка по днях (накопичено з 1 ${_monthsShort[today.month - 1]})'),
@@ -807,8 +855,8 @@ class _KpiDetailState extends State<_KpiDetail> {
       KpiTrack(ratio: ratio, pace: data.shiftElapsed),
       const SizedBox(height: 12),
       _Stats([
-        ('Чеків', '${data.checks}'),
-        ('Середній чек', kpiMoney(data.avgCheck)),
+        _Stat('Чеків', '${data.checks}'),
+        _Stat('Середній чек', kpiMoney(data.avgCheck)),
       ]),
       const SizedBox(height: 12),
       _SectionLabel(
@@ -852,21 +900,72 @@ class _KpiDetailState extends State<_KpiDetail> {
 
   List<Widget> _vtm() {
     final ratio = data.vtmFact / data.vtmPlan;
+    final monthFact =
+        data.vtmDays.take(today.day).fold<double>(0, (s, v) => s + v);
+    final monthPct = (monthFact / data.vtmMonthPlan * 100).round();
+    // Бонус +20% — лише персональний і лише коли накопичений факт уже
+    // перевищив план місяця (нарахування — після закриття місяця).
+    final bonus = data.bonusPointsMonth;
+    final showBonus = scope == KpiScope.my &&
+        bonus != null &&
+        monthFact >= data.vtmMonthPlan;
     return [
       _BigValue(
         value: '${kpiInt(data.vtmFact)} ₴',
-        caption: 'план ${kpiInt(data.vtmPlan)} ₴',
+        caption: 'план на день ${kpiInt(data.vtmPlan)} ₴',
         ratio: ratio,
       ),
       const SizedBox(height: 6),
       KpiTrack(ratio: ratio, pace: data.shiftElapsed),
       const SizedBox(height: 12),
       _Stats([
-        ('Частка ВТМ', kpiPct(data.vtmShare, 1)),
-        ('До плану',
+        _Stat('Чеків із ВТМ', '${data.vtmChecks} / ${data.vtmChecksTotal}'),
+        _Stat('До плану дня',
             '${kpiInt((data.vtmPlan - data.vtmFact).clamp(0, double.infinity))} ₴'),
-        ('Пройшло зміни', kpiPct(data.shiftElapsed * 100, 0)),
+        _Stat(
+          'План місяця',
+          '$monthPct%',
+          color: monthPct >= 100
+              ? _C.goodFg
+              : monthPct < 70
+                  ? _C.warnFg
+                  : null,
+        ),
       ]),
+      if (showBonus) ...[
+        const SizedBox(height: 12),
+        _BonusCard(
+          points: bonus,
+          monthGen: _monthsGenDay[today.month - 1],
+        ),
+      ],
+      const SizedBox(height: 12),
+      _SectionLabel(
+        'ВТМ за місяць: факт і план',
+        trailing: 'план ${kpiInt(data.vtmMonthPlan)} ₴',
+      ),
+      const SizedBox(height: 6),
+      KpiCumulativeChart(
+        dayFacts: data.vtmDays,
+        monthPlan: data.vtmMonthPlan,
+        today: today,
+      ),
+      const SizedBox(height: 6),
+      const Text(
+        'План на місяць у гривнях, розбитий по днях пропорційно плановим '
+        'годинам фармацевта. Пунктир — план наростаючим підсумком.',
+        style: TextStyle(fontSize: 11, color: _C.muted, height: 1.4),
+      ),
+      const SizedBox(height: 12),
+      const _SectionLabel('Пропущені заміни на ВТМ', trailing: 'сьогодні'),
+      const SizedBox(height: 4),
+      _SwapsTable(swaps: data.vtmSwaps),
+      const SizedBox(height: 8),
+      const Text(
+        'Чеки, де клієнт узяв бренд, хоча в наявності був ВТМ-аналог. '
+        'Потенціал — скільки ВТМ додало б до плану.',
+        style: TextStyle(fontSize: 11, color: _C.muted, height: 1.4),
+      ),
       const SizedBox(height: 12),
       const _SectionLabel('Топ ВТМ за зміну'),
       const SizedBox(height: 4),
@@ -948,8 +1047,15 @@ class _BigValue extends StatelessWidget {
   }
 }
 
+class _Stat {
+  final String label;
+  final String value;
+  final Color? color; // статусний колір значення (зелений/жовтий)
+  const _Stat(this.label, this.value, {this.color});
+}
+
 class _Stats extends StatelessWidget {
-  final List<(String, String)> items;
+  final List<_Stat> items;
   const _Stats(this.items);
 
   @override
@@ -969,21 +1075,23 @@ class _Stats extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    items[i].$1.toUpperCase(),
+                    items[i].label.toUpperCase(),
                     style: const TextStyle(
                       fontSize: 10,
                       color: _C.muted,
                       letterSpacing: 0.3,
+                      height: 1.2,
                     ),
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    items[i].$2,
-                    style: const TextStyle(
+                    items[i].value,
+                    style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color: _C.text,
+                      color: items[i].color ?? _C.text,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1004,29 +1112,171 @@ class _SectionLabel extends StatelessWidget {
   final String? trailing;
   const _SectionLabel(this.text, {this.trailing});
 
+  /// Секції в картці деталізації розділяємо явно: відступ + лінія зверху.
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Icon(Icons.bar_chart_rounded, size: 14, color: _C.state),
-        const SizedBox(width: 5),
-        Expanded(
-          child: Text(
-            text.toUpperCase(),
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: _C.muted,
-              letterSpacing: 0.5,
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.only(top: 14),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: _C.border)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.bar_chart_rounded, size: 14, color: _C.state),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              text.toUpperCase(),
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: _C.muted,
+                letterSpacing: 0.5,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
-            overflow: TextOverflow.ellipsis,
           ),
+          if (trailing != null)
+            Text(
+              trailing!,
+              style: const TextStyle(fontSize: 11, color: _C.muted),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Зелена картка «Йдете на бонус +20%» — лише при перевищенні плану місяця.
+class _BonusCard extends StatelessWidget {
+  final int points; // додаткові бали за місяць
+  final String monthGen; // «вересня»
+  const _BonusCard({required this.points, required this.monthGen});
+
+  @override
+  Widget build(BuildContext context) {
+    final extra = (points * 0.2).round();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: _C.goodBg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0x4022C55E)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: Color(0xFF22C55E),
+              shape: BoxShape.circle,
+            ),
+            child: const Text(
+              '+20%',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Йдете на бонус +20%: близько +${kpiInt(extra)} балів',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: _C.goodFg,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Продажі ВТМ уже перевищили план $monthGen. 20% від '
+                  '${kpiInt(points)} додаткових балів за продажі препаратів; '
+                  'нарахується після закриття місяця.',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF166534),
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// «Пропущені заміни на ВТМ»: бренд → ВТМ-аналог, к-сть, потенціал, разом.
+class _SwapsTable extends StatelessWidget {
+  final List<KpiVtmSwap> swaps;
+  const _SwapsTable({required this.swaps});
+
+  @override
+  Widget build(BuildContext context) {
+    const hs = TextStyle(
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+        color: _C.muted,
+        letterSpacing: 0.3);
+    const cs = TextStyle(fontSize: 12, color: _C.text);
+    const bold = TextStyle(
+        fontSize: 12, fontWeight: FontWeight.w700, color: _C.text);
+    Widget line(Widget a, Widget b, Widget c, Color border) => Container(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration:
+              BoxDecoration(border: Border(bottom: BorderSide(color: border))),
+          child: Row(
+            children: [
+              Expanded(child: a),
+              SizedBox(width: 48, child: b),
+              SizedBox(width: 84, child: c),
+            ],
+          ),
+        );
+    final qty = swaps.fold<int>(0, (s, x) => s + x.qty);
+    final sum = swaps.fold<double>(0, (s, x) => s + x.potential);
+    return Column(
+      children: [
+        line(
+          const Text('ПРОДАНО БРЕНД → Є ВТМ', style: hs),
+          const Text('К-СТЬ', style: hs, textAlign: TextAlign.right),
+          const Text('ПОТЕНЦІАЛ', style: hs, textAlign: TextAlign.right),
+          _C.border,
         ),
-        if (trailing != null)
-          Text(
-            trailing!,
-            style: const TextStyle(fontSize: 11, color: _C.muted),
+        for (final s in swaps)
+          line(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(s.brand, style: cs, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text('→ ${s.vtm}',
+                    style: const TextStyle(fontSize: 11, color: _C.goodFg),
+                    overflow: TextOverflow.ellipsis),
+              ],
+            ),
+            Text('${s.qty}', style: cs, textAlign: TextAlign.right),
+            Text('+${kpiInt(s.potential)} ₴',
+                style: cs, textAlign: TextAlign.right),
+            _C.divider,
           ),
+        line(
+          const Text('Разом', style: bold),
+          Text('$qty', style: bold, textAlign: TextAlign.right),
+          Text('+${kpiInt(sum)} ₴', style: bold, textAlign: TextAlign.right),
+          Colors.transparent,
+        ),
       ],
     );
   }

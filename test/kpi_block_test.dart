@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pharmacy_app/widgets/kpi_activity_ring.dart';
 import 'package:pharmacy_app/widgets/kpi_block.dart';
+import 'package:pharmacy_app/widgets/kpi_cumulative_chart.dart';
 import 'package:pharmacy_app/widgets/kpi_plan_calendar.dart';
 
 Widget _wrap(Widget child) => MaterialApp(
@@ -75,7 +76,29 @@ void main() {
     await tester.tap(find.text('Продаж ВТМ'));
     await tester.pumpAndSettle();
     expect(find.text('Продаж ВТМ · мої показники'), findsOneWidget);
-    expect(find.text('65,6%'), findsOneWidget);
+    expect(find.text('11 / 18'), findsOneWidget);
+    expect(find.text('ЧАСТКА ВТМ'), findsNothing);
+    // Мої: накопичений факт (38 500) > план місяця (22 000) → бонус є.
+    expect(find.text('175%'), findsOneWidget);
+    expect(find.textContaining('Йдете на бонус +20%: близько +248 балів'),
+        findsOneWidget);
+    expect(find.byType(KpiCumulativeChart), findsOneWidget);
+    expect(find.text('ПРОПУЩЕНІ ЗАМІНИ НА ВТМ'), findsOneWidget);
+    expect(find.text('Разом'), findsOneWidget);
+    expect(find.text('+306 ₴'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('ВТМ: в «Показниках аптеки» бонусу немає, план місяця 64%',
+      (tester) async {
+    await tester.pumpWidget(_wrap(KpiBlock(today: DateTime(2026, 9, 23))));
+    await tester.tap(find.text('Показники аптеки'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Продаж ВТМ'));
+    await tester.pumpAndSettle();
+    expect(find.text('64%'), findsOneWidget);
+    expect(find.textContaining('Йдете на бонус'), findsNothing);
+    expect(find.text('148 / 236'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

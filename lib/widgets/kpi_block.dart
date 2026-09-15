@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'kpi_activity_ring.dart';
+import 'kpi_plan_calendar.dart';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Моделі й мок-дані
 //
@@ -21,13 +24,35 @@ class KpiTopItem {
   const KpiTopItem(this.name, this.qty, this.sum);
 }
 
+/// Рядок таблиці «Потенціал росту»: мій результат проти середнього по колегах.
+class KpiGrowthRow {
+  final String label;
+  final String my;
+  final String peers;
+
+  /// true — мій результат кращий за колег (зелений), false — є потенціал (жовтий).
+  final bool better;
+  const KpiGrowthRow(this.label, this.my, this.peers, this.better);
+}
+
+/// Дані деталізації «Товарообіг» за ОДИН день (обраний у календарі).
+class KpiDayDetails {
+  final List<KpiGrowthRow> growth;
+  final KpiActivityData activity;
+  const KpiDayDetails({required this.growth, required this.activity});
+}
+
 /// Знімок показників для одного [KpiScope].
 class KpiSnapshot {
   final double turnoverFact;
-  final double turnoverPlan;
+  final double turnoverPlan; // план на день (план рахується поденно)
   final int checks;
   final double avgCheck;
-  final List<double> turnoverDays;
+  final List<double> turnoverDays; // факт по днях місяця (індекс 0 = 1-ше)
+
+  /// Деталі за обраний день: «Потенціал росту» + «Активність».
+  /// [today] потрібен, щоб відрізнити сьогодні (є «зараз») від минулого дня.
+  final KpiDayDetails Function(int day, DateTime today) dayDetails;
 
   final double vtmFact;
   final double vtmPlan;
@@ -53,6 +78,7 @@ class KpiSnapshot {
     required this.checks,
     required this.avgCheck,
     required this.turnoverDays,
+    required this.dayDetails,
     required this.vtmFact,
     required this.vtmPlan,
     required this.vtmShare,
@@ -91,6 +117,8 @@ class KpiMockData {
     KpiTopItem('Цитрамон АНЦ №10', '44', '1 012,00'),
     KpiTopItem('Лоратадин АНЦ №10', '31', '1 457,00'),
   ];
+  // Базовий ряд по днях; у снімках множиться так, щоб частина днів
+  // виконувала денний план (5 000 / 60 000), а частина — ні.
   static const List<double> _turnoverDays = [
     1400, 2900, 2100, 3300, 2800, 1900, 2600, 3100, 2700, 2400, 3500, 2900,
     2200, 3000, 2600, 2800, 3200, 2500, 2900, 3100, 2700, 2600, 3200,
@@ -104,15 +132,97 @@ class KpiMockData {
     12.4, 12.9, 12.7, 12.3, 12.0, 12.6, 12.5, 12.8, 12.4, 12.3, 12.41,
   ];
 
+  // ── Деталі за день (детермінований «шум» від номера дня) ────────────────
+
+  static String _m(double v) => v.toStringAsFixed(2).replaceAll('.', ',');
+  static String _n1(double v) => v.toStringAsFixed(1).replaceAll('.', ',');
+  static String _pc(double v) => '${v.round()}%';
+
+  /// «Потенціал росту» за день. Лічильники — лише цілі в межах 0–5, 0–4, 0–10.
+  static List<KpiGrowthRow> growthRows(int day) {
+    final k = ((day * 7) % 11) / 10;
+    final avg = 150 + k * 60, len = 1.6 + k * 1.2, one = 62 - k * 25;
+    final tpk = 30 + k * 30, tpkIz = 18 + k * 30;
+    final edk = (k * 6).round(), custom = (k * 5).round();
+    final other = (k * 4).round(), hand = (k * 10).round();
+    return [
+      KpiGrowthRow('Середній чек', _m(avg), _m(182.4), avg >= 182.4),
+      KpiGrowthRow('Довжина чека', _n1(len), _n1(2.3), len >= 2.3),
+      KpiGrowthRow('Частка чеків з 1 позицією', _pc(one), _pc(44), one <= 44),
+      KpiGrowthRow('Конверсія ТПК', _pc(tpk), _pc(47), tpk >= 47),
+      KpiGrowthRow('Конверсія ТПК в ІЗ', _pc(tpkIz), _pc(31), tpkIz >= 31),
+      KpiGrowthRow('Продажів ЄДК на відсутній товар', '$edk', _n1(2.7), edk >= 2.7),
+      KpiGrowthRow('Замовлень під клієнта', '$custom', _n1(2.1), custom >= 2.1),
+      KpiGrowthRow('Замовлень в іншу аптеку', '$other', _n1(1.4), other >= 1.4),
+      KpiGrowthRow('Знижки «Рука допомоги»', '$hand', _n1(3.6), hand >= 3.6),
+    ];
+  }
+
+  /// Події зміни 08:00–20:00 (для сьогодні — до «зараз» 14:31).
+  static KpiActivityData activity(int day, {required bool isToday}) {
+    const start = 8 * 60, end = 20 * 60, now = 14 * 60 + 31;
+    var s = day * 9973 + 17;
+    double rnd() {
+      s = (s * 1103515245 + 12345) % 2147483648;
+      return s / 2147483648;
+    }
+
+    final n = 34 + (rnd() * 14).floor();
+    final events = <KpiActivityEvent>[];
+    for (var i = 0; i < n; i++) {
+      final t = start + (rnd() * 12 * 60).floor();
+      final r = rnd();
+      final type = r < .62
+          ? KpiEventType.cash
+          : r < .80
+              ? KpiEventType.card
+              : r < .88
+                  ? KpiEventType.iz
+                  : r < .95
+                      ? KpiEventType.reimb
+                      : KpiEventType.doc;
+      if (!isToday || t <= now) events.add(KpiActivityEvent(t, type));
+    }
+    events.sort((a, b) => a.minute.compareTo(b.minute));
+
+    var ps = day * 7919 + 3;
+    double prnd() {
+      ps = (ps * 1103515245 + 12345) % 2147483648;
+      return ps / 2147483648;
+    }
+
+    final presence = <KpiPresence>[];
+    var t = start + 5;
+    while (t < end - 10) {
+      final len = 6 + (prnd() * 30).floor();
+      presence.add(KpiPresence(t, (t + len).clamp(0, end)));
+      t += len + 8 + (prnd() * 40).floor();
+    }
+
+    return KpiActivityData(
+      shiftStart: start,
+      shiftEnd: end,
+      now: isToday ? now : null,
+      events: events,
+      presence: presence,
+    );
+  }
+
+  static KpiDayDetails _dayDetails(int day, DateTime today) => KpiDayDetails(
+        growth: growthRows(day),
+        activity: activity(day, isToday: day == today.day),
+      );
+
   static KpiSnapshot forScope(KpiScope scope) {
     switch (scope) {
       case KpiScope.my:
-        return const KpiSnapshot(
+        return KpiSnapshot(
           turnoverFact: 3200,
           turnoverPlan: 5000,
           checks: 18,
           avgCheck: 177.78,
-          turnoverDays: _turnoverDays,
+          turnoverDays: [for (final v in _turnoverDays) v * 1.6],
+          dayDetails: _dayDetails,
           vtmFact: 2100,
           vtmPlan: 3000,
           vtmShare: 65.6,
@@ -132,7 +242,8 @@ class KpiMockData {
           turnoverPlan: 60000,
           checks: 236,
           avgCheck: 174.58,
-          turnoverDays: [for (final v in _turnoverDays) v * 12],
+          turnoverDays: [for (final v in _turnoverDays) v * 12 * 1.6],
+          dayDetails: _dayDetails,
           vtmFact: 26800,
           vtmPlan: 36000,
           vtmShare: 65.0,
@@ -196,6 +307,11 @@ String kpiMoney(double v) {
 const _monthsGen = [
   'січень', 'лютий', 'березень', 'квітень', 'травень', 'червень', 'липень',
   'серпень', 'вересень', 'жовтень', 'листопад', 'грудень',
+];
+/// Родовий відмінок для дат: «8 вересня».
+const _monthsGenDay = [
+  'січня', 'лютого', 'березня', 'квітня', 'травня', 'червня', 'липня',
+  'серпня', 'вересня', 'жовтня', 'листопада', 'грудня',
 ];
 const _monthsShort = [
   'січ', 'лют', 'бер', 'кві', 'тра', 'чер', 'лип', 'сер', 'вер', 'жов', 'лис',
@@ -545,7 +661,7 @@ class KpiTrack extends StatelessWidget {
 
 // ── Деталізація ──────────────────────────────────────────────────────────────
 
-class _KpiDetail extends StatelessWidget {
+class _KpiDetail extends StatefulWidget {
   final KpiKind kind;
   final KpiScope scope;
   final KpiSnapshot data;
@@ -560,6 +676,20 @@ class _KpiDetail extends StatelessWidget {
     required this.today,
     required this.onBack,
   });
+
+  @override
+  State<_KpiDetail> createState() => _KpiDetailState();
+}
+
+class _KpiDetailState extends State<_KpiDetail> {
+  /// Обраний день у календарі (деталізація «Товарообіг»); типово сьогодні.
+  late int _selDay = widget.today.day;
+
+  KpiKind get kind => widget.kind;
+  KpiScope get scope => widget.scope;
+  KpiSnapshot get data => widget.data;
+  DateTime get today => widget.today;
+  VoidCallback get onBack => widget.onBack;
 
   String get _title => switch (kind) {
         KpiKind.turnover => 'Товарообіг',
@@ -658,13 +788,19 @@ class _KpiDetail extends StatelessWidget {
     ];
   }
 
+  /// Підпис обраного дня для заголовків «Потенціал росту» / «Активність».
+  String get _selDayLabel => _selDay == today.day
+      ? 'сьогодні'
+      : '$_selDay ${_monthsGenDay[today.month - 1]}';
+
   List<Widget> _turnover() {
     final ratio = data.turnoverFact / data.turnoverPlan;
     final fact = data.turnoverFact;
+    final day = data.dayDetails(_selDay, today);
     return [
       _BigValue(
         value: '${kpiInt(fact)} ₴',
-        caption: 'план на зміну ${kpiInt(data.turnoverPlan)} ₴',
+        caption: 'план на день ${kpiInt(data.turnoverPlan)} ₴',
         ratio: ratio,
       ),
       const SizedBox(height: 6),
@@ -673,29 +809,43 @@ class _KpiDetail extends StatelessWidget {
       _Stats([
         ('Чеків', '${data.checks}'),
         ('Середній чек', kpiMoney(data.avgCheck)),
-        ('До плану',
-            '${kpiInt((data.turnoverPlan - fact).clamp(0, double.infinity))} ₴'),
       ]),
       const SizedBox(height: 12),
-      const _SectionLabel('Товарообіг по днях'),
-      const SizedBox(height: 6),
-      KpiDayChart(
-        values: _toDate(data.turnoverDays),
-        firstLabel: '1 ${_monthsShort[today.month - 1]}',
-        lastLabel: 'сьогодні, ${today.day} ${_monthsShort[today.month - 1]}',
+      _SectionLabel(
+          'Виконання денного плану · ${_monthsGen[today.month - 1]}'),
+      const SizedBox(height: 8),
+      KpiPlanCalendar(
+        dayFacts: data.turnoverDays,
+        dayPlan: data.turnoverPlan,
+        today: today,
+        selectedDay: _selDay,
+        onSelect: (d) => setState(() => _selDay = d),
+      ),
+      const SizedBox(height: 8),
+      const Text(
+        'За кожен день із виконаним планом додатково нараховується 0,2% '
+        'від продажів цього дня.',
+        style: TextStyle(fontSize: 11, color: _C.muted, height: 1.4),
       ),
       const SizedBox(height: 12),
-      const _SectionLabel('Структура зміни'),
+      _SectionLabel('Потенціал росту', trailing: _selDayLabel),
       const SizedBox(height: 4),
-      _TopTable(
-        header: const ('Група', 'Сума', 'Частка'),
-        items: [
-          KpiTopItem('Rx (рецептурні)', kpiInt(fact * .48), '48%'),
-          KpiTopItem('OTC', kpiInt(fact * .31), '31%'),
-          KpiTopItem('ВТМ', kpiInt(data.vtmFact),
-              '${(data.vtmFact / fact * 100).round()}%'),
-          KpiTopItem('Парафармація', kpiInt(fact * .08), '8%'),
-        ],
+      _GrowthTable(rows: day.growth),
+      const SizedBox(height: 8),
+      const Text(
+        'Клікніть дату в календарі, щоб побачити показники за той день. '
+        'Зелений — краще за колег, жовтий — є потенціал.',
+        style: TextStyle(fontSize: 11, color: _C.muted, height: 1.4),
+      ),
+      const SizedBox(height: 12),
+      _SectionLabel('Активність', trailing: _selDayLabel),
+      const SizedBox(height: 4),
+      KpiActivityRing(data: day.activity),
+      const SizedBox(height: 8),
+      const Text(
+        'Наведіть на рисочку, щоб побачити тип події й час. '
+        'Внутрішнє кільце — клієнти в торговому залі.',
+        style: TextStyle(fontSize: 11, color: _C.muted, height: 1.4),
       ),
     ];
   }
@@ -849,7 +999,10 @@ class _Stats extends StatelessWidget {
 
 class _SectionLabel extends StatelessWidget {
   final String text;
-  const _SectionLabel(this.text);
+
+  /// Підпис праворуч (напр. обраний день), звичайним шрифтом.
+  final String? trailing;
+  const _SectionLabel(this.text, {this.trailing});
 
   @override
   Widget build(BuildContext context) {
@@ -869,18 +1022,76 @@ class _SectionLabel extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ),
+        if (trailing != null)
+          Text(
+            trailing!,
+            style: const TextStyle(fontSize: 11, color: _C.muted),
+          ),
+      ],
+    );
+  }
+}
+
+/// Таблиця «Потенціал росту»: Показник · Мій результат · У колег.
+/// Мій результат зелений, якщо кращий за колег, жовтий — є потенціал.
+class _GrowthTable extends StatelessWidget {
+  final List<KpiGrowthRow> rows;
+  const _GrowthTable({required this.rows});
+
+  @override
+  Widget build(BuildContext context) {
+    const hs = TextStyle(
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+        color: _C.muted,
+        letterSpacing: 0.3);
+    Widget line(Widget a, Widget b, Widget c, Color border) => Container(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration:
+              BoxDecoration(border: Border(bottom: BorderSide(color: border))),
+          child: Row(
+            children: [
+              Expanded(child: a),
+              SizedBox(width: 84, child: b),
+              SizedBox(width: 56, child: c),
+            ],
+          ),
+        );
+    Text h(String s, [TextAlign align = TextAlign.left]) =>
+        Text(s.toUpperCase(), style: hs, textAlign: align);
+    return Column(
+      children: [
+        line(h('Показник'), h('Мій результат', TextAlign.right),
+            h('У колег', TextAlign.right), _C.border),
+        for (final r in rows)
+          line(
+            Text(r.label,
+                style: const TextStyle(fontSize: 12, color: _C.text, height: 1.25),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
+            Text(
+              r.my,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: r.better ? _C.goodFg : _C.warnFg,
+              ),
+            ),
+            Text(r.peers,
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 12, color: _C.text)),
+            _C.divider,
+          ),
       ],
     );
   }
 }
 
 class _TopTable extends StatelessWidget {
-  final (String, String, String) header;
+  static const header = ('Товар', 'К-сть', 'Сума');
   final List<KpiTopItem> items;
-  const _TopTable({
-    this.header = const ('Товар', 'К-сть', 'Сума'),
-    required this.items,
-  });
+  const _TopTable({required this.items});
 
   @override
   Widget build(BuildContext context) {

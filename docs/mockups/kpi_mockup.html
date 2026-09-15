@@ -79,6 +79,36 @@
   td { padding: 6px 0; border-bottom: 1px solid #F0F2F5; }
   td.r, th.r { text-align: right; }
   .note { font-size: 11px; color: #6B7280; margin-top: 8px; }
+
+  /* календар виконання денного плану */
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px 4px; margin: 8px 0 6px; }
+  .cal .dow { text-align: center; font-size: 10px; color: #9CA3AF; text-transform: uppercase; letter-spacing: .3px; padding-bottom: 2px; }
+  .cal .d { display: grid; place-items: center; }
+  .cal .d i { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 12px; font-weight: 600; color: #6B7280; background: #F0F2F5; }
+  .cal .d.met i { background: #22C55E; color: #fff; }
+  .cal .d.miss i { background: #E5E7EB; color: #6B7280; }
+  .cal .d.today i { background: #1E7DC8; color: #fff; font-weight: 800; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #1E7DC8; }
+  .cal .d.future i { background: transparent; color: #C4C9D2; font-weight: 500; cursor: default; }
+  .cal .d.empty i { visibility: hidden; }
+  .cal .d.past i { cursor: pointer; }
+  .cal .d.past i:hover { filter: brightness(.93); }
+  .cal .d.sel i { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #1E7DC8; }
+  .row2.two { grid-template-columns: 1fr 1fr; }
+
+  /* активність: дугова шкала зміни */
+  .act { position: relative; margin: 4px 0 0; }
+  .act svg { width: 100%; height: auto; display: block; }
+  .act .ev { cursor: pointer; }
+  .act .tip { position: absolute; pointer-events: none; background: #fff; border: 1px solid #E5E7EB; border-radius: 8px; padding: 6px 10px; font-size: 13px; color: #1C1C2E; box-shadow: 0 2px 8px rgba(0,0,0,.08); white-space: nowrap; transform: translate(-50%, -120%); display: none; }
+  .act .sum { position: absolute; left: 0; right: 0; top: 46%; text-align: center; pointer-events: none; }
+  .act .sum b { display: block; font-size: 22px; font-weight: 800; letter-spacing: -.5px; }
+  .act .sum span { font-size: 11px; color: #6B7280; }
+  .act .tm { font-size: 10px; fill: #6B7280; }
+  .tsel { font-size: 11px; color: #6B7280; font-weight: 500; margin-left: auto; text-transform: none; letter-spacing: 0; }
+  td.better { color: #15803D; font-weight: 600; }
+  td.worse { color: #B45309; font-weight: 600; }
+  .legend { display: flex; gap: 14px; font-size: 11px; color: #6B7280; margin: 8px 0 4px; }
+  .legend b { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
   .hint { background: #FFF8E1; border: 1px solid #FCD34D66; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #92400E; margin-bottom: 12px; }
 </style>
 </head>
@@ -132,7 +162,7 @@ function track(ratio, pace) {
 }
 function kpiBar(name, m, key) {
   const p = Math.round(m.fact / m.plan * 100);
-  return `<div class="kpi" onclick="open('${key}')">
+  return `<div class="kpi" onclick="showView('${key}')">
     <div class="head"><span class="name">${name}</span><span class="chev">›</span><span class="badge ${badgeCls(p)}">${p}%</span></div>
     ${track(m.fact / m.plan, SHIFT_ELAPSED)}
     <div class="sub"><span class="fact">${fmt(m.fact)}</span><span class="plan">план ${fmt(m.plan)}</span></div>
@@ -157,7 +187,7 @@ function zfBadge(z) {
 }
 function zfRow(z) {
   const p = Math.round(z.cur / z.target * 100);
-  return `<div class="kpi" onclick="open('zf')">
+  return `<div class="kpi" onclick="showView('zf')">
     <div class="head"><span class="name">Частка ЗФ</span><span class="chev">›</span><span class="badge ${badgeCls(p)}">${p}%</span></div>
     ${track(z.cur / z.target, Math.round(z.monthElapsed))}
     <div class="sub"><span class="fact">${pct(z.cur)}</span><span class="plan">план ${z.target}%</span></div>
@@ -185,7 +215,7 @@ function chart(days, target, unit) {
 function detailZf(d) {
   const z = d.zf, diff = z.cur - z.target;
   return `<div class="det">
-    <div class="top"><button class="back" onclick="open('list')">‹ Назад</button><h3>Частка ЗФ · ${d.title.toLowerCase()}</h3></div>
+    <div class="top"><button class="back" onclick="showView('list')">‹ Назад</button><h3>Частка ЗФ · ${d.title.toLowerCase()}</h3></div>
     <div class="card">
       <div class="big"><b>${pct(z.cur)}</b><span>план на вересень ${z.target}%</span><span class="badge ${badgeCls(Math.round(z.cur / z.target * 100))}">${Math.round(z.cur / z.target * 100)}%</span></div>
       <div style="margin-top:6px">${track(z.cur / z.target, Math.round(z.monthElapsed))}</div>
@@ -203,35 +233,197 @@ function detailZf(d) {
     </div>
   </div>`;
 }
+// Календар місяця: день із виконаним денним планом — зелений, без — сірий,
+// сьогодні — синій з кільцем, майбутні — без кружечка.
+let selDay = 23; // обрана дата в календарі (за замовчуванням сьогодні)
+function selectDay(n) { selDay = n; render(); }
+
+function calendar(dayFacts, dayPlan, today, year, month) {
+  const first = new Date(year, month - 1, 1).getDay();      // 0=Нд
+  const lead = (first + 6) % 7;                              // зсув до Пн
+  const total = new Date(year, month, 0).getDate();
+  const dows = ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].map(x => `<div class="dow">${x}</div>`).join('');
+  let cells = '';
+  for (let i = 0; i < lead; i++) cells += `<div class="d empty"><i>0</i></div>`;
+  for (let day = 1; day <= total; day++) {
+    let cls, title = '', click = '';
+    if (day === today) { cls = 'today past'; title = `сьогодні: ${fmt(dayFacts[day - 1])} з ${fmt(dayPlan)}`; }
+    else if (day > today) cls = 'future';
+    else { const ok = dayFacts[day - 1] >= dayPlan; cls = (ok ? 'met' : 'miss') + ' past'; title = `${fmt(dayFacts[day - 1])} з ${fmt(dayPlan)} ${ok ? '✓' : ''}`; }
+    if (day <= today) click = ` onclick="selectDay(${day})"`;
+    if (day === selDay && day !== today) cls += ' sel';
+    cells += `<div class="d ${cls}" title="${title}"${click}><i>${day}</i></div>`;
+  }
+  return `<div class="cal">${dows}${cells}</div>
+    <div class="legend"><span><b style="background:#22C55E"></b>план виконано</span><span><b style="background:#E5E7EB"></b>не виконано</span><span><b style="background:#1E7DC8"></b>сьогодні</span></div>`;
+}
+
+// ── Активність: дугова шкала зміни ────────────────────────────────────────
+// Події зміни на ¾-дузі (початок зміни зліва внизу → кінець справа внизу).
+// Підказка з типом і часом — лише при наведенні на рисочку.
+const ACT_TYPES = {
+  cash:  { label: 'Чек, готівка',       color: '#8FCB86' },
+  card:  { label: 'Чек, картка',        color: '#5FB556' },
+  iz:    { label: 'Збір ІЗ',            color: '#5B9BE0' },
+  reimb: { label: 'Чек, Реімбурсація',  color: '#F2C94C' },
+  doc:   { label: 'АНЦДок',             color: '#B59BE0' },
+};
+function mockEvents(day) {
+  // детермінований псевдовипадковий список подій 08:00–20:00
+  let s = day * 9973 + 17;
+  const rnd = () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
+  const n = 34 + Math.floor(rnd() * 14), ev = [];
+  for (let i = 0; i < n; i++) {
+    const t = 8 * 60 + Math.floor(rnd() * 12 * 60);
+    const r = rnd();
+    const type = r < .62 ? 'cash' : r < .80 ? 'card' : r < .88 ? 'iz' : r < .95 ? 'reimb' : 'doc';
+    ev.push({ t, type });
+  }
+  return ev.sort((a, b) => a.t - b.t);
+}
+const hhmm = t => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+
+// Присутність клієнтів у торговому залі (мок; реально — окремий сервіс/датчик).
+// Інтервали [від, до] у хвилинах від опівночі.
+function mockPresence(day) {
+  let s = day * 7919 + 3;
+  const rnd = () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
+  const out = [];
+  let t = 8 * 60 + 5;
+  while (t < 20 * 60 - 10) {
+    const len = 6 + Math.floor(rnd() * 30);
+    out.push([t, Math.min(t + len, 20 * 60)]);
+    t += len + 8 + Math.floor(rnd() * 40);
+  }
+  return out;
+}
+const PRESENCE = { color: '#C4B5FD', idle: '#7C3AED' };
+const IDLE_MIN = 8; // хв без жодної події при клієнтах у залі = «без обслуговування»
+
+function activity(day, isToday) {
+  const start = 8 * 60, end = 20 * 60, now = 14 * 60 + 31;
+  const events = mockEvents(day).filter(e => !isToday || e.t <= now);
+  const cx = 160, cy = 150, r = 108, w = 26;
+  const a0 = 135, sweep = 270;
+  const pt = (deg, rad) => { const a = deg * Math.PI / 180; return [cx + rad * Math.cos(a), cy + rad * Math.sin(a)]; };
+  const arc = (from, to, rad) => { const [x1, y1] = pt(from, rad), [x2, y2] = pt(to, rad); return `M${x1.toFixed(1)} ${y1.toFixed(1)} A${rad} ${rad} 0 ${to - from > 180 ? 1 : 0} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`; };
+  const angle = t => a0 + sweep * (t - start) / (end - start);
+
+  let ticks = '';
+  for (const e of events) {
+    const a = angle(e.t), [x1, y1] = pt(a, r - w / 2 + 2), [x2, y2] = pt(a, r + w / 2 - 2);
+    const c = `x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"`;
+    // видима рисочка + прозора широка зона наведення (10 px) з підказкою
+    ticks += `<line ${c} stroke="${ACT_TYPES[e.type].color}" stroke-width="2.5" stroke-linecap="round"></line>`
+           + `<line class="ev" ${c} stroke="transparent" stroke-width="10" data-tip="${ACT_TYPES[e.type].label}, ${hhmm(e.t)}"></line>`;
+  }
+  // внутрішнє кільце: клієнти в залі (фіолетовий); без подій ≥ IDLE_MIN хв — темніший
+  const rIn = r - w / 2 - 9, wIn = 8;
+  const presence = mockPresence(day).filter(([a]) => !isToday || a <= now).map(([a, b]) => [a, isToday ? Math.min(b, now) : b]);
+  let inner = '', idleN = 0, idleMin = 0;
+  for (const [a, b] of presence) {
+    const served = events.some(e => e.t >= a && e.t <= b);
+    const idle = !served && b - a >= IDLE_MIN;
+    if (idle) { idleN++; idleMin += b - a; }
+    const tip = idle ? `Клієнти в залі без обслуговування, ${hhmm(a)}–${hhmm(b)} (${b - a} хв)` : `Клієнти в залі, ${hhmm(a)}–${hhmm(b)}`;
+    inner += `<path class="ev" d="${arc(angle(a), angle(b), rIn)}" stroke="${idle ? PRESENCE.idle : PRESENCE.color}" stroke-width="${wIn}" fill="none" data-tip="${tip}"></path>`;
+  }
+  // маркери: початок зміни (зелений), кінець/зараз (сірий) — з «ніжкою» назовні
+  const pin = (deg, color, tip) => { const [x1, y1] = pt(deg, r + w / 2 + 1), [x2, y2] = pt(deg, r + w / 2 + 16); return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#9CA3AF" stroke-width="1.5"></line><circle class="ev" cx="${x2.toFixed(1)}" cy="${y2.toFixed(1)}" r="5" fill="${color}" data-tip="${tip}"></circle>`; };
+  const nowA = angle(isToday ? now : end);
+  const pins = pin(a0, '#5FB556', `Початок зміни, ${hhmm(start)}`) + pin(a0 + sweep, '#9CA3AF', `Кінець зміни, ${hhmm(end)}`)
+    + (isToday ? `<line x1="${pt(nowA, r - w / 2 - 2)[0].toFixed(1)}" y1="${pt(nowA, r - w / 2 - 2)[1].toFixed(1)}" x2="${pt(nowA, r + w / 2 + 2)[0].toFixed(1)}" y2="${pt(nowA, r + w / 2 + 2)[1].toFixed(1)}" stroke="#1C1C2E" stroke-width="1.5" class="ev" data-tip="Зараз, ${hhmm(now)}"></line>` : '');
+  const [lx, ly] = pt(a0, r + w / 2 + 36), [rx, ry] = pt(a0 + sweep, r + w / 2 + 36);
+  const counts = {};
+  for (const e of events) counts[e.type] = (counts[e.type] || 0) + 1;
+  const legend = Object.entries(ACT_TYPES).map(([k, v]) => `<span><b style="background:${v.color}"></b>${v.label}${counts[k] ? ' · ' + counts[k] : ''}</span>`).join('')
+    + `<span><b style="background:${PRESENCE.color}"></b>Клієнти в залі</span>`
+    + `<span><b style="background:${PRESENCE.idle}"></b>Без обслуговування${idleN ? ' · ' + idleN : ''}</span>`;
+  return `<div class="act" onmouseover="tipShow(event)" onmouseout="tipHide(event)">
+    <svg viewBox="0 0 320 274">
+      <path d="${arc(a0, a0 + sweep, r)}" stroke="#EEF0F3" stroke-width="${w}" fill="none" stroke-linecap="butt"></path>
+      <path d="${arc(a0, a0 + sweep, rIn)}" stroke="#F4F5F8" stroke-width="${wIn}" fill="none" stroke-linecap="butt"></path>
+      ${inner}${ticks}${pins}
+      <text class="tm" x="${lx.toFixed(1)}" y="${(ly + 4).toFixed(1)}" text-anchor="middle">${hhmm(start)}</text>
+      <text class="tm" x="${rx.toFixed(1)}" y="${(ry + 4).toFixed(1)}" text-anchor="middle">${hhmm(end)}</text>
+    </svg>
+    <div class="sum"><b>${events.length}</b><span>подій за зміну</span>${idleN ? `<span style="display:block;margin-top:4px;color:${PRESENCE.idle};font-weight:600">${idleMin} хв без обслуговування</span>` : ''}</div>
+    <div class="tip" id="acttip"></div>
+  </div>
+  <div class="legend" style="flex-wrap:wrap; gap:8px 14px">${legend}</div>`;
+}
+function tipShow(ev) {
+  const el = ev.target.closest('.ev'); if (!el) return;
+  const box = ev.currentTarget, tip = box.querySelector('.tip'), rb = box.getBoundingClientRect(), eb = el.getBoundingClientRect();
+  tip.textContent = el.dataset.tip;
+  tip.style.left = (eb.left + eb.width / 2 - rb.left) + 'px';
+  tip.style.top = (eb.top - rb.top) + 'px';
+  tip.style.display = 'block';
+}
+function tipHide(ev) { if (!ev.target.closest('.ev')) return; ev.currentTarget.querySelector('.tip').style.display = 'none'; }
+
+// Мок «Потенціал росту» за день: мій результат vs середнє по колегах.
+function growthRows(day) {
+  const k = ((day * 7) % 11) / 10;  // детермінований «шум» 0..1
+  const my = {
+    avg: 150 + k * 60, len: 1.6 + k * 1.2, one: 62 - k * 25, tpk: 30 + k * 30,
+    // лічильники за день — лише цілі в межах: 0–5, 0–4, 0–10
+    custom: Math.round(k * 5), other: Math.round(k * 4), hand: Math.round(k * 10),
+    tpkIz: 18 + k * 30,               // % конверсії ТПК в інтернет-замовлення
+    edk: Math.round(k * 6),           // продажів ЄДК на відсутній товар, шт
+  };
+  const peers = { avg: 182.4, len: 2.3, one: 44, tpk: 47, tpkIz: 31, edk: 2.7, custom: 2.1, other: 1.4, hand: 3.6 };
+  const row = (label, m, p, fmtM, fmtP, higherBetter) => {
+    const better = higherBetter ? m >= p : m <= p;
+    return `<tr><td>${label}</td><td class="r ${better ? 'better' : 'worse'}">${fmtM(m)}</td><td class="r">${fmtP(p)}</td></tr>`;
+  };
+  const money = v => v.toFixed(2).replace('.', ',');
+  const num1 = v => v.toFixed(1).replace('.', ',');
+  const pc = v => Math.round(v) + '%';
+  const int = v => String(Math.round(v));
+  return row('Середній чек', my.avg, peers.avg, money, money, true)
+       + row('Довжина чека', my.len, peers.len, num1, num1, true)
+       + row('Частка чеків з 1 позицією', my.one, peers.one, pc, pc, false)
+       + row('Конверсія ТПК', my.tpk, peers.tpk, pc, pc, true)
+       + row('Конверсія ТПК в ІЗ', my.tpkIz, peers.tpkIz, pc, pc, true)
+       + row('Продажів ЄДК на відсутній товар', my.edk, peers.edk, int, num1, true)
+       + row('Замовлень під клієнта', my.custom, peers.custom, int, num1, true)
+       + row('Замовлень в іншу аптеку', my.other, peers.other, int, num1, true)
+       + row('Знижки «Рука допомоги»', my.hand, peers.hand, int, num1, true);
+}
+
 function detailTurnover(d) {
   const t = d.turnover, p = Math.round(t.fact / t.plan * 100);
   const days = [1400,2900,2100,3300,2800,1900,2600,3100,2700,2400,3500,2900,2200,3000,2600,2800,3200,2500,2900,3100,2700,2600,3200].map(v => scope === 'pharmacy' ? v * 12 : v);
+  const dayPlan = scope === 'pharmacy' ? 36000 : 3000;   // мок: денний план
+  const today = 23, metDays = days.slice(0, today - 1).filter(v => v >= dayPlan).length;
   return `<div class="det">
-    <div class="top"><button class="back" onclick="open('list')">‹ Назад</button><h3>Товарообіг · ${d.title.toLowerCase()}</h3></div>
+    <div class="top"><button class="back" onclick="showView('list')">‹ Назад</button><h3>Товарообіг · ${d.title.toLowerCase()}</h3></div>
     <div class="card">
-      <div class="big"><b>${fmt(t.fact)} ₴</b><span>план на зміну ${fmt(t.plan)} ₴</span><span class="badge ${badgeCls(p)}">${p}%</span></div>
+      <div class="big"><b>${fmt(t.fact)} ₴</b><span>план на день ${fmt(t.plan)} ₴</span><span class="badge ${badgeCls(p)}">${p}%</span></div>
       <div style="margin-top:6px">${track(t.fact / t.plan, SHIFT_ELAPSED)}</div>
-      <div class="row2">
+      <div class="row2 two">
         <div class="stat"><div class="l">Чеків</div><div class="v">${t.checks}</div></div>
         <div class="stat"><div class="l">Середній чек</div><div class="v">${t.avg.toFixed(2).replace('.', ',')}</div></div>
-        <div class="stat"><div class="l">До плану</div><div class="v">${fmt(t.plan - t.fact)} ₴</div></div>
       </div>
-      <div class="section">${ICON} ТОВАРООБІГ ПО ДНЯХ</div>
-      ${chart(days, 0, '')}
-      <div class="section">${ICON} СТРУКТУРА ЗМІНИ</div>
-      <table><tr><th>Група</th><th class="r">Сума</th><th class="r">Частка</th></tr>
-        <tr><td>Rx (рецептурні)</td><td class="r">${fmt(t.fact * .48)}</td><td class="r">48%</td></tr>
-        <tr><td>OTC</td><td class="r">${fmt(t.fact * .31)}</td><td class="r">31%</td></tr>
-        <tr><td>ВТМ</td><td class="r">${fmt(d.vtm.fact)}</td><td class="r">${Math.round(d.vtm.fact / t.fact * 100)}%</td></tr>
-        <tr><td>Парафармація</td><td class="r">${fmt(t.fact * .08)}</td><td class="r">8%</td></tr>
+      <div class="section">${ICON} ВИКОНАННЯ ДЕННОГО ПЛАНУ · ВЕРЕСЕНЬ</div>
+      ${calendar(days, dayPlan, today, 2026, 9)}
+      <div class="note" style="margin-bottom:12px">За кожен день із виконаним планом додатково нараховується 0,2% від продажів цього дня.</div>
+      <div class="section">${ICON} ПОТЕНЦІАЛ РОСТУ <span class="tsel">${selDay === today ? 'сьогодні' : selDay + ' вересня'}</span></div>
+      <table><tr><th>Показник</th><th class="r">Мій результат</th><th class="r">У колег</th></tr>
+        ${growthRows(selDay)}
       </table>
+      <div class="note" style="margin-bottom:12px">Клікніть дату в календарі, щоб побачити показники за той день. Зелений — краще за колег, жовтий — є потенціал.</div>
+      <div class="section">${ICON} АКТИВНІСТЬ <span class="tsel">${selDay === today ? 'сьогодні' : selDay + ' вересня'}</span></div>
+      ${activity(selDay, selDay === today)}
+      <div class="note">Наведіть на рисочку, щоб побачити тип події й час. Дані надходитимуть окремим сервісом.</div>
     </div>
   </div>`;
 }
 function detailVtm(d) {
   const v = d.vtm, p = Math.round(v.fact / v.plan * 100);
   return `<div class="det">
-    <div class="top"><button class="back" onclick="open('list')">‹ Назад</button><h3>Продаж ВТМ · ${d.title.toLowerCase()}</h3></div>
+    <div class="top"><button class="back" onclick="showView('list')">‹ Назад</button><h3>Продаж ВТМ · ${d.title.toLowerCase()}</h3></div>
     <div class="card">
       <div class="big"><b>${fmt(v.fact)} ₴</b><span>план ${fmt(v.plan)} ₴</span><span class="badge ${badgeCls(p)}">${p}%</span></div>
       <div style="margin-top:6px">${track(v.fact / v.plan, SHIFT_ELAPSED)}</div>
@@ -267,7 +459,7 @@ function render() {
   const body = view === 'list' ? list(d) : view === 'zf' ? detailZf(d) : view === 'turnover' ? detailTurnover(d) : detailVtm(d);
   el.innerHTML = (view === 'list' ? '' : seg()) + body;
 }
-function open(v) { view = v; render(); }
+function showView(v) { view = v; render(); }
 function setScope(s) { scope = s; render(); }
 render();
 

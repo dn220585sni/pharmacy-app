@@ -1,6 +1,9 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pharmacy_app/widgets/kpi_activity_ring.dart';
 import 'package:pharmacy_app/widgets/kpi_block.dart';
+import 'package:pharmacy_app/widgets/kpi_plan_calendar.dart';
 
 Widget _wrap(Widget child) => MaterialApp(
       home: Scaffold(
@@ -60,12 +63,72 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Товарообіг · мої показники'), findsOneWidget);
     expect(find.text('177,78'), findsOneWidget);
+    expect(find.byType(KpiPlanCalendar), findsOneWidget);
+    expect(find.byType(KpiActivityRing), findsOneWidget);
+    expect(find.text('ПОТЕНЦІАЛ РОСТУ'), findsOneWidget);
+    expect(find.text('Конверсія ТПК в ІЗ'), findsOneWidget);
+    expect(find.text('Знижки «Рука допомоги»'), findsOneWidget);
+    // Дві плашки: Чеків і Середній чек; «Днів із планом» немає.
+    expect(find.text('ДНІВ ІЗ ПЛАНОМ'), findsNothing);
     await tester.tap(find.text('Назад'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Продаж ВТМ'));
     await tester.pumpAndSettle();
     expect(find.text('Продаж ВТМ · мої показники'), findsOneWidget);
     expect(find.text('65,6%'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Календар: клік по даті міняє «Потенціал росту» й «Активність»',
+      (tester) async {
+    await tester.pumpWidget(_wrap(KpiBlock(today: DateTime(2026, 9, 23))));
+    await tester.tap(find.text('Товарообіг'));
+    await tester.pumpAndSettle();
+    // Типово обрано сьогодні: два підписи секцій + легенда календаря.
+    expect(find.text('сьогодні'), findsNWidgets(3));
+    final growthToday = KpiMockData.growthRows(23).first.my;
+    expect(find.text(growthToday), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(const ValueKey('cal-day-8')));
+    await tester.tap(find.byKey(const ValueKey('cal-day-8')));
+    await tester.pumpAndSettle();
+    expect(find.text('8 вересня'), findsNWidgets(2));
+    final growth8 = KpiMockData.growthRows(8).first.my;
+    expect(find.text(growth8), findsOneWidget);
+    expect(find.text(growthToday), findsNothing);
+
+    // Майбутній день не клікається (без InkWell з ключем).
+    expect(find.byKey(const ValueKey('cal-day-30')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('KpiActivityRing: наведення показує підказку події',
+      (tester) async {
+    const data = KpiActivityData(
+      shiftStart: 8 * 60,
+      shiftEnd: 20 * 60,
+      now: 14 * 60,
+      events: [KpiActivityEvent(8 * 60, KpiEventType.cash)],
+      presence: [KpiPresence(9 * 60, 9 * 60 + 30)],
+    );
+    await tester.pumpWidget(_wrap(const KpiActivityRing(data: data)));
+    expect(find.text('1'), findsOneWidget);
+    expect(find.text('Без обслуговування · 1'), findsOneWidget);
+    expect(find.text('30 хв без обслуговування'), findsOneWidget);
+
+    // Подія о 08:00 стоїть на початку дуги (135°): наводимо на цю точку.
+    // Полотно кілець починається у верхньому лівому куті віджета.
+    final box = tester.getRect(find.byType(KpiActivityRing));
+    final scale = box.width / 320;
+    final center = box.topLeft + Offset(160 * scale, 150 * scale);
+    final r = 108 * scale;
+    final at = center + Offset(r * -0.7071, r * 0.7071);
+    final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await g.addPointer(location: Offset.zero);
+    addTearDown(g.removePointer);
+    await g.moveTo(at);
+    await tester.pumpAndSettle();
+    expect(find.text('Чек, готівка, 08:00'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

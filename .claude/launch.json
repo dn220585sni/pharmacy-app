@@ -15,6 +15,12 @@
         "--no-pub"
       ],
       "port": 8787
+    },
+    {
+      "name": "mockups",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tool/serve_mockups.js"],
+      "port": 8790
     }
   ]
 }

@@ -49,6 +49,15 @@ void main() {
     expect(find.text('план на вересень 13%'), findsOneWidget);
     expect(find.text('11 / 18'), findsOneWidget);
     expect(find.byType(KpiDayChart), findsOneWidget);
+    // Плашка балів, «Пропущено ЗФ» ПЕРЕД «Продано ЗФ за зміну», суми балів.
+    expect(find.text('БАЛІВ ЗА ЗФ СЬОГОДНІ'), findsOneWidget);
+    expect(find.text('58'), findsOneWidget);
+    final missedY = tester.getTopLeft(find.text('ПРОПУЩЕНО ЗФ')).dy;
+    final soldY = tester.getTopLeft(find.text('ПРОДАНО ЗФ ЗА ЗМІНУ')).dy;
+    expect(missedY, lessThan(soldY));
+    expect(find.text('+44'), findsOneWidget);
+    expect(find.text('+58'), findsOneWidget);
+    expect(find.text('ТОП ЗФ ЗА ЗМІНУ'), findsNothing);
     expect(find.text('Товарообіг'), findsNothing);
 
     await tester.tap(find.text('Назад'));

@@ -74,6 +74,8 @@
   .chart { position: relative; height: 90px; display: flex; align-items: flex-end; gap: 3px; margin: 6px 0 4px; border-bottom: 1px solid #E5E7EB; }
   .chart i { flex: 1; background: #BFD6EE; border-radius: 2px 2px 0 0; }
   .chart i.today { background: #1E7DC8; }
+  .chart i.met { background: #22C55E; }
+  .chart i.below { background: #E5E7EB; }
   .chart .goal { position: absolute; left: 0; right: 0; border-top: 2px dashed #EF8F8F; }
   .chart .goal span { position: absolute; right: 0; top: -14px; font-size: 10px; color: #B91C1C; font-weight: 700; }
   .axis { display: flex; justify-content: space-between; font-size: 10px; color: #9CA3AF; margin-bottom: 12px; }
@@ -97,6 +99,12 @@
   .cal .d.past i:hover { filter: brightness(.93); }
   .cal .d.sel i { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #1E7DC8; }
   .row2.two { grid-template-columns: 1fr 1fr; }
+
+  /* ЗФ: плашка «золота фішка» як у головній таблиці (тепле коло + бали) */
+  .zfb { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #F5F0E8; color: #6B7280; font-size: 11px; font-weight: 500; margin-right: 8px; vertical-align: middle; flex: none; }
+  td .zfrow { display: flex; align-items: center; }
+  td .zfname { line-height: 1.25; }
+  td.pts { color: #15803D; font-weight: 600; }
 
   /* ВТМ: бонус, накопичення за місяць, заміни, категорії */
   .bonus { display: flex; align-items: center; gap: 10px; background: #E7F6EC; border: 1px solid #22C55E40; border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; }
@@ -138,14 +146,6 @@
   <div>
     <p class="caption">Інтерактивно: перемикайте, клікайте по показниках</p>
     <div class="panel" id="app"></div>
-  </div>
-  <div>
-    <p class="caption">Для довідки: деталізація «Частка ЗФ» (статично)</p>
-    <div class="panel" id="static-zf"></div>
-  </div>
-  <div>
-    <p class="caption">Для довідки: деталізація «Продаж ВТМ» (статично)</p>
-    <div class="panel" id="static-turn"></div>
   </div>
 </div>
 
@@ -228,29 +228,55 @@ function earned(d) {
 
 function chart(days, target, unit) {
   const max = Math.max(...days, target) * 1.1;
-  const bars = days.map((v, i) => `<i style="height:${v / max * 100}%" class="${i === days.length - 1 ? 'today' : ''}" title="${i + 1}.09: ${v}"></i>`).join('');
+  const bars = days.map((v, i) => `<i style="height:${v / max * 100}%" class="${i === days.length - 1 ? 'today' : ''}${target ? (v < target ? ' below' : ' met') : ''}" title="${i + 1}.09: ${v}${target && v < target ? ' — нижче плану' : ''}"></i>`).join('');
   const goal = target ? `<div class="goal" style="bottom:${target / max * 100}%"><span>план ${target}${unit}</span></div>` : '';
   return `<div class="chart">${goal}${bars}</div><div class="axis"><span>1 вер</span><span>сьогодні, 23 вер</span></div>`;
 }
 
 function detailZf(d) {
-  const z = d.zf, diff = z.cur - z.target;
+  const z = d.zf, diff = z.cur - z.target, p = Math.round(z.cur / z.target * 100);
+  const isPh = scope === 'pharmacy', k = isPh ? 12 : 1;
+  // ЗФ-товари, продані за зміну: [назва, бали за уп., к-сть, сума]
+  const sold = [
+    ['Аскорбінова к-та ЗФ 500 мг №30', 3, 4 * k, 128 * k],
+    ['Вітамін D3 ЗФ 2000 МО №60', 8, 3 * k, 387 * k],
+    ['Магній B6 ЗФ №50', 6, 2 * k, 246 * k],
+    ['Омега-3 ЗФ №30', 10, 1 * k, 215 * k],
+  ];
+  const soldPts = sold.reduce((s, r) => s + r[1] * r[2], 0);
+  // Пропущені ЗФ: продано звичайний товар, хоча в наявності був ЗФ-аналог
+  const missed = [
+    ['Магне-B6 №50', 'Магній B6 ЗФ №50', 6, 3 * k],
+    ['Аквадетрим 15 000 МО', 'Вітамін D3 ЗФ 2000 МО №60', 8, 2 * k],
+    ['Супрадин №30', 'Мультивітамін ЗФ №30', 5, 2 * k],
+  ];
+  const missedPts = missed.reduce((s, r) => s + r[2] * r[3], 0);
   return `<div class="det">
     <div class="top"><button class="back" onclick="showView('list')">‹ Назад</button><h3>Частка ЗФ · ${d.title.toLowerCase()}</h3></div>
     <div class="card">
-      <div class="big"><b>${pct(z.cur)}</b><span>план на вересень ${z.target}%</span><span class="badge ${badgeCls(Math.round(z.cur / z.target * 100))}">${Math.round(z.cur / z.target * 100)}%</span></div>
+      <div class="big"><b>${pct(z.cur)}</b><span>план на вересень ${z.target}%</span><span class="badge ${badgeCls(p)}">${p}%</span></div>
       <div style="margin-top:6px">${track(z.cur / z.target, Math.round(z.monthElapsed))}</div>
       <div class="row2">
-        <div class="stat"><div class="l">До цілі</div><div class="v">${diff >= 0 ? '+' : ''}${diff.toFixed(2).replace('.', ',')} п.п.</div></div>
+        <div class="stat"><div class="l">До плану</div><div class="v ${diff >= 0 ? 'good' : 'warn'}">${diff >= 0 ? '+' : '−'}${Math.abs(diff).toFixed(2).replace('.', ',')} п.п.</div></div>
         <div class="stat"><div class="l">Чеків із ЗФ</div><div class="v">${z.checksWithZf} / ${z.checksTotal}</div></div>
-        <div class="stat"><div class="l">Пройшло місяця</div><div class="v">${pct(z.monthElapsed, 0)}</div></div>
+        <div class="stat"><div class="l">Балів за ЗФ сьогодні</div><div class="v">${fmt(soldPts)}</div></div>
       </div>
-      <div class="section">${ICON} ДИНАМІКА ПО ДНЯХ (накопичено з 1 вересня)</div>
+
+      <div class="section">${ICON} ЧАСТКА ЗФ ПО ДНЯХ <span class="tsel">накопичено з 1 вересня</span></div>
       ${chart(z.days, z.target, '%')}
-      <div class="section">${ICON} ТОП ЗФ ЗА ЗМІНУ</div>
-      <table><tr><th>Товар</th><th class="r">К-сть</th><th class="r">Сума</th></tr>
-      ${z.top.map(r => `<tr><td>${r[0]}</td><td class="r">${r[1]}</td><td class="r">${r[2]}</td></tr>`).join('')}</table>
-      <div class="note">Частка ЗФ = сума продажів товарів із маркером «Золота фішка» / загальний товарообіг за місяць.</div>
+      <div class="legend" style="margin-top:0"><span><b style="background:#22C55E"></b>план виконано</span><span><b style="background:#E5E7EB"></b>не виконано</span><span><b style="background:#1E7DC8"></b>сьогодні</span></div>
+      <div class="note" style="margin-bottom:0">Частка ЗФ = продажі товарів із золотою фішкою / загальний товарообіг, наростаючим підсумком за місяць. Оцінюється результат за місяць.</div>
+
+      <div class="section">${ICON} ПРОПУЩЕНО ЗФ <span class="tsel">сьогодні</span></div>
+      <table><tr><th>Продано → є ЗФ-аналог</th><th class="r">К-сть</th><th class="r">Бали</th></tr>
+      ${missed.map(r => `<tr><td>${r[0]}<div class="swap">→ ${r[1]}</div></td><td class="r">${r[3]}</td><td class="r pts">+${r[2] * r[3]}</td></tr>`).join('')}
+      <tr class="tot"><td>Разом</td><td class="r">${missed.reduce((s, r) => s + r[3], 0)}</td><td class="r pts">+${missedPts}</td></tr></table>
+      <div class="note" style="margin-bottom:0">Чеки, де клієнт узяв товар без золотої фішки, хоча в наявності був ЗФ-аналог. Бали — скільки додала б заміна.</div>
+
+      <div class="section">${ICON} ПРОДАНО ЗФ ЗА ЗМІНУ <span class="tsel">${sold.reduce((s, r) => s + r[2], 0)} уп.</span></div>
+      <table><tr><th>Товар</th><th class="r">К-сть</th><th class="r">Сума</th><th class="r">Бали</th></tr>
+      ${sold.map(r => `<tr><td>${r[0]}</td><td class="r">${r[2]}</td><td class="r">${fmt(r[3])},00</td><td class="r pts">+${r[1] * r[2]}</td></tr>`).join('')}
+      <tr class="tot"><td>Разом</td><td class="r">${sold.reduce((s, r) => s + r[2], 0)}</td><td class="r">${fmt(sold.reduce((s, r) => s + r[3], 0))},00</td><td class="r pts">+${soldPts}</td></tr></table>
     </div>
   </div>`;
 }
@@ -465,11 +491,13 @@ function cumChart(dayFacts, monthPlan, today, daysInMonth) {
   const area = `M${x(0)},${y(0)} L${pts.join(' L')} L${x(today).toFixed(1)},${y(0)} Z`;
   const line = `M${x(0)},${y(0)} L${pts.join(' L')}`;
   const met = s >= monthPlan;
+  const onPace = s >= monthPlan * today / daysInMonth;   // факт ≥ план наростаючим на сьогодні
+  const lc = onPace ? '#22C55E' : '#9CA3AF', fc = onPace ? '#22C55E' : '#E5E7EB', fo = onPace ? .14 : .6;
   return `<div class="cum"><svg viewBox="0 0 ${W} ${H}">
     <line x1="0" y1="${y(0)}" x2="${W}" y2="${y(0)}" stroke="#E5E7EB"></line>
-    <line x1="0" y1="${y(0)}" x2="${W}" y2="${y(monthPlan)}" stroke="#9CA3AF" stroke-width="1.5" stroke-dasharray="5 4"></line>
-    <path d="${area}" fill="#1E7DC8" fill-opacity=".14"></path>
-    <path d="${line}" fill="none" stroke="#1E7DC8" stroke-width="2"></path>
+    <line x1="0" y1="${y(0)}" x2="${W}" y2="${y(monthPlan)}" stroke="#6B7280" stroke-width="1.5" stroke-dasharray="5 4"></line>
+    <path d="${area}" fill="${fc}" fill-opacity="${fo}"></path>
+    <path d="${line}" fill="none" stroke="${lc}" stroke-width="2"></path>
     <circle cx="${x(today)}" cy="${y(s)}" r="4" fill="#1E7DC8" stroke="#fff" stroke-width="2"></circle>
     <line x1="${x(today)}" y1="${y(0)}" x2="${x(today)}" y2="${y(s) + 6}" stroke="#1E7DC8" stroke-width="1" stroke-dasharray="2 2"></line>
     <text class="lblb" x="${x(today) - 8}" y="${y(s) - 8}" text-anchor="end">${fmt(s)} ₴${met ? ' ✓' : ''}</text>
@@ -556,10 +584,6 @@ function showView(v) { view = v; render(); }
 function setScope(s) { scope = s; render(); }
 render();
 
-// статичні довідкові панелі
-document.getElementById('static-zf').innerHTML = seg() + detailZf(DATA.my);
-document.getElementById('static-turn').innerHTML = seg() + detailVtm(DATA.my);
-scope = 'my';
 </script>
 </body>
 </html>

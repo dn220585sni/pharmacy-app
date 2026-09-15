@@ -36,6 +36,27 @@ class KpiGrowthRow {
   const KpiGrowthRow(this.label, this.my, this.peers, this.better);
 }
 
+/// ЗФ-товар, проданий за зміну: бали фармацевту за упаковку, к-сть, сума.
+class KpiZfSold {
+  final String name;
+  final int pointsPerPack;
+  final int qty;
+  final double sum;
+  const KpiZfSold(this.name, this.pointsPerPack, this.qty, this.sum);
+  int get points => pointsPerPack * qty;
+}
+
+/// Пропущений ЗФ: продано товар без золотої фішки, хоча в наявності був
+/// ЗФ-аналог. [pointsPerPack] — бали за упаковку аналога.
+class KpiZfMissed {
+  final String sold;
+  final String zfAnalog;
+  final int pointsPerPack;
+  final int qty;
+  const KpiZfMissed(this.sold, this.zfAnalog, this.pointsPerPack, this.qty);
+  int get points => pointsPerPack * qty;
+}
+
 /// Пропущена заміна бренду на ВТМ: клієнт узяв бренд, хоча в наявності був
 /// ВТМ-аналог. [potential] — скільки ВТМ додало б до плану, грн.
 class KpiVtmSwap {
@@ -83,7 +104,8 @@ class KpiSnapshot {
   final int zfChecks; // чеків із ЗФ
   final int zfChecksTotal;
   final List<double> zfDays; // накопичена частка по днях місяця
-  final List<KpiTopItem> zfTop;
+  final List<KpiZfSold> zfSold; // продано ЗФ за зміну
+  final List<KpiZfMissed> zfMissed; // пропущено ЗФ сьогодні
 
   /// Скільки зміни минуло, 0..1 (рисочка темпу на смужках за зміну).
   final double shiftElapsed;
@@ -112,24 +134,24 @@ class KpiSnapshot {
     required this.zfChecks,
     required this.zfChecksTotal,
     required this.zfDays,
-    required this.zfTop,
+    required this.zfSold,
+    required this.zfMissed,
     required this.shiftElapsed,
     required this.monthElapsed,
   });
 }
 
 class KpiMockData {
-  static const _zfTop = [
-    KpiTopItem('Аскорбінова к-та ЗФ 500 мг №30', '4', '128,00'),
-    KpiTopItem('Вітамін D3 ЗФ 2000 МО №60', '3', '387,00'),
-    KpiTopItem('Магній B6 ЗФ №50', '2', '246,00'),
-    KpiTopItem('Омега-3 ЗФ №30', '1', '215,00'),
+  static const _zfSold = [
+    KpiZfSold('Аскорбінова к-та ЗФ 500 мг №30', 3, 4, 128),
+    KpiZfSold('Вітамін D3 ЗФ 2000 МО №60', 8, 3, 387),
+    KpiZfSold('Магній B6 ЗФ №50', 6, 2, 246),
+    KpiZfSold('Омега-3 ЗФ №30', 10, 1, 215),
   ];
-  static const _zfTopPharmacy = [
-    KpiTopItem('Аскорбінова к-та ЗФ 500 мг №30', '41', '1 312,00'),
-    KpiTopItem('Вітамін D3 ЗФ 2000 МО №60', '27', '3 483,00'),
-    KpiTopItem('Магній B6 ЗФ №50', '19', '2 337,00'),
-    KpiTopItem('Омега-3 ЗФ №30', '12', '2 580,00'),
+  static const _zfMissed = [
+    KpiZfMissed('Магне-B6 №50', 'Магній B6 ЗФ №50', 6, 3),
+    KpiZfMissed('Аквадетрим 15 000 МО', 'Вітамін D3 ЗФ 2000 МО №60', 8, 2),
+    KpiZfMissed('Супрадин №30', 'Мультивітамін ЗФ №30', 5, 2),
   ];
   static const _vtmTop = [
     KpiTopItem('Парацетамол АНЦ 500 мг №10', '6', '114,00'),
@@ -273,7 +295,8 @@ class KpiMockData {
           zfChecks: 11,
           zfChecksTotal: 18,
           zfDays: _zfDaysMy,
-          zfTop: _zfTop,
+          zfSold: _zfSold,
+          zfMissed: _zfMissed,
           shiftElapsed: 0.62,
           monthElapsed: 0.767,
         );
@@ -301,7 +324,14 @@ class KpiMockData {
           zfChecks: 121,
           zfChecksTotal: 236,
           zfDays: _zfDaysPharmacy,
-          zfTop: _zfTopPharmacy,
+          zfSold: [
+            for (final s in _zfSold)
+              KpiZfSold(s.name, s.pointsPerPack, s.qty * 12, s.sum * 12),
+          ],
+          zfMissed: [
+            for (final m in _zfMissed)
+              KpiZfMissed(m.sold, m.zfAnalog, m.pointsPerPack, m.qty * 12),
+          ],
           shiftElapsed: 0.62,
           monthElapsed: 0.767,
         );
@@ -798,6 +828,8 @@ class _KpiDetailState extends State<_KpiDetail> {
   List<Widget> _zf() {
     final ratio = data.zfCur / data.zfTarget;
     final diff = data.zfCur - data.zfTarget;
+    final soldPts = data.zfSold.fold<int>(0, (s, x) => s + x.points);
+    final soldQty = data.zfSold.fold<int>(0, (s, x) => s + x.qty);
     return [
       _BigValue(
         value: kpiPct(data.zfCur),
@@ -808,13 +840,19 @@ class _KpiDetailState extends State<_KpiDetail> {
       KpiTrack(ratio: ratio, pace: data.monthElapsed),
       const SizedBox(height: 12),
       _Stats([
-        _Stat('До плану',
-            '${diff >= 0 ? '+' : '−'}${diff.abs().toStringAsFixed(2).replaceAll('.', ',')} п.п.'),
+        _Stat(
+          'До плану',
+          '${diff >= 0 ? '+' : '−'}${diff.abs().toStringAsFixed(2).replaceAll('.', ',')} п.п.',
+          color: diff >= 0 ? _C.goodFg : _C.warnFg,
+        ),
         _Stat('Чеків із ЗФ', '${data.zfChecks} / ${data.zfChecksTotal}'),
-        _Stat('Пройшло місяця', kpiPct(data.monthElapsed * 100, 0)),
+        _Stat('Балів за ЗФ сьогодні', kpiInt(soldPts)),
       ]),
       const SizedBox(height: 12),
-      _SectionLabel('Динаміка по днях (накопичено з 1 ${_monthsShort[today.month - 1]})'),
+      _SectionLabel(
+        'Частка ЗФ по днях',
+        trailing: 'накопичено з 1 ${_monthsShort[today.month - 1]}',
+      ),
       const SizedBox(height: 6),
       KpiDayChart(
         values: _toDate(data.zfDays),
@@ -823,16 +861,35 @@ class _KpiDetailState extends State<_KpiDetail> {
         firstLabel: '1 ${_monthsShort[today.month - 1]}',
         lastLabel: 'сьогодні, ${today.day} ${_monthsShort[today.month - 1]}',
       ),
-      const SizedBox(height: 12),
-      const _SectionLabel('Топ ЗФ за зміну'),
-      const SizedBox(height: 4),
-      _TopTable(items: data.zfTop),
+      const Wrap(
+        spacing: 14,
+        runSpacing: 4,
+        children: [
+          _LegendDot(color: KpiDayChart.metColor, label: 'план виконано'),
+          _LegendDot(color: KpiDayChart.belowColor, label: 'не виконано'),
+          _LegendDot(color: KpiDayChart.todayColor, label: 'сьогодні'),
+        ],
+      ),
       const SizedBox(height: 8),
       const Text(
-        'Частка ЗФ = сума продажів товарів із маркером «Золота фішка» / '
-        'загальний товарообіг за місяць.',
+        'Частка ЗФ = продажі товарів із золотою фішкою / загальний товарообіг, '
+        'наростаючим підсумком за місяць. Оцінюється результат за місяць.',
         style: TextStyle(fontSize: 11, color: _C.muted, height: 1.4),
       ),
+      const SizedBox(height: 12),
+      const _SectionLabel('Пропущено ЗФ', trailing: 'сьогодні'),
+      const SizedBox(height: 4),
+      _ZfMissedTable(items: data.zfMissed),
+      const SizedBox(height: 8),
+      const Text(
+        'Чеки, де клієнт узяв товар без золотої фішки, хоча в наявності був '
+        'ЗФ-аналог. Бали — скільки додала б заміна.',
+        style: TextStyle(fontSize: 11, color: _C.muted, height: 1.4),
+      ),
+      const SizedBox(height: 12),
+      _SectionLabel('Продано ЗФ за зміну', trailing: '$soldQty уп.'),
+      const SizedBox(height: 4),
+      _ZfSoldTable(items: data.zfSold),
     ];
   }
 
@@ -1217,6 +1274,138 @@ class _BonusCard extends StatelessWidget {
   }
 }
 
+/// Кружечок легенди + підпис (для графіків у деталізаціях).
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        Text(label, style: const TextStyle(fontSize: 11, color: _C.muted)),
+      ],
+    );
+  }
+}
+
+const _thStyle = TextStyle(
+    fontSize: 10,
+    fontWeight: FontWeight.w600,
+    color: _C.muted,
+    letterSpacing: 0.3);
+const _tdStyle = TextStyle(fontSize: 12, color: _C.text);
+const _tdBold =
+    TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _C.text);
+const _tdPts =
+    TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _C.goodFg);
+const _tdPtsBold =
+    TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _C.goodFg);
+
+/// Рядок таблиці з фіксованими правими колонками.
+Widget _tableLine(List<Widget> cells, List<double?> widths, Color border) =>
+    Container(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      decoration:
+          BoxDecoration(border: Border(bottom: BorderSide(color: border))),
+      child: Row(
+        children: [
+          for (var i = 0; i < cells.length; i++)
+            widths[i] == null
+                ? Expanded(child: cells[i])
+                : SizedBox(width: widths[i], child: cells[i]),
+        ],
+      ),
+    );
+
+/// «Пропущено ЗФ»: продано → ЗФ-аналог, к-сть, бали (зеленим), разом.
+class _ZfMissedTable extends StatelessWidget {
+  final List<KpiZfMissed> items;
+  const _ZfMissedTable({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    const w = [null, 48.0, 56.0];
+    final qty = items.fold<int>(0, (s, x) => s + x.qty);
+    final pts = items.fold<int>(0, (s, x) => s + x.points);
+    return Column(
+      children: [
+        _tableLine(const [
+          Text('ПРОДАНО → Є ЗФ-АНАЛОГ', style: _thStyle),
+          Text('К-СТЬ', style: _thStyle, textAlign: TextAlign.right),
+          Text('БАЛИ', style: _thStyle, textAlign: TextAlign.right),
+        ], w, _C.border),
+        for (final m in items)
+          _tableLine([
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(m.sold, style: _tdStyle, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text('→ ${m.zfAnalog}',
+                    style: const TextStyle(fontSize: 11, color: _C.goodFg),
+                    overflow: TextOverflow.ellipsis),
+              ],
+            ),
+            Text('${m.qty}', style: _tdStyle, textAlign: TextAlign.right),
+            Text('+${m.points}', style: _tdPts, textAlign: TextAlign.right),
+          ], w, _C.divider),
+        _tableLine([
+          const Text('Разом', style: _tdBold),
+          Text('$qty', style: _tdBold, textAlign: TextAlign.right),
+          Text('+$pts', style: _tdPtsBold, textAlign: TextAlign.right),
+        ], w, Colors.transparent),
+      ],
+    );
+  }
+}
+
+/// «Продано ЗФ за зміну»: товар, к-сть, сума, бали (зеленим), разом.
+class _ZfSoldTable extends StatelessWidget {
+  final List<KpiZfSold> items;
+  const _ZfSoldTable({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    const w = [null, 44.0, 72.0, 48.0];
+    final qty = items.fold<int>(0, (s, x) => s + x.qty);
+    final sum = items.fold<double>(0, (s, x) => s + x.sum);
+    final pts = items.fold<int>(0, (s, x) => s + x.points);
+    return Column(
+      children: [
+        _tableLine(const [
+          Text('ТОВАР', style: _thStyle),
+          Text('К-СТЬ', style: _thStyle, textAlign: TextAlign.right),
+          Text('СУМА', style: _thStyle, textAlign: TextAlign.right),
+          Text('БАЛИ', style: _thStyle, textAlign: TextAlign.right),
+        ], w, _C.border),
+        for (final s in items)
+          _tableLine([
+            Text(s.name,
+                style: _tdStyle, maxLines: 2, overflow: TextOverflow.ellipsis),
+            Text('${s.qty}', style: _tdStyle, textAlign: TextAlign.right),
+            Text(kpiMoney(s.sum), style: _tdStyle, textAlign: TextAlign.right),
+            Text('+${s.points}', style: _tdPts, textAlign: TextAlign.right),
+          ], w, _C.divider),
+        _tableLine([
+          const Text('Разом', style: _tdBold),
+          Text('$qty', style: _tdBold, textAlign: TextAlign.right),
+          Text(kpiMoney(sum), style: _tdBold, textAlign: TextAlign.right),
+          Text('+$pts', style: _tdPtsBold, textAlign: TextAlign.right),
+        ], w, Colors.transparent),
+      ],
+    );
+  }
+}
+
 /// «Пропущені заміни на ВТМ»: бренд → ВТМ-аналог, к-сть, потенціал, разом.
 class _SwapsTable extends StatelessWidget {
   final List<KpiVtmSwap> swaps;
@@ -1401,6 +1590,12 @@ class KpiDayChart extends StatelessWidget {
     this.height = 90,
   });
 
+  /// Єдиний стандарт з календарем ТО: план виконано — зелений, не виконано —
+  /// сірий, сьогодні — синій (акцент на поточну дату, незалежно від статусу).
+  static const metColor = Color(0xFF22C55E);
+  static const belowColor = Color(0xFFE5E7EB);
+  static const todayColor = _C.blue;
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -1448,8 +1643,10 @@ class _DayChartPainter extends CustomPainter {
     const gap = 3.0;
     final n = values.length;
     final bw = (size.width - gap * (n - 1)) / n;
-    final bar = Paint()..color = _C.chartBar;
-    final today = Paint()..color = _C.blue;
+    // Без плану (goal == null) стовпчики нейтрально-сині, з планом — зелений/сірий.
+    final bar = Paint()..color = goal == null ? _C.chartBar : KpiDayChart.metColor;
+    final today = Paint()..color = KpiDayChart.todayColor;
+    final below = Paint()..color = KpiDayChart.belowColor;
     for (var i = 0; i < n; i++) {
       final h = size.height * (values[i] / max).clamp(0.0, 1.0);
       final r = RRect.fromRectAndCorners(
@@ -1457,7 +1654,9 @@ class _DayChartPainter extends CustomPainter {
         topLeft: const Radius.circular(2),
         topRight: const Radius.circular(2),
       );
-      canvas.drawRRect(r, i == n - 1 ? today : bar);
+      final isBelow = goal != null && values[i] < goal!;
+      final isToday = i == n - 1;
+      canvas.drawRRect(r, isToday ? today : (isBelow ? below : bar));
     }
 
     // Базова лінія.

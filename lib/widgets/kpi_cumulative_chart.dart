@@ -49,6 +49,7 @@ class _CumPainter extends CustomPainter {
   final DateTime today;
 
   static const _blue = Color(0xFF1E7DC8);
+  static const _green = Color(0xFF22C55E);
   static const _muted = Color(0xFF6B7280);
   static const _border = Color(0xFFE5E7EB);
   static const _state = Color(0xFF9CA3AF);
@@ -92,6 +93,12 @@ class _CumPainter extends CustomPainter {
     double y(double v) => padT + (size.height - padT - padB) * (1 - v / max);
     final y0 = y(0);
 
+    // Єдиний стандарт: план виконано (факт ≥ план наростаючим підсумком на
+    // сьогодні) — зелений, не виконано — сірий; сьогодні — синя точка.
+    final met = s >= cumPlan[td - 1];
+    final lineColor = met ? _green : _state;
+    final areaColor = met ? _green.withValues(alpha: 0.14) : _border;
+
     // Базова лінія.
     canvas.drawLine(
       Offset(0, y0),
@@ -103,7 +110,7 @@ class _CumPainter extends CustomPainter {
 
     // Пунктир плану наростаючим підсумком.
     final planPaint = Paint()
-      ..color = _state
+      ..color = _muted
       ..strokeWidth = 1.5
       ..style = PaintingStyle.stroke;
     final planPath = Path()..moveTo(0, y0);
@@ -120,11 +127,11 @@ class _CumPainter extends CustomPainter {
     final area = Path.from(line)
       ..lineTo(x(td), y0)
       ..close();
-    canvas.drawPath(area, Paint()..color = _blue.withValues(alpha: 0.14));
+    canvas.drawPath(area, Paint()..color = areaColor);
     canvas.drawPath(
       line,
       Paint()
-        ..color = _blue
+        ..color = lineColor
         ..strokeWidth = 2
         ..style = PaintingStyle.stroke
         ..strokeJoin = StrokeJoin.round,
@@ -146,12 +153,14 @@ class _CumPainter extends CustomPainter {
     );
     canvas.drawCircle(Offset(tx, ty), 5, Paint()..color = Colors.white);
     canvas.drawCircle(Offset(tx, ty), 4, Paint()..color = _blue);
-    final met = s >= monthPlan;
     _text(
       canvas,
-      '${_int(s)} ₴${met ? ' ✓' : ''}',
+      '${_int(s)} ₴${s >= monthPlan ? ' ✓' : ''}',
       Offset(tx - 8, ty - 8),
-      const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _blue),
+      TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: met ? const Color(0xFF15803D) : _muted),
       alignRight: true,
     );
 

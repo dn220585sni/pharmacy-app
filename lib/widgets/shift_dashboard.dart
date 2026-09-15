@@ -1,16 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'anc_coin.dart';
+import 'kpi_block.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock shift data (will be replaced by a service layer later)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ShiftData {
-  static const double turnoverFact = 3200;
-  static const double turnoverPlan = 5000;
-  static const double vtmFact = 2100;   // UAH
-  static const double vtmPlan = 3000;   // UAH
+  // Товарообіг / ВТМ / Частка ЗФ — у KpiBlock (kpi_block.dart, KpiMockData).
 
   // set to null to hide the alert
   static const _AlertData alert = _AlertData(
@@ -148,21 +146,9 @@ class _ShiftDashboardState extends State<ShiftDashboard>
           _buildEarnedCard(),
           const SizedBox(height: 14),
 
-          _buildKpiBar(
-            label: 'Товарообіг',
-            fact: _ShiftData.turnoverFact,
-            plan: _ShiftData.turnoverPlan,
-            factLabel: '3 200',
-            planLabel: '5 000',
-          ),
-          const SizedBox(height: 14),
-          _buildKpiBar(
-            label: 'Продаж ВТМ',
-            fact: _ShiftData.vtmFact,
-            plan: _ShiftData.vtmPlan,
-            factLabel: '2 100',
-            planLabel: '3 000',
-          ),
+          // ── Перемикач «Мої / Аптеки» + Товарообіг, ВТМ, Частка ЗФ ──────
+          // Клік по рядку розгортає деталізацію на місці (kpi_block.dart).
+          const KpiBlock(),
           const SizedBox(height: 12),
           _buildExpandable(),
         ],
@@ -274,84 +260,6 @@ class _ShiftDashboardState extends State<ShiftDashboard>
             color: Color(0xFF6B7280),
             letterSpacing: 0.5,
           ),
-        ),
-      ],
-    );
-  }
-
-  // ── KPI progress bar ────────────────────────────────────────────────────────
-
-  // Progress bars always use primary blue; % badge uses status colour.
-  static const _barColor = Color(0xFF1E7DC8);
-
-  Widget _buildKpiBar({
-    required String label,
-    required double fact,
-    required double plan,
-    required String factLabel,
-    required String planLabel,
-  }) {
-    final ratio = (fact / plan).clamp(0.0, 1.0);
-    final pct = (ratio * 100).round();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF1C1C2E),
-              ),
-            ),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0F2F5),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                '$pct%',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF1C1C2E),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 7),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(5),
-          child: LinearProgressIndicator(
-            value: ratio,
-            minHeight: 9,
-            backgroundColor: const Color(0xFFF0F2F5),
-            valueColor: const AlwaysStoppedAnimation<Color>(_barColor),
-          ),
-        ),
-        const SizedBox(height: 5),
-        Row(
-          children: [
-            Text(
-              factLabel,
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: Color(0xFF6B7280),
-              ),
-            ),
-            const Spacer(),
-            Text(
-              'план $planLabel',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-            ),
-          ],
         ),
       ],
     );

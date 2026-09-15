@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<title>Мокап: показники за зміну</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #F4F5F8; font-family: Roboto, "Segoe UI", Arial, sans-serif; color: #1C1C2E; font-size: 13px; }
+  .stage { display: flex; gap: 24px; padding: 20px; align-items: flex-start; flex-wrap: wrap; }
+  .panel { width: 420px; background: #F4F5F8; border: 1px dashed #D1D5DB; border-radius: 12px; padding: 16px; }
+  .caption { font-size: 11px; color: #9CA3AF; margin: 0 0 10px; text-transform: uppercase; letter-spacing: .5px; }
+
+  .section { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: #6B7280; letter-spacing: .5px; margin-bottom: 10px; }
+  .section svg { width: 14px; height: 14px; fill: #9CA3AF; }
+
+  .card { background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 12px 14px; }
+  .earned { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .coin { width: 48px; height: 48px; border-radius: 50%; background: #F0C64E; border: 1.5px solid #C48F1C; display: grid; place-items: center; }
+  .coin i { width: 40px; height: 40px; border-radius: 50%; background: #FFE241; display: grid; place-items: center; font-style: normal; font-weight: 900; color: #008ECC; font-size: 12px; }
+  .earned .lbl { font-size: 11px; color: #6B7280; font-weight: 500; }
+  .earned .val { font-size: 22px; font-weight: 800; letter-spacing: -.5px; }
+
+  /* перемикач: 32 px, фон #EEF0F3, активний білий з тінню */
+  .seg { display: flex; height: 32px; background: #EEF0F3; border-radius: 9px; padding: 3px; margin: 0 0 12px; }
+  .seg button { flex: 1; border: 0; background: transparent; padding: 0 10px; border-radius: 7px; font: inherit; font-size: 12px; font-weight: 600; color: #6B7280; cursor: pointer; }
+  .seg button.on { background: #fff; color: #1E7DC8; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+  /* картка показників: рядки з роздільниками */
+  .kpis { background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 0 14px; }
+  .kpi { padding: 12px 0; cursor: pointer; border-bottom: 1px solid #F0F2F5; margin: 0 -14px; padding-left: 14px; padding-right: 14px; }
+  .kpi:last-child { border-bottom: 0; }
+  .kpi:first-child { border-radius: 10px 10px 0 0; }
+  .kpi:last-child { border-radius: 0 0 10px 10px; }
+  .kpi:hover { background: #F8F9FB; }
+  .kpi .head { display: flex; align-items: center; margin-bottom: 7px; }
+  .kpi .name { font-weight: 600; font-size: 13px; }
+  .kpi .chev { margin-left: 4px; color: #9CA3AF; font-size: 14px; line-height: 1; }
+  .badge { margin-left: auto; padding: 2px 8px; border-radius: 10px; background: #F0F2F5; color: #1C1C2E; font-weight: 600; font-size: 12px; }
+  .badge.good { background: #E7F6EC; color: #15803D; }
+  .badge.warn { background: #FEF3C7; color: #B45309; }
+  .track { position: relative; height: 8px; background: #E5E7EB; border-radius: 4px; }
+  .track > div { height: 100%; background: #1E7DC8; border-radius: 4px; }
+  .track .pace { position: absolute; top: -2px; width: 1px; height: 12px; background: #9CA3AF; }
+  .sub { display: flex; justify-content: space-between; align-items: baseline; margin-top: 5px; }
+  .sub .fact { font-size: 13px; font-weight: 700; color: #1C1C2E; }
+  .sub .plan { font-size: 11px; color: #6B7280; }
+
+  /* шкала ЗФ */
+  .zf { position: relative; padding: 16px 0 20px; }
+  .zf .bar { display: flex; height: 30px; border-radius: 8px; overflow: hidden; font-weight: 700; font-size: 14px; color: #fff; }
+  .zf .lo { background: #EF8F8F; display: grid; place-items: center; }
+  .zf .hi { background: #A9C6E8; display: grid; place-items: center; }
+  .zf .tgt { position: absolute; top: 16px; height: 30px; width: 3px; background: #4B5563; border-radius: 2px; transform: translateX(-50%); }
+  .zf .cur { position: absolute; top: 12px; width: 3px; height: 38px; background: #4B5563; transform: translateX(-50%); }
+  .zf .cur::after { content: ""; position: absolute; left: 50%; bottom: -6px; width: 12px; height: 12px; border-radius: 50%; background: #1E7DC8; border: 2px solid #fff; transform: translateX(-50%); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+  .zf .curlbl { position: absolute; top: 52px; transform: translateX(-50%); font-size: 11px; font-weight: 700; color: #1C1C2E; white-space: nowrap; }
+  .zf .month { position: absolute; top: 0; transform: translateX(-50%); font-size: 10px; color: #6B7280; white-space: nowrap; }
+  .zf .month::after { content: ""; position: absolute; left: 50%; top: 13px; width: 1px; height: 5px; background: #9CA3AF; }
+
+  /* деталізація */
+  .det .top { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .det .back { border: 0; background: #fff; border: 1px solid #E5E7EB; border-radius: 7px; padding: 5px 9px; font: inherit; font-size: 12px; color: #1E7DC8; cursor: pointer; }
+  .det h3 { margin: 0; font-size: 15px; }
+  .big { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .big b { font-size: 28px; font-weight: 800; letter-spacing: -.5px; }
+  .big span { font-size: 12px; color: #6B7280; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 12px 0; }
+  .stat { background: #F8F9FB; border-radius: 8px; padding: 8px 10px; }
+  .stat .l { font-size: 10px; color: #6B7280; text-transform: uppercase; letter-spacing: .3px; }
+  .stat .v { font-size: 15px; font-weight: 700; margin-top: 2px; }
+  .chart { position: relative; height: 90px; display: flex; align-items: flex-end; gap: 3px; margin: 6px 0 4px; border-bottom: 1px solid #E5E7EB; }
+  .chart i { flex: 1; background: #BFD6EE; border-radius: 2px 2px 0 0; }
+  .chart i.today { background: #1E7DC8; }
+  .chart .goal { position: absolute; left: 0; right: 0; border-top: 2px dashed #EF8F8F; }
+  .chart .goal span { position: absolute; right: 0; top: -14px; font-size: 10px; color: #B91C1C; font-weight: 700; }
+  .axis { display: flex; justify-content: space-between; font-size: 10px; color: #9CA3AF; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; font-size: 10px; color: #6B7280; text-transform: uppercase; letter-spacing: .3px; font-weight: 600; padding: 4px 0; border-bottom: 1px solid #E5E7EB; }
+  td { padding: 6px 0; border-bottom: 1px solid #F0F2F5; }
+  td.r, th.r { text-align: right; }
+  .note { font-size: 11px; color: #6B7280; margin-top: 8px; }
+  .hint { background: #FFF8E1; border: 1px solid #FCD34D66; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #92400E; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div>
+    <p class="caption">Інтерактивно: перемикайте, клікайте по показниках</p>
+    <div class="panel" id="app"></div>
+  </div>
+  <div>
+    <p class="caption">Для довідки: деталізація «Частка ЗФ» (статично)</p>
+    <div class="panel" id="static-zf"></div>
+  </div>
+  <div>
+    <p class="caption">Для довідки: деталізація «Товарообіг» (статично)</p>
+    <div class="panel" id="static-turn"></div>
+  </div>
+</div>
+
+<script>
+const DATA = {
+  my: {
+    title: 'Мої показники',
+    earned: '47,35',
+    turnover: { fact: 3200, plan: 5000, checks: 18, avg: 177.78 },
+    vtm:      { fact: 2100, plan: 3000, share: 65.6 },
+    zf:       { cur: 13.67, target: 13, monthElapsed: 76.7, checksWithZf: 11, checksTotal: 18,
+                days: [9.1,10.4,11.2,12.0,11.8,12.9,13.1,12.4,13.6,14.0,13.2,12.8,13.5,13.9,14.2,13.0,12.6,13.4,13.8,14.1,13.3,13.5,13.67],
+                top: [['Аскорбінова к-та ЗФ 500 мг №30','4','128,00'],['Вітамін D3 ЗФ 2000 МО №60','3','387,00'],['Магній B6 ЗФ №50','2','246,00'],['Омега-3 ЗФ №30','1','215,00']] },
+  },
+  pharmacy: {
+    title: 'Показники аптеки',
+    earned: null,
+    turnover: { fact: 41200, plan: 60000, checks: 236, avg: 174.58 },
+    vtm:      { fact: 26800, plan: 36000, share: 65.0 },
+    zf:       { cur: 12.41, target: 13, monthElapsed: 76.7, checksWithZf: 121, checksTotal: 236,
+                days: [10.2,10.8,11.0,11.6,11.9,12.3,12.0,12.5,12.2,12.8,12.6,12.1,12.4,12.9,12.7,12.3,12.0,12.6,12.5,12.8,12.4,12.3,12.41],
+                top: [['Аскорбінова к-та ЗФ 500 мг №30','41','1 312,00'],['Вітамін D3 ЗФ 2000 МО №60','27','3 483,00'],['Магній B6 ЗФ №50','19','2 337,00'],['Омега-3 ЗФ №30','12','2 580,00']] },
+  },
+};
+const fmt = n => n.toLocaleString('uk-UA', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).replace(/ |\s/g, ' ');
+const pct = (n, d = 2) => n.toFixed(d).replace('.', ',') + '%';
+const ICON = '<svg viewBox="0 0 24 24"><path d="M5 9h3v11H5zM10.5 4h3v16h-3zM16 12h3v8h-3z"/></svg>';
+
+let scope = 'my', view = 'list';
+
+const SHIFT_ELAPSED = 62; // % зміни, що минула (для рисочки темпу)
+function badgeCls(p) { return p >= 100 ? 'good' : p < 70 ? 'warn' : ''; }
+function track(ratio, pace) {
+  return `<div class="track"><div style="width:${Math.min(ratio, 1) * 100}%"></div>${pace ? `<div class="pace" style="left:${pace}%" title="пройшло ${pace}%"></div>` : ''}</div>`;
+}
+function kpiBar(name, m, key) {
+  const p = Math.round(m.fact / m.plan * 100);
+  return `<div class="kpi" onclick="open('${key}')">
+    <div class="head"><span class="name">${name}</span><span class="chev">›</span><span class="badge ${badgeCls(p)}">${p}%</span></div>
+    ${track(m.fact / m.plan, SHIFT_ELAPSED)}
+    <div class="sub"><span class="fact">${fmt(m.fact)}</span><span class="plan">план ${fmt(m.plan)}</span></div>
+  </div>`;
+}
+
+// шкала: 0 … target·1.3, ціль стоїть на ~77% ширини
+function zfScale(z) {
+  const max = z.target * 1.3;
+  const tx = z.target / max * 100, cx = Math.min(z.cur / max, 1) * 100, mx = z.monthElapsed;
+  return `<div class="zf">
+    <div class="month" style="left:${mx}%">пройшло місяця ${pct(z.monthElapsed, 1)}</div>
+    <div class="bar"><div class="lo" style="width:${tx}%">0 – ${z.target}%</div><div class="hi" style="width:${100 - tx}%">${z.target}%+</div></div>
+    <div class="tgt" style="left:${tx}%"></div>
+    <div class="cur" style="left:${cx}%"></div>
+    <div class="curlbl" style="left:${cx}%">${pct(z.cur)}</div>
+  </div>`;
+}
+function zfBadge(z) {
+  const d = z.cur - z.target, cls = d >= 0 ? 'good' : (d > -1 ? 'warn' : 'bad');
+  return `<span class="badge ${cls}">${pct(z.cur)}</span>`;
+}
+function zfRow(z) {
+  const p = Math.round(z.cur / z.target * 100);
+  return `<div class="kpi" onclick="open('zf')">
+    <div class="head"><span class="name">Частка ЗФ</span><span class="chev">›</span><span class="badge ${badgeCls(p)}">${p}%</span></div>
+    ${track(z.cur / z.target, Math.round(z.monthElapsed))}
+    <div class="sub"><span class="fact">${pct(z.cur)}</span><span class="plan">план ${z.target}%</span></div>
+  </div>`;
+}
+
+function seg() {
+  return `<div class="seg">
+    <button class="${scope==='my'?'on':''}" onclick="setScope('my')">Мої показники</button>
+    <button class="${scope==='pharmacy'?'on':''}" onclick="setScope('pharmacy')">Показники аптеки</button>
+  </div>`;
+}
+function earned(d) {
+  if (!d.earned) return '';
+  return `<div class="card earned"><div class="coin"><i>АНЦ</i></div><div><div class="lbl">Нараховано з початку зміни</div><div class="val">${d.earned}</div></div></div>`;
+}
+
+function chart(days, target, unit) {
+  const max = Math.max(...days, target) * 1.1;
+  const bars = days.map((v, i) => `<i style="height:${v / max * 100}%" class="${i === days.length - 1 ? 'today' : ''}" title="${i + 1}.09: ${v}"></i>`).join('');
+  const goal = target ? `<div class="goal" style="bottom:${target / max * 100}%"><span>ціль ${target}${unit}</span></div>` : '';
+  return `<div class="chart">${goal}${bars}</div><div class="axis"><span>1 вер</span><span>сьогодні, 23 вер</span></div>`;
+}
+
+function detailZf(d) {
+  const z = d.zf, diff = z.cur - z.target;
+  return `<div class="det">
+    <div class="top"><button class="back" onclick="open('list')">‹ Назад</button><h3>Частка ЗФ · ${d.title.toLowerCase()}</h3></div>
+    <div class="card">
+      <div class="big"><b>${pct(z.cur)}</b><span>план на вересень ${z.target}%</span><span class="badge ${badgeCls(Math.round(z.cur / z.target * 100))}">${Math.round(z.cur / z.target * 100)}%</span></div>
+      <div style="margin-top:6px">${track(z.cur / z.target, Math.round(z.monthElapsed))}</div>
+      <div class="row2">
+        <div class="stat"><div class="l">До цілі</div><div class="v">${diff >= 0 ? '+' : ''}${diff.toFixed(2).replace('.', ',')} п.п.</div></div>
+        <div class="stat"><div class="l">Чеків із ЗФ</div><div class="v">${z.checksWithZf} / ${z.checksTotal}</div></div>
+        <div class="stat"><div class="l">Пройшло місяця</div><div class="v">${pct(z.monthElapsed, 0)}</div></div>
+      </div>
+      <div class="section">${ICON} ДИНАМІКА ПО ДНЯХ (накопичено з 1 вересня)</div>
+      ${chart(z.days, z.target, '%')}
+      <div class="section">${ICON} ТОП ЗФ ЗА ЗМІНУ</div>
+      <table><tr><th>Товар</th><th class="r">К-сть</th><th class="r">Сума</th></tr>
+      ${z.top.map(r => `<tr><td>${r[0]}</td><td class="r">${r[1]}</td><td class="r">${r[2]}</td></tr>`).join('')}</table>
+      <div class="note">Частка ЗФ = сума продажів товарів із маркером «Золота фішка» / загальний товарообіг за місяць.</div>
+    </div>
+  </div>`;
+}
+function detailTurnover(d) {
+  const t = d.turnover, p = Math.round(t.fact / t.plan * 100);
+  const days = [1400,2900,2100,3300,2800,1900,2600,3100,2700,2400,3500,2900,2200,3000,2600,2800,3200,2500,2900,3100,2700,2600,3200].map(v => scope === 'pharmacy' ? v * 12 : v);
+  return `<div class="det">
+    <div class="top"><button class="back" onclick="open('list')">‹ Назад</button><h3>Товарообіг · ${d.title.toLowerCase()}</h3></div>
+    <div class="card">
+      <div class="big"><b>${fmt(t.fact)} ₴</b><span>план на зміну ${fmt(t.plan)} ₴</span><span class="badge ${badgeCls(p)}">${p}%</span></div>
+      <div style="margin-top:6px">${track(t.fact / t.plan, SHIFT_ELAPSED)}</div>
+      <div class="row2">
+        <div class="stat"><div class="l">Чеків</div><div class="v">${t.checks}</div></div>
+        <div class="stat"><div class="l">Середній чек</div><div class="v">${t.avg.toFixed(2).replace('.', ',')}</div></div>
+        <div class="stat"><div class="l">До плану</div><div class="v">${fmt(t.plan - t.fact)} ₴</div></div>
+      </div>
+      <div class="section">${ICON} ТОВАРООБІГ ПО ДНЯХ</div>
+      ${chart(days, 0, '')}
+      <div class="section">${ICON} СТРУКТУРА ЗМІНИ</div>
+      <table><tr><th>Група</th><th class="r">Сума</th><th class="r">Частка</th></tr>
+        <tr><td>Rx (рецептурні)</td><td class="r">${fmt(t.fact * .48)}</td><td class="r">48%</td></tr>
+        <tr><td>OTC</td><td class="r">${fmt(t.fact * .31)}</td><td class="r">31%</td></tr>
+        <tr><td>ВТМ</td><td class="r">${fmt(d.vtm.fact)}</td><td class="r">${Math.round(d.vtm.fact / t.fact * 100)}%</td></tr>
+        <tr><td>Парафармація</td><td class="r">${fmt(t.fact * .08)}</td><td class="r">8%</td></tr>
+      </table>
+    </div>
+  </div>`;
+}
+function detailVtm(d) {
+  const v = d.vtm, p = Math.round(v.fact / v.plan * 100);
+  return `<div class="det">
+    <div class="top"><button class="back" onclick="open('list')">‹ Назад</button><h3>Продаж ВТМ · ${d.title.toLowerCase()}</h3></div>
+    <div class="card">
+      <div class="big"><b>${fmt(v.fact)} ₴</b><span>план ${fmt(v.plan)} ₴</span><span class="badge ${badgeCls(p)}">${p}%</span></div>
+      <div style="margin-top:6px">${track(v.fact / v.plan, SHIFT_ELAPSED)}</div>
+      <div class="row2">
+        <div class="stat"><div class="l">Частка ВТМ</div><div class="v">${pct(v.share, 1)}</div></div>
+        <div class="stat"><div class="l">До плану</div><div class="v">${fmt(v.plan - v.fact)} ₴</div></div>
+        <div class="stat"><div class="l">Пройшло зміни</div><div class="v">62%</div></div>
+      </div>
+      <div class="section">${ICON} ТОП ВТМ ЗА ЗМІНУ</div>
+      <table><tr><th>Товар</th><th class="r">К-сть</th><th class="r">Сума</th></tr>
+        <tr><td>Парацетамол АНЦ 500 мг №10</td><td class="r">6</td><td class="r">114,00</td></tr>
+        <tr><td>Цитрамон АНЦ №10</td><td class="r">4</td><td class="r">92,00</td></tr>
+        <tr><td>Лоратадин АНЦ №10</td><td class="r">3</td><td class="r">141,00</td></tr>
+      </table>
+    </div>
+  </div>`;
+}
+
+function list(d) {
+  return `${earned(d)}
+    <div class="section">${ICON} ПОКАЗНИКИ ${scope === 'my' ? 'ЗА ЗМІНУ' : 'АПТЕКИ ЗА ЗМІНУ'}</div>
+    ${seg()}
+    <div class="kpis">
+    ${kpiBar('Товарообіг', d.turnover, 'turnover')}
+    ${kpiBar('Продаж ВТМ', d.vtm, 'vtm')}
+    ${zfRow(d.zf)}
+    </div>`;
+}
+
+function render() {
+  const d = DATA[scope];
+  const el = document.getElementById('app');
+  const body = view === 'list' ? list(d) : view === 'zf' ? detailZf(d) : view === 'turnover' ? detailTurnover(d) : detailVtm(d);
+  el.innerHTML = (view === 'list' ? '' : seg()) + body;
+}
+function open(v) { view = v; render(); }
+function setScope(s) { scope = s; render(); }
+render();
+
+// статичні довідкові панелі
+document.getElementById('static-zf').innerHTML = seg() + detailZf(DATA.my);
+scope = 'pharmacy';
+document.getElementById('static-turn').innerHTML = seg() + detailTurnover(DATA.pharmacy);
+scope = 'my';
+</script>
+</body>
+</html>

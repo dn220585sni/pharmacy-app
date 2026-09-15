@@ -1,0 +1,1042 @@
+import 'package:flutter/material.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Моделі й мок-дані
+//
+// ⚠️ Джерела цифр (сервіси Каті) ще не визначені — усі значення тут замокані.
+// Коли зʼявиться сервіс, `KpiMockData.forScope` замінюється на завантаження,
+// а віджети лишаються без змін.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Чиї показники показуємо.
+enum KpiScope { my, pharmacy }
+
+/// Який показник розгорнуто в деталізацію.
+enum KpiKind { turnover, vtm, zf }
+
+class KpiTopItem {
+  final String name;
+  final String qty;
+  final String sum;
+  const KpiTopItem(this.name, this.qty, this.sum);
+}
+
+/// Знімок показників для одного [KpiScope].
+class KpiSnapshot {
+  final double turnoverFact;
+  final double turnoverPlan;
+  final int checks;
+  final double avgCheck;
+  final List<double> turnoverDays;
+
+  final double vtmFact;
+  final double vtmPlan;
+  final double vtmShare; // % ВТМ у товарообігу
+  final List<KpiTopItem> vtmTop;
+
+  final double zfCur; // % частки ЗФ (накопичено з початку місяця)
+  final double zfTarget; // місячний план, %
+  final int zfChecks; // чеків із ЗФ
+  final int zfChecksTotal;
+  final List<double> zfDays; // накопичена частка по днях місяця
+  final List<KpiTopItem> zfTop;
+
+  /// Скільки зміни минуло, 0..1 (рисочка темпу на смужках за зміну).
+  final double shiftElapsed;
+
+  /// Скільки місяця минуло, 0..1 (рисочка темпу на смужці ЗФ).
+  final double monthElapsed;
+
+  const KpiSnapshot({
+    required this.turnoverFact,
+    required this.turnoverPlan,
+    required this.checks,
+    required this.avgCheck,
+    required this.turnoverDays,
+    required this.vtmFact,
+    required this.vtmPlan,
+    required this.vtmShare,
+    required this.vtmTop,
+    required this.zfCur,
+    required this.zfTarget,
+    required this.zfChecks,
+    required this.zfChecksTotal,
+    required this.zfDays,
+    required this.zfTop,
+    required this.shiftElapsed,
+    required this.monthElapsed,
+  });
+}
+
+class KpiMockData {
+  static const _zfTop = [
+    KpiTopItem('Аскорбінова к-та ЗФ 500 мг №30', '4', '128,00'),
+    KpiTopItem('Вітамін D3 ЗФ 2000 МО №60', '3', '387,00'),
+    KpiTopItem('Магній B6 ЗФ №50', '2', '246,00'),
+    KpiTopItem('Омега-3 ЗФ №30', '1', '215,00'),
+  ];
+  static const _zfTopPharmacy = [
+    KpiTopItem('Аскорбінова к-та ЗФ 500 мг №30', '41', '1 312,00'),
+    KpiTopItem('Вітамін D3 ЗФ 2000 МО №60', '27', '3 483,00'),
+    KpiTopItem('Магній B6 ЗФ №50', '19', '2 337,00'),
+    KpiTopItem('Омега-3 ЗФ №30', '12', '2 580,00'),
+  ];
+  static const _vtmTop = [
+    KpiTopItem('Парацетамол АНЦ 500 мг №10', '6', '114,00'),
+    KpiTopItem('Цитрамон АНЦ №10', '4', '92,00'),
+    KpiTopItem('Лоратадин АНЦ №10', '3', '141,00'),
+  ];
+  static const _vtmTopPharmacy = [
+    KpiTopItem('Парацетамол АНЦ 500 мг №10', '58', '1 102,00'),
+    KpiTopItem('Цитрамон АНЦ №10', '44', '1 012,00'),
+    KpiTopItem('Лоратадин АНЦ №10', '31', '1 457,00'),
+  ];
+  static const List<double> _turnoverDays = [
+    1400, 2900, 2100, 3300, 2800, 1900, 2600, 3100, 2700, 2400, 3500, 2900,
+    2200, 3000, 2600, 2800, 3200, 2500, 2900, 3100, 2700, 2600, 3200,
+  ];
+  static const _zfDaysMy = [
+    9.1, 10.4, 11.2, 12.0, 11.8, 12.9, 13.1, 12.4, 13.6, 14.0, 13.2, 12.8,
+    13.5, 13.9, 14.2, 13.0, 12.6, 13.4, 13.8, 14.1, 13.3, 13.5, 13.67,
+  ];
+  static const _zfDaysPharmacy = [
+    10.2, 10.8, 11.0, 11.6, 11.9, 12.3, 12.0, 12.5, 12.2, 12.8, 12.6, 12.1,
+    12.4, 12.9, 12.7, 12.3, 12.0, 12.6, 12.5, 12.8, 12.4, 12.3, 12.41,
+  ];
+
+  static KpiSnapshot forScope(KpiScope scope) {
+    switch (scope) {
+      case KpiScope.my:
+        return const KpiSnapshot(
+          turnoverFact: 3200,
+          turnoverPlan: 5000,
+          checks: 18,
+          avgCheck: 177.78,
+          turnoverDays: _turnoverDays,
+          vtmFact: 2100,
+          vtmPlan: 3000,
+          vtmShare: 65.6,
+          vtmTop: _vtmTop,
+          zfCur: 13.67,
+          zfTarget: 13,
+          zfChecks: 11,
+          zfChecksTotal: 18,
+          zfDays: _zfDaysMy,
+          zfTop: _zfTop,
+          shiftElapsed: 0.62,
+          monthElapsed: 0.767,
+        );
+      case KpiScope.pharmacy:
+        return KpiSnapshot(
+          turnoverFact: 41200,
+          turnoverPlan: 60000,
+          checks: 236,
+          avgCheck: 174.58,
+          turnoverDays: [for (final v in _turnoverDays) v * 12],
+          vtmFact: 26800,
+          vtmPlan: 36000,
+          vtmShare: 65.0,
+          vtmTop: _vtmTopPharmacy,
+          zfCur: 12.41,
+          zfTarget: 13,
+          zfChecks: 121,
+          zfChecksTotal: 236,
+          zfDays: _zfDaysPharmacy,
+          zfTop: _zfTopPharmacy,
+          shiftElapsed: 0.62,
+          monthElapsed: 0.767,
+        );
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Кольори й форматування (у палітрі застосунку)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _C {
+  static const text = Color(0xFF1C1C2E);
+  static const muted = Color(0xFF6B7280);
+  static const state = Color(0xFF9CA3AF);
+  static const border = Color(0xFFE5E7EB);
+  static const divider = Color(0xFFF0F2F5);
+  static const blue = Color(0xFF1E7DC8);
+  static const segBg = Color(0xFFEEF0F3);
+  static const hover = Color(0xFFF8F9FB);
+  static const goodBg = Color(0xFFE7F6EC);
+  static const goodFg = Color(0xFF15803D);
+  static const warnBg = Color(0xFFFEF3C7);
+  static const warnFg = Color(0xFFB45309);
+  static const chartBar = Color(0xFFBFD6EE);
+  static const chartGoal = Color(0xFFEF8F8F);
+  static const chartGoalText = Color(0xFFB91C1C);
+}
+
+/// "3 200" — цілі з нерозривним тонким пробілом між тисячами.
+String kpiInt(num v) {
+  final s = v.round().toString();
+  final buf = StringBuffer();
+  for (var i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 == 0) buf.write(' ');
+    buf.write(s[i]);
+  }
+  return buf.toString();
+}
+
+/// "13,67%" — відсоток із комою.
+String kpiPct(double v, [int digits = 2]) =>
+    '${v.toStringAsFixed(digits).replaceAll('.', ',')}%';
+
+/// "177,78" — гроші без символу.
+String kpiMoney(double v) {
+  final cents = (v * 100).round();
+  return '${kpiInt(cents ~/ 100)},${(cents % 100).toString().padLeft(2, '0')}';
+}
+
+const _monthsGen = [
+  'січень', 'лютий', 'березень', 'квітень', 'травень', 'червень', 'липень',
+  'серпень', 'вересень', 'жовтень', 'листопад', 'грудень',
+];
+const _monthsShort = [
+  'січ', 'лют', 'бер', 'кві', 'тра', 'чер', 'лип', 'сер', 'вер', 'жов', 'лис',
+  'гру',
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KpiBlock
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Блок показників: перемикач «Мої / Аптеки», картка з трьома показниками
+/// (Товарообіг, Продаж ВТМ, Частка ЗФ), клік по рядку — деталізація на місці.
+class KpiBlock extends StatefulWidget {
+  /// Джерело даних за областю; за замовчуванням мок.
+  final KpiSnapshot Function(KpiScope) dataFor;
+
+  /// «Сьогодні» — для підписів місяця й осі графіка.
+  final DateTime? today;
+
+  const KpiBlock({
+    super.key,
+    this.dataFor = KpiMockData.forScope,
+    this.today,
+  });
+
+  @override
+  State<KpiBlock> createState() => _KpiBlockState();
+}
+
+class _KpiBlockState extends State<KpiBlock> {
+  KpiScope _scope = KpiScope.my;
+  KpiKind? _open;
+
+  DateTime get _today => widget.today ?? DateTime.now();
+
+  @override
+  Widget build(BuildContext context) {
+    final data = widget.dataFor(_scope);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ScopeToggle(
+          scope: _scope,
+          onChanged: (s) => setState(() => _scope = s),
+        ),
+        const SizedBox(height: 12),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          transitionBuilder: (child, anim) => FadeTransition(
+            opacity: anim,
+            child: SizeTransition(
+              sizeFactor: anim,
+              axisAlignment: -1,
+              child: child,
+            ),
+          ),
+          layoutBuilder: (current, previous) => Stack(
+            alignment: Alignment.topCenter,
+            children: [...previous, ?current],
+          ),
+          child: _open == null
+              ? _KpiCard(
+                  key: const ValueKey('list'),
+                  data: data,
+                  onOpen: (k) => setState(() => _open = k),
+                )
+              : _KpiDetail(
+                  key: ValueKey(_open),
+                  kind: _open!,
+                  scope: _scope,
+                  data: data,
+                  today: _today,
+                  onBack: () => setState(() => _open = null),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Перемикач ────────────────────────────────────────────────────────────────
+
+class _ScopeToggle extends StatelessWidget {
+  final KpiScope scope;
+  final ValueChanged<KpiScope> onChanged;
+  const _ScopeToggle({required this.scope, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 32,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: _C.segBg,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Row(
+        children: [
+          _seg('Мої показники', KpiScope.my),
+          _seg('Показники аптеки', KpiScope.pharmacy),
+        ],
+      ),
+    );
+  }
+
+  Widget _seg(String label, KpiScope value) {
+    final on = scope == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => onChanged(value),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            decoration: BoxDecoration(
+              color: on ? Colors.white : Colors.transparent,
+              borderRadius: BorderRadius.circular(7),
+              boxShadow: on
+                  ? [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 2,
+                        offset: const Offset(0, 1),
+                      ),
+                    ]
+                  : null,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: on ? _C.blue : _C.muted,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Картка показників ────────────────────────────────────────────────────────
+
+class _KpiCard extends StatelessWidget {
+  final KpiSnapshot data;
+  final ValueChanged<KpiKind> onOpen;
+  const _KpiCard({super.key, required this.data, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: const BorderSide(color: _C.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          _KpiRow(
+            name: 'Товарообіг',
+            ratio: data.turnoverFact / data.turnoverPlan,
+            pace: data.shiftElapsed,
+            fact: kpiInt(data.turnoverFact),
+            plan: 'план ${kpiInt(data.turnoverPlan)}',
+            onTap: () => onOpen(KpiKind.turnover),
+          ),
+          const Divider(height: 1, thickness: 1, color: _C.divider),
+          _KpiRow(
+            name: 'Продаж ВТМ',
+            ratio: data.vtmFact / data.vtmPlan,
+            pace: data.shiftElapsed,
+            fact: kpiInt(data.vtmFact),
+            plan: 'план ${kpiInt(data.vtmPlan)}',
+            onTap: () => onOpen(KpiKind.vtm),
+          ),
+          const Divider(height: 1, thickness: 1, color: _C.divider),
+          _KpiRow(
+            name: 'Частка ЗФ',
+            ratio: data.zfCur / data.zfTarget,
+            pace: data.monthElapsed,
+            fact: kpiPct(data.zfCur),
+            plan: 'план ${kpiPct(data.zfTarget, 0)}',
+            onTap: () => onOpen(KpiKind.zf),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _KpiRow extends StatelessWidget {
+  final String name;
+  final double ratio; // факт / план (може бути > 1)
+  final double pace; // 0..1 — рисочка темпу
+  final String fact;
+  final String plan;
+  final VoidCallback onTap;
+
+  const _KpiRow({
+    required this.name,
+    required this.ratio,
+    required this.pace,
+    required this.fact,
+    required this.plan,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      hoverColor: _C.hover,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _C.text,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                const Icon(Icons.chevron_right_rounded,
+                    size: 16, color: _C.state),
+                const Spacer(),
+                _Badge(ratio: ratio),
+              ],
+            ),
+            const SizedBox(height: 7),
+            KpiTrack(ratio: ratio, pace: pace),
+            const SizedBox(height: 5),
+            Row(
+              children: [
+                Text(
+                  fact,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: _C.text,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  plan,
+                  style: const TextStyle(fontSize: 11, color: _C.muted),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Бейдж відсотка виконання: ≥100% зелений, <70% жовтий, інакше нейтральний.
+class _Badge extends StatelessWidget {
+  final double ratio;
+  const _Badge({required this.ratio});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (ratio * 100).round();
+    final (bg, fg) = pct >= 100
+        ? (_C.goodBg, _C.goodFg)
+        : pct < 70
+            ? (_C.warnBg, _C.warnFg)
+            : (_C.divider, _C.text);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        '$pct%',
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg),
+      ),
+    );
+  }
+}
+
+/// Смужка прогресу 8 px: трек #E5E7EB, заповнення синє, рисочка темпу.
+class KpiTrack extends StatelessWidget {
+  final double ratio;
+  final double? pace;
+  const KpiTrack({super.key, required this.ratio, this.pace});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 12,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final w = c.maxWidth;
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                top: 2,
+                left: 0,
+                right: 0,
+                child: Container(
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _C.border,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 2,
+                left: 0,
+                width: w * ratio.clamp(0.0, 1.0),
+                child: Container(
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _C.blue,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              if (pace != null)
+                Positioned(
+                  top: 0,
+                  left: (w * pace!.clamp(0.0, 1.0)).clamp(0.0, w - 1),
+                  child: Container(width: 1, height: 12, color: _C.state),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ── Деталізація ──────────────────────────────────────────────────────────────
+
+class _KpiDetail extends StatelessWidget {
+  final KpiKind kind;
+  final KpiScope scope;
+  final KpiSnapshot data;
+  final DateTime today;
+  final VoidCallback onBack;
+
+  const _KpiDetail({
+    super.key,
+    required this.kind,
+    required this.scope,
+    required this.data,
+    required this.today,
+    required this.onBack,
+  });
+
+  String get _title => switch (kind) {
+        KpiKind.turnover => 'Товарообіг',
+        KpiKind.vtm => 'Продаж ВТМ',
+        KpiKind.zf => 'Частка ЗФ',
+      };
+
+  String get _scopeTitle =>
+      scope == KpiScope.my ? 'мої показники' : 'показники аптеки';
+
+  /// Дні з початку місяця до сьогодні (мок може мати більше значень).
+  List<double> _toDate(List<double> days) =>
+      days.length > today.day ? days.sublist(0, today.day) : days;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            _BackButton(onTap: onBack),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '$_title · $_scopeTitle',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: _C.text,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _C.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: switch (kind) {
+              KpiKind.turnover => _turnover(),
+              KpiKind.vtm => _vtm(),
+              KpiKind.zf => _zf(),
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _zf() {
+    final ratio = data.zfCur / data.zfTarget;
+    final diff = data.zfCur - data.zfTarget;
+    return [
+      _BigValue(
+        value: kpiPct(data.zfCur),
+        caption: 'план на ${_monthsGen[today.month - 1]} ${kpiPct(data.zfTarget, 0)}',
+        ratio: ratio,
+      ),
+      const SizedBox(height: 6),
+      KpiTrack(ratio: ratio, pace: data.monthElapsed),
+      const SizedBox(height: 12),
+      _Stats([
+        ('До плану',
+            '${diff >= 0 ? '+' : '−'}${diff.abs().toStringAsFixed(2).replaceAll('.', ',')} п.п.'),
+        ('Чеків із ЗФ', '${data.zfChecks} / ${data.zfChecksTotal}'),
+        ('Пройшло місяця', kpiPct(data.monthElapsed * 100, 0)),
+      ]),
+      const SizedBox(height: 12),
+      _SectionLabel('Динаміка по днях (накопичено з 1 ${_monthsShort[today.month - 1]})'),
+      const SizedBox(height: 6),
+      KpiDayChart(
+        values: _toDate(data.zfDays),
+        goal: data.zfTarget,
+        goalLabel: 'план ${kpiPct(data.zfTarget, 0)}',
+        firstLabel: '1 ${_monthsShort[today.month - 1]}',
+        lastLabel: 'сьогодні, ${today.day} ${_monthsShort[today.month - 1]}',
+      ),
+      const SizedBox(height: 12),
+      const _SectionLabel('Топ ЗФ за зміну'),
+      const SizedBox(height: 4),
+      _TopTable(items: data.zfTop),
+      const SizedBox(height: 8),
+      const Text(
+        'Частка ЗФ = сума продажів товарів із маркером «Золота фішка» / '
+        'загальний товарообіг за місяць.',
+        style: TextStyle(fontSize: 11, color: _C.muted, height: 1.4),
+      ),
+    ];
+  }
+
+  List<Widget> _turnover() {
+    final ratio = data.turnoverFact / data.turnoverPlan;
+    final fact = data.turnoverFact;
+    return [
+      _BigValue(
+        value: '${kpiInt(fact)} ₴',
+        caption: 'план на зміну ${kpiInt(data.turnoverPlan)} ₴',
+        ratio: ratio,
+      ),
+      const SizedBox(height: 6),
+      KpiTrack(ratio: ratio, pace: data.shiftElapsed),
+      const SizedBox(height: 12),
+      _Stats([
+        ('Чеків', '${data.checks}'),
+        ('Середній чек', kpiMoney(data.avgCheck)),
+        ('До плану',
+            '${kpiInt((data.turnoverPlan - fact).clamp(0, double.infinity))} ₴'),
+      ]),
+      const SizedBox(height: 12),
+      const _SectionLabel('Товарообіг по днях'),
+      const SizedBox(height: 6),
+      KpiDayChart(
+        values: _toDate(data.turnoverDays),
+        firstLabel: '1 ${_monthsShort[today.month - 1]}',
+        lastLabel: 'сьогодні, ${today.day} ${_monthsShort[today.month - 1]}',
+      ),
+      const SizedBox(height: 12),
+      const _SectionLabel('Структура зміни'),
+      const SizedBox(height: 4),
+      _TopTable(
+        header: const ('Група', 'Сума', 'Частка'),
+        items: [
+          KpiTopItem('Rx (рецептурні)', kpiInt(fact * .48), '48%'),
+          KpiTopItem('OTC', kpiInt(fact * .31), '31%'),
+          KpiTopItem('ВТМ', kpiInt(data.vtmFact),
+              '${(data.vtmFact / fact * 100).round()}%'),
+          KpiTopItem('Парафармація', kpiInt(fact * .08), '8%'),
+        ],
+      ),
+    ];
+  }
+
+  List<Widget> _vtm() {
+    final ratio = data.vtmFact / data.vtmPlan;
+    return [
+      _BigValue(
+        value: '${kpiInt(data.vtmFact)} ₴',
+        caption: 'план ${kpiInt(data.vtmPlan)} ₴',
+        ratio: ratio,
+      ),
+      const SizedBox(height: 6),
+      KpiTrack(ratio: ratio, pace: data.shiftElapsed),
+      const SizedBox(height: 12),
+      _Stats([
+        ('Частка ВТМ', kpiPct(data.vtmShare, 1)),
+        ('До плану',
+            '${kpiInt((data.vtmPlan - data.vtmFact).clamp(0, double.infinity))} ₴'),
+        ('Пройшло зміни', kpiPct(data.shiftElapsed * 100, 0)),
+      ]),
+      const SizedBox(height: 12),
+      const _SectionLabel('Топ ВТМ за зміну'),
+      const SizedBox(height: 4),
+      _TopTable(items: data.vtmTop),
+    ];
+  }
+}
+
+class _BackButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _BackButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(7),
+        side: const BorderSide(color: _C.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        hoverColor: _C.hover,
+        child: const Padding(
+          padding: EdgeInsets.fromLTRB(6, 5, 9, 5),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.chevron_left_rounded, size: 16, color: _C.blue),
+              SizedBox(width: 2),
+              Text('Назад',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _C.blue)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BigValue extends StatelessWidget {
+  final String value;
+  final String caption;
+  final double ratio;
+  const _BigValue(
+      {required this.value, required this.caption, required this.ratio});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.5,
+            color: _C.text,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            caption,
+            style: const TextStyle(fontSize: 12, color: _C.muted),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
+        _Badge(ratio: ratio),
+      ],
+    );
+  }
+}
+
+class _Stats extends StatelessWidget {
+  final List<(String, String)> items;
+  const _Stats(this.items);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              decoration: BoxDecoration(
+                color: _C.hover,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    items[i].$1.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: _C.muted,
+                      letterSpacing: 0.3,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    items[i].$2,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: _C.text,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Icon(Icons.bar_chart_rounded, size: 14, color: _C.state),
+        const SizedBox(width: 5),
+        Expanded(
+          child: Text(
+            text.toUpperCase(),
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: _C.muted,
+              letterSpacing: 0.5,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TopTable extends StatelessWidget {
+  final (String, String, String) header;
+  final List<KpiTopItem> items;
+  const _TopTable({
+    this.header = const ('Товар', 'К-сть', 'Сума'),
+    required this.items,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const hs = TextStyle(
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+        color: _C.muted,
+        letterSpacing: 0.3);
+    const cs = TextStyle(fontSize: 12, color: _C.text);
+    Widget row(String a, String b, String c, TextStyle s, Color line) =>
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: line))),
+          child: Row(
+            children: [
+              Expanded(
+                  child: Text(a, style: s, overflow: TextOverflow.ellipsis)),
+              SizedBox(
+                  width: 44,
+                  child: Text(b, style: s, textAlign: TextAlign.right)),
+              SizedBox(
+                  width: 72,
+                  child: Text(c, style: s, textAlign: TextAlign.right)),
+            ],
+          ),
+        );
+    return Column(
+      children: [
+        row(header.$1.toUpperCase(), header.$2.toUpperCase(),
+            header.$3.toUpperCase(), hs, _C.border),
+        for (final it in items) row(it.name, it.qty, it.sum, cs, _C.divider),
+      ],
+    );
+  }
+}
+
+// ── Графік по днях ───────────────────────────────────────────────────────────
+
+/// Стовпчики по днях місяця; останній (сьогодні) синій, решта світлі.
+/// [goal] — пунктирна лінія плану з підписом.
+class KpiDayChart extends StatelessWidget {
+  final List<double> values;
+  final double? goal;
+  final String? goalLabel;
+  final String firstLabel;
+  final String lastLabel;
+  final double height;
+
+  const KpiDayChart({
+    super.key,
+    required this.values,
+    this.goal,
+    this.goalLabel,
+    required this.firstLabel,
+    required this.lastLabel,
+    this.height = 90,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: height,
+          child: CustomPaint(
+            painter: _DayChartPainter(
+              values: values,
+              goal: goal,
+              goalLabel: goalLabel,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Text(firstLabel,
+                style: const TextStyle(fontSize: 10, color: _C.state)),
+            const Spacer(),
+            Text(lastLabel,
+                style: const TextStyle(fontSize: 10, color: _C.state)),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _DayChartPainter extends CustomPainter {
+  final List<double> values;
+  final double? goal;
+  final String? goalLabel;
+  const _DayChartPainter({required this.values, this.goal, this.goalLabel});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.isEmpty) return;
+    var max = values.reduce((a, b) => a > b ? a : b);
+    if (goal != null && goal! > max) max = goal!;
+    max *= 1.1;
+    if (max <= 0) max = 1;
+
+    const gap = 3.0;
+    final n = values.length;
+    final bw = (size.width - gap * (n - 1)) / n;
+    final bar = Paint()..color = _C.chartBar;
+    final today = Paint()..color = _C.blue;
+    for (var i = 0; i < n; i++) {
+      final h = size.height * (values[i] / max).clamp(0.0, 1.0);
+      final r = RRect.fromRectAndCorners(
+        Rect.fromLTWH(i * (bw + gap), size.height - h, bw, h),
+        topLeft: const Radius.circular(2),
+        topRight: const Radius.circular(2),
+      );
+      canvas.drawRRect(r, i == n - 1 ? today : bar);
+    }
+
+    // Базова лінія.
+    canvas.drawLine(
+      Offset(0, size.height - 0.5),
+      Offset(size.width, size.height - 0.5),
+      Paint()
+        ..color = _C.border
+        ..strokeWidth = 1,
+    );
+
+    // Пунктир плану + підпис.
+    if (goal != null) {
+      final y = size.height - size.height * (goal! / max).clamp(0.0, 1.0);
+      final p = Paint()
+        ..color = _C.chartGoal
+        ..strokeWidth = 2;
+      const dash = 6.0, space = 4.0;
+      for (var x = 0.0; x < size.width; x += dash + space) {
+        canvas.drawLine(Offset(x, y), Offset((x + dash).clamp(0, size.width), y), p);
+      }
+      if (goalLabel != null) {
+        final tp = TextPainter(
+          text: TextSpan(
+            text: goalLabel,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: _C.chartGoalText,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, Offset(size.width - tp.width, y - tp.height - 2));
+        tp.dispose();
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DayChartPainter old) =>
+      old.values != values || old.goal != goal || old.goalLabel != goalLabel;
+}

@@ -20,25 +20,36 @@ class CheckoutTotals {
   /// Доступний баланс бонусів картки.
   final Money bonusBalance;
 
+  /// Мінімум, який клієнт платить грошима (`edSPLMinSumOplCash` з
+  /// GetSPLParam): бонусами не можна закрити чек повністю. Zero — без
+  /// обмеження. Перевірка на клієнті — Микола, 14.09.2026.
+  final Money minCash;
+
   const CheckoutTotals({
     required this.base,
     this.discountPct,
     this.useBonuses = false,
     this.enteredBonus = Money.zero,
     this.bonusBalance = Money.zero,
+    this.minCash = Money.zero,
   });
 
   /// Абсолютна сума персональної знижки, округлена в копійки.
   Money get discount =>
       discountPct == null ? Money.zero : base.percent(discountPct!);
 
-  /// Фактична сума бонусів до списання: обмежена балансом і сумою після знижки.
+  /// Стеля списання: min(баланс, сума після знижки − мінімум готівкою), ≥ 0.
+  /// Показується касиру як «можна списати до …».
+  Money get bonusCap {
+    var upper = base - discount - minCash;
+    if (bonusBalance < upper) upper = bonusBalance;
+    return upper.isNegative ? Money.zero : upper;
+  }
+
+  /// Фактична сума бонусів до списання: введена, обрізана стелею [bonusCap].
   Money get bonus {
     if (!useBonuses) return Money.zero;
-    final maxByTotal = base - discount;
-    var upper = bonusBalance < maxByTotal ? bonusBalance : maxByTotal;
-    if (upper.isNegative) upper = Money.zero;
-    return enteredBonus.clampMoney(Money.zero, upper);
+    return enteredBonus.clampMoney(Money.zero, bonusCap);
   }
 
   /// Сума до сплати (не може бути відʼємною).

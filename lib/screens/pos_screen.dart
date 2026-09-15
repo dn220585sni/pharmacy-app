@@ -1212,7 +1212,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void dispose() {
     _pricingDebounce?.cancel();
     // Скинути серверний сеанс (кошик + резерви) одним NewClient при закритті.
-    if (_cart.isNotEmpty) unawaited(SessionService.newClient());
+    if (_cart.isNotEmpty) unawaited(_newClientSession());
     // LogoutRlz — fire-and-forget при закритті додатка
     _logoutPharmacist();
     _ctrlQtyResetTimer?.cancel();
@@ -3420,6 +3420,62 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     return result;
   }
 
+  // ── Списання бонусів у серверному сеансі (Катя, 14.09.2026) ─────────────
+
+  /// Фактична сума бонусу з cart_panel (уже обрізана балансом, знижкою і
+  /// мінімумом готівкою — перевірка клієнтська, Микола 14.09).
+  double _bonusToSpend = 0;
+
+  /// Що зараз лежить у серверному сеансі після останнього `SetBonusOpl`.
+  double _bonusOnServer = 0;
+
+  /// cart_panel повідомив нову суму бонусу → `SetBonusOpl` і ОБОВʼЯЗКОВО
+  /// `GetSumSkid` після нього (саме він віддає нову суму до сплати).
+  /// Порядок гарантує [_fetchPricing]; тут лише ставимо переклик.
+  void _onBonusChanged(double bonus) {
+    if (_bonusToSpend == bonus) return;
+    _bonusToSpend = bonus;
+    if (_cart.isEmpty) {
+      // Перерахунку не буде (кошик порожній) — але сеанс треба почистити.
+      unawaited(_syncBonusToServer());
+      return;
+    }
+    _schedulePricingRefresh();
+  }
+
+  /// Довести серверний сеанс до [_bonusToSpend]. Повертає true, якщо сеанс
+  /// уже актуальний або оновлено успішно.
+  Future<bool> _syncBonusToServer() async {
+    if (_bonusOnServer == _bonusToSpend) return true;
+    final ok = await SessionService.setBonusOpl(_bonusToSpend);
+    if (ok) _bonusOnServer = _bonusToSpend;
+    return ok;
+  }
+
+  /// `NewClient` + скинути те, що ми знаємо про бонус у сеансі: наступний
+  /// чек починається з нуля і на сервері, і в нас.
+  Future<bool> _newClientSession() {
+    _bonusToSpend = 0;
+    _bonusOnServer = 0;
+    return SessionService.newClient();
+  }
+
+  /// Верифікація клієнта перед списанням ≥ VerifySPLSum — той самий діалог
+  /// дзвінка/SMS, що й при реєстрації, без створення анкети.
+  Future<bool> _verifyBonusSpend(double bonus) async {
+    final phone = _customerLoyalty?.phone;
+    if (phone == null || phone.isEmpty) return false;
+    final ok = await showBonusSpendVerifyDialog(
+      context: context,
+      phone: phone,
+      bonusAmount: bonus,
+      pharmacistIpn: _currentPharmacist?.ipn ?? '',
+    );
+    FiscalLog.log('ВЕРИФІКАЦІЯ списання $bonus грн для $phone: '
+        '${ok ? "підтверджено" : "НЕ підтверджено — оплату не проводимо"}');
+    return ok;
+  }
+
   void _schedulePricingRefresh() {
     _pricingDebounce?.cancel();
     if (_cart.isEmpty) {
@@ -3444,9 +3500,19 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   Future<void> _fetchPricing({bool showLoading = true}) async {
     final mySeq = ++_pricingRequestSeq;
     try {
+      // Спершу сума бонусу в сеанс, і лише потім GetSumSkid — порядок Каті.
+      // Якщо SetBonusOpl упав, усе одно перераховуємо: сума буде без бонусу,
+      // і це чесніше, ніж застаріла.
+      final bonusSynced = await _syncBonusToServer();
+      if (!mounted || mySeq != _pricingRequestSeq) return;
+      if (!bonusSynced) {
+        FiscalLog.log('SetBonusOpl($_bonusToSpend) не вдався — GetSumSkid '
+            'рахуємо з тим, що в сеансі ($_bonusOnServer)');
+      }
       final pricing = await CartPriceService.fetchTotals(
         cart: _cart,
         loyalty: _customerLoyalty,
+        bonusAmount: _bonusOnServer,
         typeProject: _isPakunokMode ? PakunokService.typeProjectTag : null,
         typeNakl: _pricingPaymentMethod == PaymentMethod.card ? '5' : '2',
       );
@@ -3561,7 +3627,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // NewClient — серверний reset сеансу: одним запитом скидає весь кошик
     // і резерви залишків (Катя). Раніше тут ще був _unlockAllCart — N окремих
     // sgVRoznSetLock(qty=0) на кожну позицію, що дублювало роботу NewClient.
-    unawaited(SessionService.newClient());
+    unawaited(_newClientSession());
 
     // Reset search without triggering _filterDrugs (which would auto-select)
     _searchController.removeListener(_filterDrugs);
@@ -3981,7 +4047,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // NewClient — серверний reset сеансу для наступного клієнта: одним запитом
     // очищає server-side кошик і резерви (інакше GetSumSkid тягнув би старі
     // товари в наступні виклики). Замінює поштучний _unlockAllCart.
-    unawaited(SessionService.newClient());
+    unawaited(_newClientSession());
 
     // Bypass the listener so _filterDrugs doesn't auto-select a drug,
     // then reset everything including _selectedDrug → ShiftDashboard appears.
@@ -4006,7 +4072,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _searchController.addListener(_filterDrugs);
     _helpingHandTimer?.cancel();
     // NewClient — скидає server-side кошик і резерви одним запитом.
-    unawaited(SessionService.newClient());
+    unawaited(_newClientSession());
     setState(() {
       _totalEarned += amount;
       _ordersOpen = false;
@@ -4276,6 +4342,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         isPakunokMode: _isPakunokMode,
         pharmacist: _currentPharmacist,
         onOpenShift: _openShiftFromMenu,
+        onBonusChanged: _onBonusChanged,
+        onVerifyBonusSpend: _verifyBonusSpend,
         scannedDrugIds: _scannedDrugIds,
         onItemScanned: (id) => setState(() => _scannedDrugIds.add(id)),
         onPaymentMethodChanged: (method) {

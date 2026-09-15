@@ -254,4 +254,26 @@ class SessionService {
     }
     return false;
   }
+
+  /// Зафіксувати суму списаних бонусів у серверному сеансі (Катя, 14.09.2026).
+  ///
+  /// `?ServiceName=SetBonusOpl&sessionId&bonus={сума}`; `bonus=0` — прибрати
+  /// інфо з сеансу. Після виклику ОБОВʼЯЗКОВО `GetSumSkid` — саме він віддає
+  /// нову суму до сплати. Ліміти (баланс, VerifySPLSum, edSPLMinSumOplCash)
+  /// перевіряє клієнт ДО виклику; сюди приходить уже валідна сума.
+  static Future<bool> setBonusOpl(double bonus) async {
+    if (ApiConfig.useMock) return true;
+    final value = bonus <= 0 ? '0' : bonus.toStringAsFixed(2);
+    try {
+      final r = await CacheApiClient().call('SetBonusOpl', params: {'bonus': value});
+      if (r.isOk) {
+        FiscalLog.log('SetBonusOpl($value) OK');
+        return true;
+      }
+      FiscalLog.log('SetBonusOpl($value) FAIL: ${r.result}');
+    } catch (e) {
+      FiscalLog.log('SetBonusOpl($value) ERROR: $e');
+    }
+    return false;
+  }
 }

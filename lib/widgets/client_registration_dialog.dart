@@ -30,6 +30,27 @@ Future<String?> showClientRegistrationDialog({
   );
 }
 
+/// Той самий дзвінок/SMS, але для підтвердження СПИСАННЯ бонусів від порогу
+/// `VerifySPLSum` (Катя, 14.09): анкета вже є, створювати нічого не треба.
+/// Повертає true, якщо клієнт назвав правильний код.
+Future<bool> showBonusSpendVerifyDialog({
+  required BuildContext context,
+  required String phone,
+  required double bonusAmount,
+  required String pharmacistIpn,
+}) async {
+  final r = await showDialog<String>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => _ClientRegistrationDialog(
+      phone: phone,
+      pharmacistIpn: pharmacistIpn,
+      verifyBonusAmount: bonusAmount,
+    ),
+  );
+  return r != null;
+}
+
 enum _Step { intro, calling, callCode, smsSending, smsCode, creating, failed }
 
 class _ClientRegistrationDialog extends StatefulWidget {
@@ -37,11 +58,17 @@ class _ClientRegistrationDialog extends StatefulWidget {
   final String pharmacistIpn;
   final String? cashierName;
 
+  /// Не null — режим підтвердження списання цієї суми (без customer/create).
+  final double? verifyBonusAmount;
+
   const _ClientRegistrationDialog({
     required this.phone,
     required this.pharmacistIpn,
     this.cashierName,
+    this.verifyBonusAmount,
   });
+
+  bool get isVerifyOnly => verifyBonusAmount != null;
 
   @override
   State<_ClientRegistrationDialog> createState() =>
@@ -129,9 +156,14 @@ class _ClientRegistrationDialogState extends State<_ClientRegistrationDialog> {
     final typed = _code.text.trim();
     if (typed.isEmpty) return;
     if (typed == _secret) {
-      FiscalLog.log('РЕЄСТРАЦІЯ ${widget.phone}: телефон підтверджено '
+      FiscalLog.log('${widget.isVerifyOnly ? "СПИСАННЯ" : "РЕЄСТРАЦІЯ"} '
+          '${widget.phone}: телефон підтверджено '
           '(${_step == _Step.callCode ? "дзвінок" : "SMS"})');
-      _create();
+      if (widget.isVerifyOnly) {
+        Navigator.of(context).pop('OK');
+      } else {
+        _create();
+      }
       return;
     }
     _attempts++;
@@ -234,7 +266,9 @@ class _ClientRegistrationDialogState extends State<_ClientRegistrationDialog> {
   }
 
   String _title() => switch (_step) {
-        _Step.intro => 'Клієнта немає в Лайк',
+        _Step.intro => widget.isVerifyOnly
+            ? 'Підтвердження списання бонусів'
+            : 'Клієнта немає в Лайк',
         _Step.calling => 'Телефонуємо клієнту…',
         _Step.callCode => 'Клієнту дзвонять',
         _Step.smsSending => 'Надсилаємо SMS…',
@@ -244,9 +278,14 @@ class _ClientRegistrationDialogState extends State<_ClientRegistrationDialog> {
       };
 
   String _subtitle() => switch (_step) {
-        _Step.intro => 'Номер $_prettyPhone не зареєстровано. Щоб створити '
-            'анкету, підтвердимо номер дзвінком: клієнт назве останні 4 '
-            'цифри номера, з якого йому подзвонили.',
+        _Step.intro => widget.isVerifyOnly
+            ? 'Списання ${widget.verifyBonusAmount!.toStringAsFixed(2)} грн '
+                'бонусів потребує підтвердження. Клієнту на $_prettyPhone '
+                'подзвонять — він назве останні 4 цифри номера, з якого '
+                'надійшов дзвінок.'
+            : 'Номер $_prettyPhone не зареєстровано. Щоб створити '
+                'анкету, підтвердимо номер дзвінком: клієнт назве останні 4 '
+                'цифри номера, з якого йому подзвонили.',
         _Step.calling => 'Зачекайте кілька секунд.',
         _Step.callCode => 'Попросіть клієнта назвати останні 4 цифри номера, '
             'з якого надійшов дзвінок, і введіть їх.',

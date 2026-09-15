@@ -3,6 +3,7 @@ import '../models/checkout_totals.dart';
 import '../models/customer_loyalty.dart';
 import '../models/money.dart';
 import '../models/payment_method.dart';
+import '../services/spl_params_service.dart';
 
 /// Shared checkout state & calculation logic.
 ///
@@ -76,11 +77,17 @@ mixin CheckoutMixin<T extends StatefulWidget> on State<T> {
         bonusBalance: checkoutLoyalty == null
             ? Money.zero
             : Money.fromHryvnia(checkoutLoyalty!.bonusBalance),
+        // Мінімум готівкою з GetSPLParam (edSPLMinSumOplCash) — наша
+        // клієнтська перевірка (Микола, 14.09.2026).
+        minCash: Money.fromHryvnia(SplParamsService.cached?.minCashPayment ?? 0),
       );
 
   double get discountAmount => _totals.discount.toHryvnia();
 
   double get effectiveBonusAmount => _totals.bonus.toHryvnia();
+
+  /// Скільки максимум можна списати (баланс, знижка, мінімум готівкою).
+  double get bonusCapAmount => _totals.bonusCap.toHryvnia();
 
   double get finalTotal => _totals.finalTotal.toHryvnia();
 

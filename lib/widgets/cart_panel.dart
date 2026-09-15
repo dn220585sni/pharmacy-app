@@ -91,6 +91,14 @@ class CartPanel extends StatefulWidget {
   /// закриту зміну. Той самий шлях, що пункт меню «Відкрити зміну».
   final Future<void> Function()? onOpenShift;
 
+  /// Фактична сума бонусу до списання змінилась — екран кладе її в серверний
+  /// сеанс (`SetBonusOpl`) і перераховує GetSumSkid (Катя, 14.09).
+  final ValueChanged<double>? onBonusChanged;
+
+  /// Підтвердити клієнта перед списанням ≥ `VerifySPLSum` (дзвінок/SMS).
+  /// true — підтверджено, можна платити.
+  final Future<bool> Function(double bonus)? onVerifyBonusSpend;
+
   const CartPanel({
     super.key,
     required this.cart,
@@ -115,6 +123,8 @@ class CartPanel extends StatefulWidget {
     this.onPaymentMethodChanged,
     this.pharmacist,
     this.onOpenShift,
+    this.onBonusChanged,
+    this.onVerifyBonusSpend,
   });
 
   @override
@@ -692,6 +702,47 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     if (widget.loyalty == null && availableDiscount != null) {
       availableDiscount = null;
     }
+    // Інший клієнт — верифікацію списання треба проходити заново.
+    if (oldWidget.loyalty?.phone != widget.loyalty?.phone) {
+      _bonusVerifiedFor = null;
+    }
+    // Кошик/клієнт змінились → фактичний бонус міг обрізатись стелею —
+    // сервер має знати актуальну суму (SetBonusOpl → GetSumSkid).
+    _notifyBonus();
+  }
+
+  // ── Списання бонусів: сервер має знати суму (Катя, 14.09) ──────────────
+
+  /// Остання сума, яку повідомили екрану (щоб не смикати сервер даремно).
+  double? _lastNotifiedBonus;
+
+  /// Сума бонусу, для якої клієнт уже підтвердив номер (дзвінок/SMS).
+  /// null — не підтверджував. Скидається при зміні клієнта і після оплати.
+  double? _bonusVerifiedFor;
+
+  /// Повідомити екран про фактичну суму бонусу до списання. Екран кладе її
+  /// в серверний сеанс (`SetBonusOpl`) і ОБОВʼЯЗКОВО перераховує GetSumSkid —
+  /// саме він тоді віддає нову суму до сплати; локально бонус не віднімаємо.
+  void _notifyBonus() {
+    final v = effectiveBonusAmount;
+    if (_lastNotifiedBonus == v) return;
+    _lastNotifiedBonus = v;
+    widget.onBonusChanged?.call(v);
+  }
+
+  /// Верифікація клієнта перед списанням від порогу `VerifySPLSum`
+  /// (GetSPLParam). Поріг 0 / немає колбека — без верифікації.
+  Future<bool> _ensureBonusVerified() async {
+    final bonus = effectiveBonusAmount;
+    if (bonus <= 0) return true;
+    final threshold = SplParamsService.cached?.verifySum ?? 0;
+    if (threshold <= 0 || bonus < threshold) return true;
+    if (_bonusVerifiedFor != null && _bonusVerifiedFor! >= bonus) return true;
+    final verify = widget.onVerifyBonusSpend;
+    if (verify == null) return true;
+    final ok = await verify(bonus);
+    if (ok) _bonusVerifiedFor = bonus;
+    return ok;
   }
 
   @override
@@ -764,6 +815,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   Future<void> _processPayment() async {
     if (!_canProcessPayment || _isProcessingPayment) return;
 
+    // Списання бонусів від порогу VerifySPLSum — спершу підтвердити, що
+    // телефон у руках клієнта (той самий дзвінок/SMS, що й при реєстрації).
+    if (!await _ensureBonusVerified()) return;
+    if (!mounted) return;
+
     // Без відкритої зміни чек не проводимо — див. `_ensureShiftOpen`. На час
     // перевірки кнопка зайнята: запит до ПРРО триває, і подвійний клік
     // інакше проскочив би повз.
@@ -802,6 +858,10 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     // Bonus write-off is handled by Sparta LoyaltyService.sale()
     // in POS._processPayment() — fire-and-forget, no blocking here.
     widget.onPay(paidByPoints: effectiveBonusAmount);
+    // Наступний чек — з нуля: і верифікація, і сума в сеансі (NewClient на
+    // екрані її й так скидає, але наш лічильник має це знати).
+    _bonusVerifiedFor = null;
+    _lastNotifiedBonus = null;
     setState(() {
       _isProcessingPayment = false;
       showPaymentSuccess = true;
@@ -2493,12 +2553,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                 setState(() {
                   useBonuses = v;
                   if (useBonuses && widget.loyalty != null) {
-                    final max = baseTotal - discountAmount;
-                    final capped =
-                        widget.loyalty!.bonusBalance.clamp(0, max);
-                    bonusCtr.text = capped.toStringAsFixed(0);
+                    // Стеля вже враховує баланс, знижку і мінімум готівкою.
+                    bonusCtr.text = bonusCapAmount.toStringAsFixed(0);
                   }
                 });
+                _notifyBonus();
               },
               bonusController: bonusCtr,
               cartTotal: baseTotal,
@@ -2512,7 +2571,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
               onRequestDiscount: _requestDiscount,
               onClearDiscount: () =>
                   setState(() => personalDiscount = null),
-              onBonusAmountChanged: () => setState(() {}),
+              onBonusAmountChanged: () => setState(_notifyBonus),
             ),
 
             const SizedBox(height: 10),

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../models/cart_item.dart';
 import '../models/customer_loyalty.dart';
 import 'cache_api_client.dart';
+import 'fiscal_log.dart';
 
 /// Ціна однієї позиції кошика, як її розрахував сервер.
 class CartItemPricing {
@@ -242,6 +243,7 @@ class CartPriceService {
     }
     return _fetchFromServer(
       cart: cart,
+      bonusAmount: bonusAmount,
       socialProgramCode: socialProgramCode,
       orderId: orderId,
       helsiNumber: helsiNumber,
@@ -308,6 +310,7 @@ class CartPriceService {
     String? helsiNumber,
     String? typeProject,
     String? typeNakl,
+    double bonusAmount = 0,
   }) async {
     final params = <String, String>{
       if (socialProgramCode != null && socialProgramCode.isNotEmpty)
@@ -320,11 +323,24 @@ class CartPriceService {
       // Та сама назва й значення, що в `SavesgVNakl` — 2 готівка / 5 картка.
       if (typeNakl != null && typeNakl.isNotEmpty) 'TypeNakl': typeNakl,
     };
+    // Бонус у GetSumSkid НЕ передається: він уже лежить у серверному сеансі
+    // після `SetBonusOpl` (Катя, 14.09) — сюди приходить лише для діагностики.
 
     final response = await CacheApiClient().call('GetSumSkid', params: params);
     if (!response.isOk) {
       debugPrint('GetSumSkid FAIL: ${response.result}');
       return _stubPricing(cart: cart);
+    }
+
+    // Формат бонусу у відповіді ще не підтверджений Катею (окреме поле чи
+    // по рядках Goods.disc; чи SumCheck уже без бонусу). Поки списання
+    // активне — пишемо сирі ключі й підсумки, щоб побачити це наживо.
+    if (bonusAmount > 0) {
+      final d = response.data;
+      final goods = (d['Goods'] as List?) ?? const [];
+      FiscalLog.log('GetSumSkid при бонусі $bonusAmount: '
+          'ключі=${d.keys.where((k) => k != 'Goods').map((k) => '$k=${d[k]}').join(', ')}; '
+          'Goods=${goods.map((g) => g is Map ? 'skod=${g['skod']} price=${g['price']} qty=${g['qty']} disc=${g['disc'] ?? g['discount']} total=${g['total']}' : '$g').join(' ;; ')}');
     }
 
     final parsed = GetSumSkidResponse.fromJson(response.data);

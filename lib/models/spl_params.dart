@@ -43,6 +43,15 @@ class SplParams {
   /// GlobID аптеки. Поле `GlobId`. Використовується для `orderNo`.
   final String globId;
 
+  /// З якої суми списання бонусів потрібна верифікація клієнта (дзвінок/SMS).
+  /// Поле `VerifySPLSum` (Катя, 2026-09-14). 0 — верифікація не потрібна.
+  /// Перевірка — НАША, на клієнті, до `SetBonusOpl` (Микола, 14.09).
+  final double verifySum;
+
+  /// Мінімум, який клієнт платить грошима; бонус ≤ сума − цей мінімум.
+  /// Поле `edSPLMinSumOplCash` (Катя, 2026-09-14). 0 — без обмеження.
+  final double minCashPayment;
+
   const SplParams({
     required this.posKey,
     required this.placeCode,
@@ -56,7 +65,12 @@ class SplParams {
     required this.ngdMode,
     required this.cardPrefixes,
     required this.globId,
+    this.verifySum = 0,
+    this.minCashPayment = 0,
   });
+
+  static double _money(dynamic v) =>
+      double.tryParse(v?.toString().trim().replaceAll(',', '.') ?? '') ?? 0;
 
   /// Унікальний номер ІЗ для Спарти: `GlobId + no` (номер чека в Компасі).
   /// Напр. GlobId=129, no=2900635968 → "1292900635968".
@@ -87,6 +101,8 @@ class SplParams {
         ngdMode: _flag(j['chkSPLNGD']),
         cardPrefixes: _csv(j['EdSPLPrefix']),
         globId: j['GlobId']?.toString() ?? '',
+        verifySum: _money(j['VerifySPLSum']),
+        minCashPayment: _money(j['edSPLMinSumOplCash']),
       );
 
   /// Чи достатньо даних для роботи зі Спартою (підпис + проведення).
@@ -99,5 +115,6 @@ class SplParams {
   @override
   String toString() =>
       'SplParams(placeCode=$placeCode, globId=$globId, baseUrl=$baseUrl, '
-      'ngd=$ngdMode, spisBonus=$allowBonusSpend, posKey=${posKey.isNotEmpty ? "***" : ""})';
+      'ngd=$ngdMode, spisBonus=$allowBonusSpend, verifySum=$verifySum, '
+      'minCash=$minCashPayment, posKey=${posKey.isNotEmpty ? "***" : ""})';
 }

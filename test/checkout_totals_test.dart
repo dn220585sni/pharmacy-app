@@ -72,6 +72,60 @@ void main() {
     });
   });
 
+  group('CheckoutTotals — мінімум готівкою (edSPLMinSumOplCash)', () {
+    test('бонус не може закрити чек повністю: лишається мінімум грошима', () {
+      // base 100, мінімум готівкою 10 → стеля 90, хоч баланс 200 і введено 100
+      final t = CheckoutTotals(
+        base: Money.fromHryvnia(100),
+        useBonuses: true,
+        enteredBonus: Money.fromHryvnia(100),
+        bonusBalance: Money.fromHryvnia(200),
+        minCash: Money.fromHryvnia(10),
+      );
+      expect(t.bonusCap, Money.fromHryvnia(90));
+      expect(t.bonus, Money.fromHryvnia(90));
+      expect(t.finalTotal, Money.fromHryvnia(10));
+    });
+
+    test('мінімум рахується від суми ПІСЛЯ знижки', () {
+      // base 100, знижка 20% → 80; мінімум 30 → стеля 50
+      final t = CheckoutTotals(
+        base: Money.fromHryvnia(100),
+        discountPct: 20,
+        useBonuses: true,
+        enteredBonus: Money.fromHryvnia(70),
+        bonusBalance: Money.fromHryvnia(70),
+        minCash: Money.fromHryvnia(30),
+      );
+      expect(t.bonus, Money.fromHryvnia(50));
+      expect(t.finalTotal, Money.fromHryvnia(30));
+    });
+
+    test('чек менший за мінімум → бонусів списати не можна', () {
+      final t = CheckoutTotals(
+        base: Money.fromHryvnia(8),
+        useBonuses: true,
+        enteredBonus: Money.fromHryvnia(5),
+        bonusBalance: Money.fromHryvnia(50),
+        minCash: Money.fromHryvnia(10),
+      );
+      expect(t.bonusCap, Money.zero);
+      expect(t.bonus, Money.zero);
+      expect(t.finalTotal, Money.fromHryvnia(8));
+    });
+
+    test('мінімум 0 — поведінка як раніше (баланс і сума чека)', () {
+      final t = CheckoutTotals(
+        base: Money.fromHryvnia(100),
+        useBonuses: true,
+        enteredBonus: Money.fromHryvnia(100),
+        bonusBalance: Money.fromHryvnia(200),
+      );
+      expect(t.bonusCap, Money.fromHryvnia(100));
+      expect(t.finalTotal, Money.zero);
+    });
+  });
+
   group('CheckoutTotals — без float-дрейфу', () {
     test('базова сума з копійок не дрейфує у фіналі', () {
       // 0,10 × 3 = 0,30; знижка 0; фінал 0,30 рівно

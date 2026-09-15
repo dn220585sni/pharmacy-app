@@ -3,6 +3,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/spl_params.dart';
+import 'api_config.dart';
 import 'fiscal_log.dart';
 import 'spl_params_service.dart';
 
@@ -58,6 +59,10 @@ class LoyaltyCheckResult {
   final String? mobile;
   final String? cardNo;
   final String? errorMsg;
+
+  /// Код помилки Спарти (`UNKNOWN_CARD` — анкети немає → можна реєструвати;
+  /// `NETWORK_ERROR`/`HTTP_…` — Лайк недоступний → офлайн-прикріплення телефону).
+  final String? errorCode;
   final List<String> messages;
 
   /// Анкетні додатки Спарти: `code` → `value` з `addonsList`.
@@ -74,9 +79,17 @@ class LoyaltyCheckResult {
     this.mobile,
     this.cardNo,
     this.errorMsg,
+    this.errorCode,
     this.messages = const [],
     this.addons = const {},
   });
+
+  /// Анкети в Спарті немає — пропонуємо реєстрацію з каси.
+  bool get isUnknownCard => errorCode == 'UNKNOWN_CARD';
+
+  /// Лайк не відповів (мережа/HTTP) — офлайн-режим, а не «клієнта немає».
+  bool get isOffline =>
+      errorCode == 'NETWORK_ERROR' || (errorCode?.startsWith('HTTP_') ?? false);
 
   /// Анкетне «Получать эл-й чек» — код `cashreceipt`.
   ///
@@ -85,6 +98,23 @@ class LoyaltyCheckResult {
   /// `ReceiptPrintRule.electronicFromAnketa`, а не цей геттер: тут лише сире
   /// значення, `null` — поля в анкеті немає.
   String? get cashReceipt => addons['cashreceipt']?.toString();
+}
+
+/// Результат `customer/create` — реєстрації анкети з каси.
+class LoyaltyCreateResult {
+  final bool success;
+
+  /// Віртуальна картка Спарти (для `tx/order` та `IdentSPL`).
+  final String? cardNo;
+  final String? errorMsg;
+  final String? errorCode;
+
+  LoyaltyCreateResult({
+    required this.success,
+    this.cardNo,
+    this.errorMsg,
+    this.errorCode,
+  });
 }
 
 /// Результат продажу.
@@ -345,6 +375,7 @@ class LoyaltyService {
       return LoyaltyCheckResult(
         success: false,
         errorMsg: result['msg']?.toString() ?? 'Помилка API',
+        errorCode: result['errorCode']?.toString(),
       );
     }
 
@@ -362,6 +393,85 @@ class LoyaltyService {
       messages: _extractMessages(resp),
       addons: addonsFrom(person),
     );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // customer/create — реєстрація анкети з каси (віртуальна картка)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /// Створити анкету клієнта за телефоном; Спарта видає віртуальну картку.
+  ///
+  /// Контракт (Андрій, 2026-09-14/15; `API_TX_NGD_ANC_23` customer/create):
+  /// `cardNo:""` → у відповіді `response.cardNo` (напр. `2883158761324`) —
+  /// одразу придатна для `tx/order` та `IdentSPL`. Підпис — дефолтний ланцюжок
+  /// `partnerCode+placeCode+posCode+date+no+documentNo+reverse+checkOnly+cardNo`
+  /// з порожнім cardNo (перевірено на прикладі Андрія). `ver` = 3 за
+  /// документацією (не 4, як у sale). `permission*` — не згода клієнта, а
+  /// внутрішній вибір каналів (беремо як у прикладі). `regUserCode` — порожній.
+  /// Викликати ЛИШЕ після підтвердження телефону дзвінком/SMS
+  /// ([PhoneVerifyService]).
+  ///
+  /// [phone] — `+380XXXXXXXXX`.
+  static Future<LoyaltyCreateResult> createCustomer(
+    String phone, {
+    String? cashierName,
+  }) async {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.length != 12 || !digits.startsWith('380')) {
+      return LoyaltyCreateResult(success: false, errorMsg: 'Некоректний номер телефону');
+    }
+    if (ApiConfig.useMock) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      return LoyaltyCreateResult(success: true, cardNo: 'MOCK${digits.substring(3)}');
+    }
+    await _ensureConfig();
+    final now = DateTime.now();
+    final signature = _computeSignature(
+      partnerCode: SplConfig.partnerCode,
+      placeCode: SplConfig.placeCode,
+      date: _dateToMs(now),
+    );
+    final result = await _post('/customer/create', {
+      'ver': 3,
+      'requestId': _requestId(),
+      'apiUser': SplConfig.apiUser,
+      'apiToken': SplConfig.apiToken,
+      'partnerCode': SplConfig.partnerCode,
+      'placeCode': SplConfig.placeCode,
+      'posCode': '',
+      'date': _dateToIso(now),
+      'no': '',
+      'cardNo': '',
+      'person': {
+        'mobileCountry': '+380',
+        'mobile': digits.substring(3),
+        'phone': '',
+        'pass': '',
+        'permissionPD': true,
+        'permissionME': true,
+        'permissionMS': true,
+        'permissionOE': true,
+        'permissionOS': false,
+      },
+      'regUserCode': '',
+      'regUserName': cashierName ?? '',
+      'signature': signature,
+    });
+
+    if (result['errorCode']?.toString() != '0') {
+      return LoyaltyCreateResult(
+        success: false,
+        errorMsg: result['msg']?.toString() ?? 'Помилка API',
+        errorCode: result['errorCode']?.toString(),
+      );
+    }
+    final resp = result['response'] as Map<String, dynamic>? ?? {};
+    final cardNo = resp['cardNo']?.toString() ?? '';
+    if (cardNo.isEmpty) {
+      return LoyaltyCreateResult(
+          success: false, errorMsg: 'Спарта не повернула номер картки');
+    }
+    return LoyaltyCreateResult(success: true, cardNo: cardNo);
   }
 
   // ───────────────────────────────────────────────────────────────────────────

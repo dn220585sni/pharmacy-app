@@ -60,6 +60,7 @@ import '../widgets/prescription_panel.dart';
 import '../widgets/social_projects_panel.dart';
 import '../widgets/messages_panel.dart';
 import '../widgets/barcode_input_dialog.dart';
+import '../widgets/client_registration_dialog.dart';
 import '../widgets/robot_panel.dart';
 import '../services/api_config.dart';
 import '../data/mock_messages.dart';
@@ -3619,43 +3620,118 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
       if (!result.success) {
         setState(() => _isLoadingLoyalty = false);
-        if (mounted) {
+        if (result.isUnknownCard) {
+          // Анкети в Спарті немає → реєстрація з каси (дзвінок/SMS →
+          // customer/create → віртуальна картка). Андрій, 14–15.09.2026.
+          final cardNo = await showClientRegistrationDialog(
+            context: context,
+            phone: '+380$digits',
+            pharmacistIpn: _currentPharmacist?.ipn ?? '',
+            cashierName: _currentPharmacist?.user,
+          );
+          if (!mounted || cardNo == null) return;
+          _applyLoyalty(digits, cardNo: cardNo, balance: 0);
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(result.errorMsg ?? 'Картку не знайдено'),
-            duration: const Duration(seconds: 2),
+            content: Text('Клієнта зареєстровано в Лайк, картка $cardNo'),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
           ));
+          return;
         }
+        if (result.isOffline) {
+          // Лайк не відповів. Андрій (п.6): у транзакції cardNo = телефон,
+          // юр-особа зареєструє пізніше; бонусів офлайн немає. Це вже вміє
+          // IdentSPL (SpartaCard = SpartaPhone) — треба лише свідома згода.
+          final attach = await _confirmOfflineLoyalty('+380$digits');
+          if (!mounted || !attach) return;
+          _applyLoyalty(digits, cardNo: null, balance: 0);
+          FiscalLog.log('ЛАЙК офлайн: телефон +380$digits прикріплено без картки');
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(result.errorMsg ?? 'Картку не знайдено'),
+          duration: const Duration(seconds: 2),
+        ));
         return;
       }
 
-      // Mask the phone number: +38050***9993
-      final masked = _maskPhone(digits);
-      _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
-      _loyaltyPhoneController.removeListener(_guardPhoneCursor);
-      _loyaltyPhoneController.text = masked;
-      _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
-      _loyaltyPhoneController.addListener(_guardPhoneCursor);
-
-      setState(() {
-        _customerLoyalty = CustomerLoyalty(
-          phone: '+380$digits',
-          bonusBalance: result.balanceAfter,
-          cardNo: result.cardNo,
-          firstName: result.firstName,
-          lastName: result.lastName,
-          cashReceipt: result.cashReceipt,
-        );
-        _isLoadingLoyalty = false;
-      });
-      // IdentSPL — зберегти клієнта у серверному сеансі (для накладної).
-      unawaited(SessionService.identSPL(
-        phone: '+380$digits',
-        card: result.cardNo,
-      ));
+      _applyLoyalty(
+        digits,
+        cardNo: result.cardNo,
+        balance: result.balanceAfter,
+        firstName: result.firstName,
+        lastName: result.lastName,
+        cashReceipt: result.cashReceipt,
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() => _isLoadingLoyalty = false);
     }
+  }
+
+  /// Прикріпити клієнта Лайк до чека: маскований телефон у полі,
+  /// [_customerLoyalty] і `IdentSPL` у серверному сеансі (для накладної).
+  /// [cardNo] null = офлайн, IdentSPL передасть SpartaCard = телефон.
+  void _applyLoyalty(
+    String digits, {
+    required String? cardNo,
+    required double balance,
+    String? firstName,
+    String? lastName,
+    String? cashReceipt,
+  }) {
+    // Mask the phone number: +38050***9993
+    final masked = _maskPhone(digits);
+    _loyaltyPhoneController.removeListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.removeListener(_guardPhoneCursor);
+    _loyaltyPhoneController.text = masked;
+    _loyaltyPhoneController.addListener(_onLoyaltyPhoneChanged);
+    _loyaltyPhoneController.addListener(_guardPhoneCursor);
+
+    setState(() {
+      _customerLoyalty = CustomerLoyalty(
+        phone: '+380$digits',
+        bonusBalance: balance,
+        cardNo: cardNo,
+        firstName: firstName,
+        lastName: lastName,
+        cashReceipt: cashReceipt,
+      );
+      _isLoadingLoyalty = false;
+    });
+    unawaited(SessionService.identSPL(phone: '+380$digits', card: cardNo));
+  }
+
+  /// Лайк недоступний — спитати, чи прикріпити телефон до чека офлайн.
+  Future<bool> _confirmOfflineLoyalty(String phone) async {
+    final r = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Лайк недоступний',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+        content: Text(
+          'Перевірити картку зараз не вдалося. Прикріпити телефон $phone до '
+          'чека? Бонуси нарахуються пізніше, списати їх зараз не можна.',
+          style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280), height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Без Лайк', style: TextStyle(color: Color(0xFF6B7280))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E7DC8),
+                foregroundColor: Colors.white,
+                elevation: 0),
+            child: const Text('Прикріпити телефон'),
+          ),
+        ],
+      ),
+    );
+    return r ?? false;
   }
 
   /// Format: +38050***9993 — show operator code + last 4 digits, mask the middle.

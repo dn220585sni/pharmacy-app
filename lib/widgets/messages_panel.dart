@@ -722,7 +722,7 @@ class _FolderTab extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEF4444),
+                  color: const Color(0xFF1E7DC8), // лічильник = «є нове», не помилка
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(

@@ -143,6 +143,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   // ── Product Browser (drug safety tags + external analogues) ─────────────
   /// Drug IDs we've already tried fetching from Product Browser.
   final _productBrowserFetched = <String>{};
+
+  /// Товари, для яких картку anc.ua взято за кодом СЦ (id на сайті) — для них
+  /// пізніший результат пошуку за назвою ігнорується.
+  final _productBrowserByKodSc = <String>{};
   /// External analogues from anc.ua search API (by INN/active substance).
   List<ProductSearchResult> _externalAnalogues = [];
   /// Drug ID for which external analogues are currently loaded.
@@ -2034,7 +2038,30 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // Fire-and-forget async fetch
     future.then((result) async {
       if (!mounted || result == null) return;
+      // Картку вже взяли за кодом СЦ — результат пошуку за назвою не потрібен
+      // (він менш надійний: Нурофен/Нурофєн, рос./укр. назви).
+      if (_productBrowserByKodSc.contains(drug.id)) return;
+      await _applyProductBrowserResult(drug, result);
+    }).catchError((_) {
+      // Silently ignore — product browser is optional enhancement
+    });
+  }
 
+  /// Картка anc.ua за кодом СЦ (з GetSKUdetail) — детерміновано, без звірки
+  /// назв. Успіх позначає товар у [_productBrowserByKodSc], після чого пошук
+  /// за назвою для нього ігнорується.
+  void _fetchProductBrowserByKodSc(Drug drug, String kodSc) {
+    if (_productBrowserByKodSc.contains(drug.id)) return;
+    ProductBrowserService.fetchByKodSc(kodSc).then((result) async {
+      if (!mounted || result == null) return;
+      _productBrowserByKodSc.add(drug.id);
+      await _applyProductBrowserResult(drug, result);
+    }).catchError((_) {});
+  }
+
+  /// Застосувати картку anc.ua до товару в таблиці/кошику/виборі.
+  Future<void> _applyProductBrowserResult(
+      Drug drug, ProductBrowserResult result) async {
       final usageInfo = result.toUsageInfo();
 
       // Fetch Ukrainian indications from full_description or instructions HTML
@@ -2070,9 +2097,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           _selectedDrug = updatedDrug;
         }
       });
-    }).catchError((_) {
-      // Silently ignore — product browser is optional enhancement
-    });
   }
 
   // ── Caché GetSKUdetail: auto-fetch drug detail ──────────────────────────
@@ -2126,6 +2150,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           intakeWarning: detail.intakeWarning,
           usageInfo: detail.toUsageInfo(),
           skuCode: detail.skuCode,
+          kodSc: detail.kodSc,
           comingPrice: detail.comingPrice,
           comingCode: detail.comingCode,
         );
@@ -2149,6 +2174,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           );
         }
       });
+
+      // Код СЦ прийшов — картка anc.ua за ідентифікатором (перекриває
+      // результат пошуку за назвою, якщо той уже встиг застосуватись).
+      if (detail.kodSc != null) _fetchProductBrowserByKodSc(drug, detail.kodSc!);
 
       // If INN was just populated, try fetching external analogues
       debugPrint('SKUDetail: inn=${detail.inn}, analogueGroup=${detail.analogueGroup} for ${drug.name}');

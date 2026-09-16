@@ -317,6 +317,9 @@ class SKUDetailResult {
   final String? intakeWarning;
   final String? nameUkr;     // українська назва
   final String? skuCode;      // числовий код товару (ids з відповіді API)
+  /// Код СЦ («сервер цін») = id товару на anc.ua. За спекою Каті у відповіді
+  /// GetSKUdetail `ids` без «*» — саме він (з «*» — це ukod, тоді null).
+  final String? kodSc;
   final String? comingPrice;  // ціна приходу (for FarmaSell Helping Hand)
   final String? comingCode;   // код приходу (for FarmaSell Helping Hand)
 
@@ -341,6 +344,7 @@ class SKUDetailResult {
     this.imageUrl,
     this.intakeWarning,
     this.skuCode,
+    this.kodSc,
     this.comingPrice,
     this.comingCode,
   });
@@ -371,8 +375,9 @@ class SKUDetailResult {
       isOwnBrand: json['isOwnBrand']?.toString() == '1',
       analogueGroup: _nonEmpty(json['analogueGroup']),
       imageUrl: _nonEmpty(json['imageUrl']),
-      intakeWarning: _nonEmpty(json['intakeWarning']),
+      intakeWarning: meaningfulIntakeWarning(json['intakeWarning']),
       skuCode: _nonEmpty(json['ids']),
+      kodSc: kodScFromIds(json['ids']),
       comingPrice: _nonEmpty(json['comingPrice']),
       comingCode: _nonEmpty(json['comingCode']),
     );
@@ -1091,4 +1096,30 @@ class DrugService {
         );
     return drug?.stock ?? 0;
   }
+}
+
+/// Код СЦ («сервер цін» = id товару на anc.ua) з поля `ids` відповіді
+/// GetSKUdetail: лише число без «*» (з «*» це ukod — тоді null).
+String? kodScFromIds(dynamic v) {
+  final s = v?.toString().trim() ?? '';
+  if (s.isEmpty || s.contains('*')) return null;
+  return RegExp(r'^\d+$').hasMatch(s) ? s : null;
+}
+
+/// «Особливості прийому» з Caché лише тоді, коли в них є хоч якийсь зміст.
+///
+/// Формат: сегменти через «_», у сегменті «Текст:signType:Категорія».
+/// Косметика/БАДи приходять як «:Дорослим_:Дітям_:Вагітним_…» — самі назви
+/// категорій без тексту і без signType; таке показувати нема чого → null
+/// (інакше картка малює сирий рядок у жовтій плашці).
+String? meaningfulIntakeWarning(dynamic v) {
+  final s = v?.toString().trim() ?? '';
+  if (s.isEmpty) return null;
+  for (final seg in s.split('_')) {
+    final parts = seg.split(':');
+    // Усе, крім останньої частини (назви категорії), — текст/signType.
+    final payload = parts.length > 1 ? parts.sublist(0, parts.length - 1) : parts;
+    if (payload.any((p) => p.trim().isNotEmpty)) return s;
+  }
+  return null;
 }

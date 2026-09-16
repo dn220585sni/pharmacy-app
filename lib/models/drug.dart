@@ -106,6 +106,8 @@ class Drug {
 
   // ── Caché codes ──────────────────────────────────────────────────────
   final String? ukod;          // u-код товару (код довідника, напр. "762*1*47*6****")
+  /// Код СЦ («сервер цін») — id товару на anc.ua; з GetSKUdetail (`ids` без «*»).
+  final String? kodSc;
   final String? skuCode;       // s-код або числовий код товару
   final String? comingPrice;   // ціна приходу товару
   final String? comingCode;    // код приходу товару
@@ -149,6 +151,7 @@ class Drug {
     this.hasHelpingHand = false,
     this.isMedicine = true,
     this.ukod,
+    this.kodSc,
     this.skuCode,
     this.comingPrice,
     this.comingCode,
@@ -246,6 +249,7 @@ class Drug {
       hasHelpingHand: hasHelpingHand,
       isMedicine: isMedicine,
       ukod: ukod,
+      kodSc: kodSc,
       skuCode: skuCode,
       comingPrice: comingPrice,
       comingCode: comingCode,
@@ -297,6 +301,7 @@ class Drug {
       hasHelpingHand: hasHelpingHand,
       isMedicine: isMedicine,
       ukod: ukod,
+      kodSc: kodSc,
       skuCode: skuCode,
       comingPrice: comingPrice,
       comingCode: comingCode,
@@ -352,6 +357,7 @@ class Drug {
       hasHelpingHand: hasHelpingHand,
       isMedicine: isMedicine,
       ukod: ukod,
+      kodSc: kodSc,
       skuCode: skuCode,
       comingPrice: comingPrice,
       comingCode: comingCode,
@@ -360,6 +366,7 @@ class Drug {
 
   /// Create copy enriched with data from GetSKUdetail API.
   Drug copyWithSKUDetail({
+    String? kodSc,
     String? nameUkr,
     String? inn,
     String? dosageForm,
@@ -430,6 +437,7 @@ class Drug {
       hasHelpingHand: hh || hasHelpingHand,
       isMedicine: isMedicine,
       ukod: ukod,
+      kodSc: kodSc ?? this.kodSc,
       skuCode: skuCode ?? this.skuCode,
       comingPrice: comingPrice ?? this.comingPrice,
       comingCode: comingCode ?? this.comingCode,

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/drug.dart';
 import '../models/nearby_pharmacy.dart';
+import 'fiscal_log.dart';
 
 /// Product Browser API (anc.ua) — drug safety tags & product info.
 ///
@@ -41,6 +42,49 @@ class ProductBrowserService {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Картка товару за кодом СЦ («сервер цін») — він же id товару на anc.ua
+  /// (перевірено 16.09: 5511 → Цитрамон-Дарниця №6, 1072035 → Миргород…).
+  ///
+  /// Детермінований шлях без звірки назв: `search?q=<кодСЦ>` → рядок з
+  /// `id == кодСЦ` → `fetchBySlug(link)`. Немає збігу за id → null (і рядок у
+  /// журналі), далі викликач може впасти на пошук за назвою.
+  static Future<ProductBrowserResult?> fetchByKodSc(String kodSc) async {
+    if (kodSc.isEmpty) return null;
+    final cached = _cache.values.cast<ProductBrowserResult?>().firstWhere(
+          (r) => r?.id == kodSc,
+          orElse: () => null,
+        );
+    if (cached != null) return cached;
+    try {
+      final results = await searchProducts(kodSc, limit: 10);
+      final hit = pickByKodSc(kodSc, results);
+      if (hit == null) {
+        FiscalLog.log('anc.ua за кодом СЦ $kodSc: не знайдено '
+            '(відповідей ${results.length}'
+            '${results.isNotEmpty ? ', перший id=${results.first.id} "${results.first.name}"' : ''})');
+        return null;
+      }
+      final result = await fetchBySlug(hit.link);
+      FiscalLog.log('anc.ua за кодом СЦ $kodSc: ${result != null ? 'OK' : 'картка не віддалась'} '
+          'slug=${hit.link} "${hit.name}"');
+      return result;
+    } catch (e) {
+      FiscalLog.log('anc.ua за кодом СЦ $kodSc: помилка $e');
+      return null;
+    }
+  }
+
+  /// З результатів пошуку — рядок, чий `id` дорівнює коду СЦ (не перший-ліпший).
+  static ProductSearchResult? pickByKodSc(
+    String kodSc,
+    List<ProductSearchResult> candidates,
+  ) {
+    for (final p in candidates) {
+      if (p.id == kodSc) return p;
+    }
+    return null;
   }
 
   /// Fetch Ukrainian indications from full_description HTML.

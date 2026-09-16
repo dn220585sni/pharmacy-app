@@ -221,13 +221,14 @@ class _SidebarButtonState extends State<_SidebarButton> {
                   color: isHighlighted
                       ? const Color(0xFFE8F3FB)
                       : Colors.white,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: isActive
                         ? const Color(0xFF1E7DC8)
                         : isHighlighted
                             ? const Color(0xFFBFCBFB)
                             : const Color(0xFFE5E7EB),
+                    width: isActive ? 1.5 : 1,
                   ),
                 ),
                 child: Column(
@@ -250,16 +251,18 @@ class _SidebarButtonState extends State<_SidebarButton> {
                           color: const Color(0x0F000000),
                           borderRadius: BorderRadius.circular(3),
                         ),
+                        // Клавіатурний застосунок: шорткат має читатися з метра,
+                        // тому кегль і колір тексту, а не «стану».
                         child: Text(
                           widget.item.hotkeyLabel!,
                           style: TextStyle(
-                            fontSize: 8,
+                            fontSize: 9.5,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.3,
                             height: 1,
                             color: isHighlighted
                                 ? const Color(0xFF1E7DC8)
-                                : const Color(0xFF6B7280),
+                                : const Color(0xFF4B5563),
                           ),
                         ),
                       ),
@@ -274,12 +277,14 @@ class _SidebarButtonState extends State<_SidebarButton> {
                   child: Container(
                     width: 18,
                     height: 18,
+                    // Лічильник — це «є нове», а не помилка: синій, як усе,
+                    // що кличе до дії; червоний лишаємо блокуванням.
                     decoration: const BoxDecoration(
-                      color: Color(0xFFEF4444),
+                      color: Color(0xFF1E7DC8),
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Color(0x33EF4444),
+                          color: Color(0x331E7DC8),
                           blurRadius: 4,
                           offset: Offset(0, 1),
                         ),

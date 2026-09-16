@@ -305,6 +305,7 @@ class _DrugListItemState extends State<DrugListItem> {
               color: isDimmed ? textSecondary : const Color(0xFF15803D),
               fontSize: 14.5,
               fontWeight: widget.isSelected ? FontWeight.w700 : FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
         ],
@@ -322,11 +323,13 @@ class _DrugListItemState extends State<DrugListItem> {
           mainAxisAlignment: MainAxisAlignment.end,
           mainAxisSize: MainAxisSize.min,
           children: [
+            // «Рука допомоги» — маленька синя мітка (клікабельна), а не
+            // малинова: рожеве біля ціни читається як попередження.
             if (showHand)
               const Padding(
-                padding: EdgeInsets.only(right: 3),
+                padding: EdgeInsets.only(right: 4),
                 child: Icon(Icons.favorite_rounded,
-                    size: 10, color: Color(0xFFE8A0B4)),
+                    size: 10, color: Color(0xFF7FB3E3)),
               ),
             Text(
               drug.price > 0
@@ -338,6 +341,7 @@ class _DrugListItemState extends State<DrugListItem> {
                 fontSize: 14.5,
                 fontWeight:
                     widget.isSelected ? FontWeight.w700 : FontWeight.w600,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ],
@@ -362,11 +366,23 @@ class _DrugListItemState extends State<DrugListItem> {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
-        color: widget.isSelected
-            ? const Color(0xFFE8F3FB)
-            : widget.isEvenRow
-                ? Colors.white
-                : const Color(0xFFF8F9FB),
+        // Виділений рядок = фокус клавіатури: крім підкладки, синя смужка
+        // зліва, щоб фокус читався з метра (клавіатурний застосунок).
+        decoration: BoxDecoration(
+          color: widget.isSelected
+              ? const Color(0xFFE8F3FB)
+              : widget.isEvenRow
+                  ? Colors.white
+                  : const Color(0xFFF8F9FB),
+          border: Border(
+            left: BorderSide(
+              color: widget.isSelected
+                  ? const Color(0xFF1E7DC8)
+                  : Colors.transparent,
+              width: 3,
+            ),
+          ),
+        ),
         child: Column(
           children: [
             Padding(
@@ -384,7 +400,7 @@ class _DrugListItemState extends State<DrugListItem> {
                       children: [
                         Expanded(
                           child: Text(
-                            drug.displayName,
+                            drug.uiName,
                             style: TextStyle(
                               color: textPrimary,
                               fontSize: 13.5,
@@ -474,14 +490,19 @@ class _DrugListItemState extends State<DrugListItem> {
                                   fontWeight: FontWeight.w600,
                                   color: Color(0xFF1C1C2E),
                                 ),
+                                // Рамка поля лише у виділеному рядку або коли
+                                // є кількість: 20 порожніх рамок у списку —
+                                // це сітка-шум, а не інформація.
                                 decoration: InputDecoration(
                                   isDense: true,
                                   contentPadding: const EdgeInsets.symmetric(
                                       horizontal: 4, vertical: 5),
                                   filled: true,
-                                  fillColor: (widget.cartQuantity > 0 || widget.cartFractionalQty != null)
+                                  fillColor: _inCart
                                       ? const Color(0xFFE8F3FB)
-                                      : const Color(0xFFF9FAFB),
+                                      : widget.isSelected
+                                          ? Colors.white
+                                          : Colors.transparent,
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(6),
                                     borderSide: const BorderSide(
@@ -490,9 +511,11 @@ class _DrugListItemState extends State<DrugListItem> {
                                   enabledBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(6),
                                     borderSide: BorderSide(
-                                      color: (widget.cartQuantity > 0 || widget.cartFractionalQty != null)
+                                      color: _inCart
                                           ? const Color(0xFF1E7DC8)
-                                          : const Color(0xFFE5E7EB),
+                                          : widget.isSelected
+                                              ? const Color(0xFFD1D5DB)
+                                              : Colors.transparent,
                                       width: 1,
                                     ),
                                   ),

@@ -209,7 +209,7 @@ class _AnalogueRow extends StatelessWidget {
             // Name
             Expanded(
               child: Text(
-                drug.name,
+                drug.uiName,
                 style: TextStyle(
                   color: textPrimary,
                   fontSize: 13,
@@ -218,16 +218,17 @@ class _AnalogueRow extends StatelessWidget {
               ),
             ),
 
-            // Price
+            // Price — темна, табличні цифри, як у головному списку
             SizedBox(
               width: _kColPrice,
               child: Text(
                 '${drug.price.asMoney} ₴',
                 textAlign: TextAlign.right,
                 style: TextStyle(
-                  color: textSecondary,
+                  color: textPrimary,
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w500,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
             ),

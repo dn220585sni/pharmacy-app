@@ -193,7 +193,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
                     children: [
                       Expanded(
                         child: Text(
-                          drug.name,
+                          drug.uiName,
                           style: const TextStyle(
                             color: Color(0xFF1C1C2E),
                             fontSize: 13.5,
@@ -405,7 +405,7 @@ class OutOfStockPanelState extends State<OutOfStockPanel> {
 
                 // Name
                 Text(
-                  drug.name,
+                  drug.uiName,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: Color(0xFF1C1C2E),

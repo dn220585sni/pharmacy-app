@@ -1,3 +1,5 @@
+import '../utils/drug_name_case.dart';
+
 // ── Storage location ──────────────────────────────────────────────────────────
 
 enum StorageLocationType { shelf, showcase, polka, robot }
@@ -158,7 +160,12 @@ class Drug {
   });
 
   /// Назва для відображення: українська якщо є, інакше оригінальна.
+  /// Саме вона йде в накладну і чек ПРРО — регістр серверний.
   String get displayName => (nameUkr != null && nameUkr!.isNotEmpty) ? nameUkr! : name;
+
+  /// Назва для ЕКРАНА: звичайний регістр замість серверного капсу
+  /// (див. `utils/drug_name_case.dart`). Лише для віджетів, не для документів.
+  String get uiName => humanizeDrugName(displayName);
 
   /// Чи товар відсутній на складі. Дробові залишки (наприклад 0.5 упаковки —
   /// блістерами) НЕ вважаються відсутніми — їх можна додати в кошик блістерно.

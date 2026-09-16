@@ -156,7 +156,7 @@ class CartOfferCard extends StatelessWidget {
                                 ],
                                 Expanded(
                                   child: Text(
-                                    drug.name,
+                                    drug.uiName,
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(

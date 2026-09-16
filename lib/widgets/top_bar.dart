@@ -51,11 +51,12 @@ class TopBar extends StatelessWidget {
       child: Row(
         children: [
           // АНЦ Каса — logo image from asset
+          // Усі елементи шапки однієї висоти (36) і з одним радіусом (8).
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Image.asset(
-              'assets/images/Logo1.png',
-              height: 40,
+              'assets/images/anc-kasa-blue.png',
+              height: 36,
               fit: BoxFit.contain,
             ),
           ),
@@ -63,8 +64,9 @@ class TopBar extends StatelessWidget {
           GestureDetector(
             onTap: onPharmacistTap,
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+              height: 36,
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 color: hasPharmacist
                     ? const Color(0xFFE8F3FB)
@@ -112,24 +114,27 @@ class TopBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          // Help button
+          // Help — найпасивніший елемент шапки, тому сіра обведена кнопка,
+          // а не червона: червоний у касі лише для блокувань і помилок.
           GestureDetector(
             onTap: () {
               // TODO: open help / knowledge base
             },
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              height: 36,
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
               decoration: BoxDecoration(
-                color: const Color(0xFFEF4444),
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFD1D5DB)),
               ),
               child: const Text(
                 'Help',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: Color(0xFF6B7280),
                   fontSize: 13,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),

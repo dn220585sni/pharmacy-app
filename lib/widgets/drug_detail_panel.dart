@@ -380,7 +380,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    drug.displayName,
+                    drug.uiName,
                     style: const TextStyle(
                       color: Color(0xFF1C1C2E),
                       fontSize: 13.5,
@@ -417,6 +417,7 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
           color: Color(0xFF1E7DC8),
           fontSize: 22,
           fontWeight: FontWeight.w800,
+          fontFeatures: [FontFeature.tabularFigures()],
         ),
       );
     }
@@ -807,23 +808,26 @@ class _DrugDetailPanelState extends State<DrugDetailPanel> {
           dispensingText, dispensingStatus),
     ];
 
+    // Два стовпці з тонкими розділювачами замість «коробок у коробках»:
+    // колір лише в стані (слово + крапка), рамок і бейджів немає.
     return Padding(
-          padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-          child: Column(
-            children: [
-              for (int i = 0; i < cells.length; i += 2)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    children: [
-                      Expanded(child: _UsagePropCell(data: cells[i])),
-                      const SizedBox(width: 5),
-                      Expanded(child: _UsagePropCell(data: cells[i + 1])),
-                    ],
-                  ),
-                ),
-            ],
-          ),
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+      child: Column(
+        children: [
+          for (int i = 0; i < cells.length; i += 2) ...[
+            if (i > 0)
+              const Divider(height: 1, thickness: 1, color: Color(0xFFEEEFF2)),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: _UsagePropCell(data: cells[i])),
+                const SizedBox(width: 12),
+                Expanded(child: _UsagePropCell(data: cells[i + 1])),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -1332,54 +1336,17 @@ class _UsagePropCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (textColor, badgeIcon, badgeColor) = _statusStyle(data.status);
+    final (textColor, _, dotColor) = _statusStyle(data.status);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFEDEFF3)),
-      ),
+    // Без рамки й фону: сіра іконка, підпис, стан кольоровим словом із
+    // крапкою — щоб «протипоказано» ловилося з метра раніше за слово.
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Icon circle with status badge overlay
-          SizedBox(
-            width: 28,
-            height: 28,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF0F2F5),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(data.icon, size: 14, color: const Color(0xFF6B7280)),
-                ),
-                Positioned(
-                  top: -2,
-                  right: -2,
-                  child: Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: badgeColor,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 1.5),
-                    ),
-                    child: Icon(badgeIcon, size: 7, color: Colors.white),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 7),
-
-          // Label + status text
+          Icon(data.icon, size: 15, color: const Color(0xFF9CA3AF)),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1394,15 +1361,32 @@ class _UsagePropCell extends StatelessWidget {
                     height: 1.15,
                   ),
                 ),
-                Text(
-                  data.value,
-                  style: TextStyle(
-                    color: textColor,
-                    fontSize: 10.5,
-                    height: 1.2,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: dotColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        data.value,
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w500,
+                          height: 1.2,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1412,7 +1396,7 @@ class _UsagePropCell extends StatelessWidget {
     );
   }
 
-  // Returns (statusTextColor, badgeIcon, badgeCircleColor)
+  // Returns (statusTextColor, badgeIcon, dotColor)
   (Color, IconData, Color) _statusStyle(UsageStatus s) {
     switch (s) {
       case UsageStatus.ok:
@@ -1973,7 +1957,7 @@ class _HelpingHandDialogState extends State<HelpingHandDialog> {
                         ),
                       ),
                       Text(
-                        widget.drug.name,
+                        widget.drug.uiName,
                         style: const TextStyle(
                           color: Color(0xFF6B7280),
                           fontSize: 12,

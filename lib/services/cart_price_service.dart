@@ -112,12 +112,18 @@ class GetSumSkidResponse {
   final double roundingDiscount;
   final List<GetSumSkidItem> goods;
 
+  /// Сума списаних бонусів (`sumoplbonus`, Катя 16.09) — сервер віддає її
+  /// окремо, щоб не відновлювати з `skidka_sumcheck`. `null` — поля у
+  /// відповіді немає (старий сервер) → рахуємо як раніше.
+  final double? bonusPaid;
+
   const GetSumSkidResponse({
     required this.ok,
     required this.sumCheck,
     required this.discount,
     required this.roundingDiscount,
     required this.goods,
+    this.bonusPaid,
     this.errorMessage,
   });
 
@@ -140,12 +146,16 @@ class GetSumSkidResponse {
             .map(GetSumSkidItem.fromJson)
             .toList(growable: false)
         : const <GetSumSkidItem>[];
+    final bonusRaw = j['sumoplbonus'] ?? j['SumOplBonus'] ?? j['sumOplBonus'];
     return GetSumSkidResponse(
       ok: true,
       sumCheck: _toDouble(j['SumCheck']),
       discount: _toDouble(j['discount']),
       roundingDiscount: _toDouble(j['skidka_sumcheck']),
       goods: items,
+      bonusPaid: bonusRaw == null || bonusRaw.toString().trim().isEmpty
+          ? null
+          : _toDouble(bonusRaw),
     );
   }
 }
@@ -407,12 +417,24 @@ class CartPriceService {
     // бонусу, бо далі вони живуть по-різному: округлення при переході на
     // картку зникає (cart_panel додає його назад до total), а бонус — ні.
     final skidka = _round2(response.roundingDiscount);
-    final bonusApplied = bonusAmount <= 0
-        ? 0.0
-        : _round2(bonusAmount < skidka ? bonusAmount : skidka);
-    if (bonusAmount > 0 && bonusApplied + 0.005 < bonusAmount) {
-      FiscalLog.log('GetSumSkid: у skidka_sumcheck=$skidka бонусу '
-          '$bonusAmount НЕМАЄ повністю — сервер міг не прийняти SetBonusOpl');
+    final double bonusApplied;
+    final serverBonus = response.bonusPaid;
+    if (serverBonus != null) {
+      // Сервер віддав суму списаних бонусів окремо (`sumoplbonus`, 16.09) —
+      // читаємо напряму; наше значення лише звіряємо в журналі.
+      bonusApplied = _round2(serverBonus.clamp(0, skidka > 0 ? skidka : 0));
+      if ((serverBonus - bonusAmount).abs() > 0.005) {
+        FiscalLog.log('GetSumSkid: sumoplbonus=$serverBonus ≠ бонус на касі '
+            '$bonusAmount (skidka_sumcheck=$skidka) — беремо серверний');
+      }
+    } else {
+      bonusApplied = bonusAmount <= 0
+          ? 0.0
+          : _round2(bonusAmount < skidka ? bonusAmount : skidka);
+      if (bonusAmount > 0 && bonusApplied + 0.005 < bonusAmount) {
+        FiscalLog.log('GetSumSkid: у skidka_sumcheck=$skidka бонусу '
+            '$bonusAmount НЕМАЄ повністю — сервер міг не прийняти SetBonusOpl');
+      }
     }
     return CartPricing(
       items: items,

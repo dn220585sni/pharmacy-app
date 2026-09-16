@@ -1358,6 +1358,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _toggleMessages();
         return true;
       }
+      // ── Ctrl+S: toggle social projects panel (плитка так і підписана) ──
+      if (event.logicalKey == LogicalKeyboardKey.keyS) {
+        _toggleSocialProjects();
+        return true;
+      }
       return false; // other Ctrl combos — pass through
     }
 

@@ -1605,8 +1605,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       // ⚠️ Caché шукає лише в УКРАЇНСЬКІЙ назві (nameukr): 11.09 «нимесил»
       // → 0, «німесил» → 5. Російське написання рятує лише словник
       // (DrugNameIndex) у `_searchByNameOnServer`.
+      // Пауза 500 мс (було 300; Микола 21.09): проміжні набори («пра» →
+      // «параце») на сервері не скасовуються і накладаються на наступний запит —
+      // кожен зайвий виклик = ще 2 повні перебори довідника. Див. «ПОШУК-ЧАС».
       _nameSearchTimer = Timer(
-        const Duration(milliseconds: 300),
+        const Duration(milliseconds: 500),
         () => _searchByNameOnServer(query),
       );
     }

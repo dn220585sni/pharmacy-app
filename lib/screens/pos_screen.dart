@@ -1756,11 +1756,29 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// - SearchByNameSKU: s-коди з цінами, терміном, comingPrice (лише в наявності)
   /// - SearchByName: u-коди, включно з нульовим залишком
   Future<({List<DrugSearchItem> sku, List<DrugSearchItem> u})>
-      _fetchNameSearch(String query) async {
+      _fetchNameSearch(String query, {List<String>? timing}) async {
+    // ДІАГНОСТИКА 21.09 (Микола: «пошук став довшим?»): час КОЖНОГО виклику
+    // окремо — вони паралельні, тож спроба триває як повільніший із двох.
+    Future<List<DrugSearchItem>> timed(
+        String label, Future<List<DrugSearchItem>> Function() call) async {
+      final sw = Stopwatch()..start();
+      final rows = await call();
+      timing?.add('$label ${sw.elapsedMilliseconds} мс/${rows.length}');
+      return rows;
+    }
+
+    final before = timing?.length ?? 0;
     final r = await Future.wait([
-      DrugService.searchByName(query),
-      DrugService.searchByNameUcodes(query),
+      timed('SKU', () => DrugService.searchByName(query)),
+      timed('U', () => DrugService.searchByNameUcodes(query)),
     ]);
+    if (timing != null && timing.length - before == 2) {
+      // Два записи спроби → один: «німесил» SKU 412 мс/4, U 388 мс/1.
+      final pair = timing.sublist(before)..sort();
+      timing
+        ..removeRange(before, timing.length)
+        ..add('«$query» ${pair.join(', ')}');
+    }
     return (sku: r[0], u: r[1]);
   }
 
@@ -1797,10 +1815,17 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return t != query && t != (originalQuery ?? query);
     }
 
+    // ДІАГНОСТИКА 21.09: один рядок журналу на кожен серверний пошук —
+    // загальний час, кожна спроба (запит, мс і рядків по SKU/U) та підсумок.
+    final searchSw = Stopwatch()..start();
+    final attempts = <String>[];
+    var outcome = 'перервано (екран закрито)';
+
     try {
-      var found = await _fetchNameSearch(query);
+      var found = await _fetchNameSearch(query, timing: attempts);
       if (!mounted) return;
       if (stale()) {
+        outcome = 'застарів (касир набрав інше)';
         setState(() => _isServerLookup = false);
         return;
       }
@@ -1813,9 +1838,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       if (found.sku.isEmpty && found.u.isEmpty && !ApiConfig.useMock) {
         final fix = DrugNameIndex.instance.fix(query);
         if (fix != null) {
-          found = await _fetchNameSearch(fix.serverQuery);
+          found = await _fetchNameSearch(fix.serverQuery, timing: attempts);
           if (!mounted) return;
           if (stale()) {
+            outcome = 'застарів (касир набрав інше)';
             setState(() => _isServerLookup = false);
             return;
           }
@@ -1839,9 +1865,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         if (found.sku.isEmpty && found.u.isEmpty) {
           final stem = stemForServer(query);
           if (stem != null) {
-            final broad = await _fetchNameSearch(stem);
+            final broad = await _fetchNameSearch(stem, timing: attempts);
             if (!mounted) return;
             if (stale()) {
+              outcome = 'застарів (касир набрав інше)';
               setState(() => _isServerLookup = false);
               return;
             }
@@ -1857,6 +1884,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
       final skuItems = found.sku; // s-codes (in-stock with prices)
       final uItems = found.u;     // u-codes (all, including zero stock)
+      outcome = 'показано ${skuItems.length}+${uItems.length}';
 
       if (skuItems.isEmpty && uItems.isEmpty) {
         // Сервер порожній — не лишати в таблиці рядки від ПОПЕРЕДНЬОГО
@@ -2011,9 +2039,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _fetchCacheAnalogues(_selectedDrug!);
         if (_selectedDrug!.isOutOfStock) _fetchNearbyPharmacies(_selectedDrug!);
       }
-    } catch (_) {
+    } catch (e) {
+      outcome = 'помилка: $e';
       if (!mounted) return;
       setState(() => _isServerLookup = false);
+    } finally {
+      // Час — до кінця побудови таблиці (сам кадр сюди не входить).
+      FiscalLog.log('ПОШУК-ЧАС «$query»: ${searchSw.elapsedMilliseconds} мс, '
+          'спроб ${attempts.length}: ${attempts.join(' | ')} → $outcome');
     }
   }
 

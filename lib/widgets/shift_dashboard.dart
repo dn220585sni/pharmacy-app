@@ -10,15 +10,6 @@ import 'kpi_block.dart';
 class _ShiftData {
   // Товарообіг / ВТМ / Частка ЗФ — у KpiBlock (kpi_block.dart, KpiMockData).
 
-  // set to null to hide the alert
-  static const _AlertData alert = _AlertData(
-    type: _AlertType.warning,
-    title: 'Показник Лайк нижче 70%',
-    body:
-        'Запитуйте номер телефону у кожного клієнта — це нараховані бонуси і '
-        'шанс повернути його до вас. Кожен чек з номером покращує ваш показник.',
-  );
-
   static const List<_MetricRow> allMetrics = [
     _MetricRow('Чеків за зміну', '18', _RowStatus.neutral),
     _MetricRow('Середній чек', '177,78', _RowStatus.neutral),
@@ -29,16 +20,7 @@ class _ShiftData {
   ];
 }
 
-enum _AlertType { warning, tip, success }
-
 enum _RowStatus { neutral, good, warning, bad }
-
-class _AlertData {
-  final _AlertType type;
-  final String title;
-  final String body;
-  const _AlertData({required this.type, required this.title, required this.body});
-}
 
 class _MetricRow {
   final String label;
@@ -132,13 +114,7 @@ class _ShiftDashboardState extends State<ShiftDashboard>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Alert appears only after the first payment has been made
-          if (widget.earnedAmount > 0) ...[
-            _buildSectionLabel('Зверніть увагу', Icons.info_outline_rounded),
-            const SizedBox(height: 10),
-            _buildAlert(_ShiftData.alert),
-            const SizedBox(height: 16),
-          ],
+          // Блок «Зверніть увагу» прибрано 17.09 — сервісу підказок ще немає.
           _buildSectionLabel('Показники за зміну', Icons.bar_chart_rounded),
           const SizedBox(height: 14),
 
@@ -262,82 +238,6 @@ class _ShiftDashboardState extends State<ShiftDashboard>
           ),
         ),
       ],
-    );
-  }
-
-  // ── Alert card ──────────────────────────────────────────────────────────────
-
-  Widget _buildAlert(_AlertData alert) {
-    final (bgColor, accentColor, icon) = switch (alert.type) {
-      _AlertType.tip => (
-          const Color(0xFFEFF6FF),
-          const Color(0xFF1E7DC8),
-          Icons.lightbulb_outline_rounded,
-        ),
-      _AlertType.success => (
-          const Color(0xFFF0FDF4),
-          const Color(0xFF22C55E),
-          Icons.check_circle_outline_rounded,
-        ),
-      _AlertType.warning => (
-          const Color(0xFFFFFBEB),
-          const Color(0xFFF59E0B),
-          Icons.warning_amber_rounded,
-        ),
-    };
-
-    return Container(
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: accentColor.withValues(alpha: 0.25)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Left accent strip
-            Container(width: 4, color: accentColor),
-            // Content
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(11, 10, 12, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(icon, size: 14, color: accentColor),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: Text(
-                            alert.title,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: accentColor,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      alert.body,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF374151),
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 

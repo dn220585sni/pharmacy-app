@@ -2799,116 +2799,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
             ],
           ),
 
-          // ── Intake warnings from external service ───────────────────────
-          ..._buildIntakeWarnings(),
+          // Блок «Особливості прийому» після оплати прибрано 17.09 —
+          // сервісу ще немає. Банер у картці товару лишається.
         ],
       ),
     );
-  }
-
-  // ── Intake warnings ──────────────────────────────────────────────────────
-
-  List<Widget> _buildIntakeWarnings() {
-    final warnings = widget.cart
-        .where((item) => item.drug.intakeWarning != null)
-        .toList();
-    if (warnings.isEmpty) return [];
-    return [
-      const SizedBox(height: 10),
-      Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFFFBEB),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: const Color(0xFFF59E0B).withValues(alpha: 0.3),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Row(
-              children: [
-                Icon(Icons.info_outline_rounded,
-                    size: 14, color: Color(0xFFF59E0B)),
-                SizedBox(width: 5),
-                Text(
-                  'Особливості прийому',
-                  style: TextStyle(
-                    color: Color(0xFF92400E),
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ...warnings.map((item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Drug image / placeholder
-                      Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: const Color(0xFFF59E0B).withValues(alpha: 0.3),
-                          ),
-                        ),
-                        child: item.drug.imageUrl != null
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(5),
-                                child: Image.network(
-                                  item.drug.imageUrl!,
-                                  fit: BoxFit.cover,
-                                  cacheWidth: 64,
-                                  errorBuilder: (context, error, stack) =>
-                                      const Icon(Icons.medication_rounded,
-                                          size: 16,
-                                          color: Color(0xFFF59E0B)),
-                                ),
-                              )
-                            : const Icon(Icons.medication_rounded,
-                                size: 16, color: Color(0xFFF59E0B)),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.drug.uiName,
-                              style: const TextStyle(
-                                color: Color(0xFF92400E),
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 1),
-                            Text(
-                              item.drug.intakeWarning!,
-                              style: const TextStyle(
-                                color: Color(0xFFB45309),
-                                fontSize: 11,
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                )),
-          ],
-        ),
-      ),
-    ];
   }
 
   // ── Cash withdrawal section (card payment) ────────────────────────────────

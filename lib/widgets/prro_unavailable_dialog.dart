@@ -13,20 +13,34 @@ import '../models/money.dart';
 ///
 /// Вікно модальне і закривається лише кнопкою: фармацевт має ПРОЧИТАТИ, що
 /// чека немає, а не пропустити це між двома кліками.
+///
+/// [checkUnknown] — ПРРО не відповів, і звірити зміну (X-звіт) теж не
+/// вдалося: чек МІГ зареєструватись. Тоді проводити резерв вручну не можна,
+/// поки каса не дозвірить його на старті (журнал відновлення).
 Future<void> showPrroUnavailableDialog(
   BuildContext context, {
   required String numNakl,
   String? error,
+  bool checkUnknown = false,
 }) {
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (ctx) => AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      icon: const Icon(Icons.receipt_long_outlined,
-          color: Color(0xFFDC2626), size: 36),
-      title: const Text('Чек НЕ пробито — ПРРО недоступний',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+      icon: Icon(
+          checkUnknown
+              ? Icons.help_outline_rounded
+              : Icons.receipt_long_outlined,
+          color: checkUnknown
+              ? const Color(0xFFB45309)
+              : const Color(0xFFDC2626),
+          size: 36),
+      title: Text(
+          checkUnknown
+              ? 'ПРРО не відповів — чек, можливо, пробито'
+              : 'Чек НЕ пробито — ПРРО недоступний',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
       content: Text.rich(
         TextSpan(
           style: const TextStyle(fontSize: 13.5, height: 1.45),
@@ -35,12 +49,22 @@ Future<void> showPrroUnavailableDialog(
             TextSpan(
                 text: '№$numNakl',
                 style: const TextStyle(fontWeight: FontWeight.w700)),
-            const TextSpan(
-              text: ' збережено як резерв, фіскального чека немає.\n\n'
-                  'Коли ПРРО запрацює, знайдіть цю накладну у '
-                  '«Витратах по касі» (Ctrl+E) і проведіть її звідти.\n'
-                  'Каса сама нічого не пробиватиме.',
-            ),
+            if (checkUnknown)
+              const TextSpan(
+                text: ' збережено як резерв. ПРРО не підтвердив чек, а '
+                    'перевірити зміну не вдалося — чек МІГ зареєструватись.\n\n'
+                    'НЕ проводьте цю накладну вручну: каса дозвірить її з '
+                    'ПРРО при наступному запуску і відмітить чек сама. '
+                    'Якщо сумніваєтесь — перевірте зміну в кабінеті ПРРО '
+                    'або викличте адміністратора.',
+              )
+            else
+              const TextSpan(
+                text: ' збережено як резерв, фіскального чека немає.\n\n'
+                    'Коли ПРРО запрацює, знайдіть цю накладну у '
+                    '«Витратах по касі» (Ctrl+E) і проведіть її звідти.\n'
+                    'Каса сама нічого не пробиватиме.',
+              ),
             if (error != null && error.isNotEmpty)
               TextSpan(
                 text: '\n\n$error',

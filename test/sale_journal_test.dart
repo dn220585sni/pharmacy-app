@@ -159,12 +159,33 @@ void main() {
 
     test('журнал тримає кілька продажів окремо', () async {
       SaleJournal.resetForTest([
-        rec(numNakl: '2900661785'),
+        rec(numNakl: '2900661785', stage: SaleStage.fixed),
         rec(numNakl: '2900661786', stage: SaleStage.fiscalized),
       ]);
       await SaleJournal.finish('2900661785');
       expect(SaleJournal.count, 1);
       expect(SaleJournal.pending.single.numNakl, '2900661786');
+    });
+
+    // Код-рев'ю 22.09, п.3: PutKasa не пройшов → markFixed пропущено, але
+    // finish викликали. Раніше запис зникав, і recover() не мав що добивати.
+    test('finish ДО стадії fixed ігнорується — чек є, а каса не відмічена',
+        () async {
+      SaleJournal.resetForTest(
+          [rec(stage: SaleStage.fiscalized, orderNum: 'lubcs0eFvXU')]);
+      await SaleJournal.finish('2900661785');
+      expect(SaleJournal.count, 1);
+      expect(SaleJournal.pending.single.stage, SaleStage.fiscalized);
+
+      // Те саме для started/paid — гроші могли бути взяті.
+      SaleJournal.resetForTest([rec(stage: SaleStage.paid)]);
+      await SaleJournal.finish('2900661785');
+      expect(SaleJournal.count, 1);
+
+      // А після markFixed — закривається.
+      await SaleJournal.markFixed('2900661785');
+      await SaleJournal.finish('2900661785');
+      expect(SaleJournal.count, 0);
     });
   });
 

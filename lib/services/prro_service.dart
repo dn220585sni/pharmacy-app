@@ -202,6 +202,12 @@ class PrroResult {
   /// X-звіт віддає лише номер, час і суму.
   final bool recovered;
 
+  /// Лише для `connection`-помилки: ПРРО не відповів І звірити зміну
+  /// (X-звіт) не вдалося — чек МІГ зареєструватись. Викликач не має
+  /// стверджувати «чека немає» (не стирати запис журналу, не пропонувати
+  /// проводити резерв вручну).
+  final bool checkUnknown;
+
   const PrroResult({
     required this.success,
     this.checkId,
@@ -218,11 +224,13 @@ class PrroResult {
     this.error,
     this.errorKind,
     this.recovered = false,
+    this.checkUnknown = false,
   });
 
   const PrroResult.failure({
     required String this.error,
     required PrroErrorKind this.errorKind,
+    this.checkUnknown = false,
   })  : success = false,
         checkId = null,
         orderNum = null,
@@ -236,6 +244,38 @@ class PrroResult {
         isOffline = false,
         cashInBox = null,
         recovered = false;
+
+  /// Та сама помилка з позначкою «чек міг бути зареєстрований».
+  PrroResult withCheckUnknown() => PrroResult.failure(
+        error: error ?? 'невідома помилка',
+        errorKind: errorKind ?? PrroErrorKind.connection,
+        checkUnknown: true,
+      );
+}
+
+/// Результат звірки чека за `local_number` у зміні ([PrroService.findRegisteredCheck]).
+class CheckLookup {
+  const CheckLookup.found(PrroShiftCheck this.check)
+      : unknown = false,
+        reason = null;
+
+  /// X-звіт відповів, нашого чека в зміні немає.
+  const CheckLookup.absent()
+      : check = null,
+        unknown = false,
+        reason = null;
+
+  /// Звірку виконати не вдалося ([reason]) — нічого не стверджуємо.
+  const CheckLookup.unknown(String this.reason)
+      : check = null,
+        unknown = true;
+
+  final PrroShiftCheck? check;
+  final bool unknown;
+  final String? reason;
+
+  bool get found => check != null;
+  bool get absent => check == null && !unknown;
 }
 
 /// Товар для фіскального чеку.
@@ -1271,19 +1311,25 @@ class PrroService {
   /// того, як ми відвалились. Перед будь-якою повторною відправкою звіряємо
   /// `checks_list` X-звіту за нашим `local_number` (= NumNakl накладної).
   ///
-  /// `null` = «не знайдено АБО не змогли перевірити» — свідомо не розрізняємо:
-  /// обидва випадки ведуть до звичайного шляху (черга / повтор). Знайдений чек
-  /// означає, що повтор робити НЕ можна.
+  /// Три відповіді (код-рев'ю 22.09, п.4 — раніше «не знайдено» і «не змогли
+  /// перевірити» зливались у `null`, і checkout стирав запис журналу навіть
+  /// коли чек міг бути зареєстрований):
+  /// - [CheckLookup.found] — чек є, повтор робити НЕ можна;
+  /// - [CheckLookup.absent] — X-звіт відповів, нашого local_number у зміні
+  ///   немає: чека точно не було;
+  /// - [CheckLookup.unknown] — X-звіт недоступний або без local_number:
+  ///   нічого не стверджуємо, запис журналу має лишитись на дозвірку.
   ///
   /// [attempts] > 1 має сенс одразу після таймауту: чек міг ще дореєстровуватись.
   /// ⚠️ Бачить лише поточну зміну: якщо між обривом і перевіркою пройшов Z-звіт,
   /// чек уже не в списку.
-  static Future<PrroShiftCheck?> findRegisteredCheck({
+  static Future<CheckLookup> findRegisteredCheck({
     required int localNumber,
     bool isReturn = false,
     int attempts = 2,
     Duration retryDelay = const Duration(seconds: 3),
   }) async {
+    var answered = false;
     for (var i = 0; i < attempts; i++) {
       if (i > 0) await Future.delayed(retryDelay);
       final report = await xReport(
@@ -1295,7 +1341,7 @@ class PrroService {
 
       final hit = matchCheck(report.checks,
           localNumber: localNumber, isReturn: isReturn);
-      if (hit != null) return hit;
+      if (hit != null) return CheckLookup.found(hit);
 
       // Каса взагалі не віддає local_number → звірка неможлива в принципі,
       // повторний запит нічого не змінить. Сигнал у лог, щоб побачити це на
@@ -1305,10 +1351,13 @@ class PrroService {
         FiscalLog.log('⚠️ A1: xReport не віддає local_number '
             '(${report.checks.length} чеків у зміні) — перевірка дублікатів '
             'НЕМОЖЛИВА, чек піде звичайним шляхом');
-        return null;
+        return const CheckLookup.unknown('X-звіт без local_number');
       }
+      answered = true;
     }
-    return null;
+    return answered
+        ? const CheckLookup.absent()
+        : CheckLookup.unknown(lastXReportFailure ?? 'X-звіт недоступний');
   }
 
   /// Обробити обрив зв'язку: спершу перевірити, чи чек усе-таки зареєстровано.
@@ -1322,11 +1371,19 @@ class PrroService {
     required PrroResult failure,
   }) async {
     if (localNumber == null) return failure;
-    final hit = await findRegisteredCheck(
+    final lookup = await findRegisteredCheck(
       localNumber: localNumber,
       isReturn: isReturn,
     );
-    if (hit == null) return failure;
+    final hit = lookup.check;
+    if (hit == null) {
+      if (lookup.unknown) {
+        FiscalLog.log('A1: чек local_number=$localNumber — звірку НЕ виконано '
+            '(${lookup.reason ?? "невідомо"}); чек міг бути зареєстрований');
+        return failure.withCheckUnknown();
+      }
+      return failure;
+    }
 
     FiscalLog.log('A1 ДУБЛЬ ВІДСІЧЕНО: чек local_number=$localNumber уже '
         'зареєстрований (№${hit.orderNum}, ${hit.datetime ?? "час невідомий"}, '

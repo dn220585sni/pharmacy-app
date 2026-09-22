@@ -1380,13 +1380,24 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       // PutKasa — фіксація чека ПРРО в касі/накладній для БУДЬ-ЯКОГО чека
       // (готівка/картка, Лайк/не-Лайк). Без цього чек проходить по ПРРО, але
       // НЕ відмічається пробитим по касі (Задача 31, пост-фіскалізація A3).
-      if (await SessionService.putKasa(numNakl, fiscN, '0', urlN)) {
+      final kasaFixed = await SessionService.putKasa(numNakl, fiscN, '0', urlN);
+      if (kasaFixed) {
         await SaleJournal.markFixed(numNakl);
+      } else {
+        // Чек у ПРРО є, а в касі не відмічений. Запис журналу лишається на
+        // стадії fiscalized — recover() добʼє PutKasa на наступному старті
+        // (код-рев'ю 22.09, п.3: раніше finish() нижче його стирав).
+        FiscalLog.log('⚠️ PutKasa НЕ пройшов (nakl=$numNakl, чек №$fiscN) — '
+            'запис лишається в журналі на відновлення');
+        await SaleJournal.markNote(numNakl, 'PutKasa не пройшов після чека');
+        _snack('Чек №$fiscN пробито, але не відмічено в касі. Каса добʼє '
+            'відмітку при наступному запуску.');
       }
       // ── ЛАЙК: завершення ланцюга (лише коли order pending пройшов) ──
       // orderModify(+лінк ФН) → orderStatusChange(D) → PutKasaSPL(1).
+      var loyaltyTailOk = true;
       if (sparta != null && orderNo != null) {
-        await sparta.orderModify(
+        final modRes = await sparta.orderModify(
           no: numNakl,
           orderNo: orderNo,
           date: orderDate,
@@ -1400,15 +1411,27 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
           discountGross: splDiscountGross,
           paidByPoints: splPaidByPoints,
         );
-        await sparta.orderStatusChange(
+        final statRes = await sparta.orderStatusChange(
             orderNo: orderNo, date: orderDate, status: 'D');
         final splFixed =
             prId != null && await SessionService.putKasaSPL(numNakl, '1', prId);
-        FiscalLog.log('SPL завершено: orderModify + D, '
-            'PutKasaSPL(1)=${prId == null ? "пропущено (prId null)" : splFixed}');
+        loyaltyTailOk = modRes.ok && statRes.ok && (prId == null || splFixed);
+        FiscalLog.log('SPL завершено: orderModify=${modRes.ok} D=${statRes.ok}, '
+            'PutKasaSPL(1)=${prId == null ? "пропущено (prId null)" : splFixed}'
+            '${loyaltyTailOk ? "" : " ⚠️ хвіст Лайка не пройшов"}');
+        if (!loyaltyTailOk) {
+          await SaleJournal.markNote(numNakl,
+              'хвіст Лайка: orderModify=${modRes.ok} D=${statRes.ok} '
+              'PutKasaSPL=${prId == null ? "-" : splFixed}');
+        }
       }
-      // Продаж пройшов усі стадії — знімаємо з журналу незавершених.
-      await SaleJournal.finish(numNakl);
+      // Продаж пройшов усі стадії — знімаємо з журналу незавершених. Якщо
+      // PutKasa або хвіст Лайка не пройшли, запис лишається (finish закриває
+      // лише стадію fixed; recover() на старті добʼє касу, а Лайк покаже в
+      // журналі — бонуси наосліп не переграємо).
+      if (kasaFixed && loyaltyTailOk) {
+        await SaleJournal.finish(numNakl);
+      }
       if (resume != null) {
         FiscalLog.log('ПРОДОВЖЕННЯ nakl=$numNakl завершено: чек №$fiscN');
       }
@@ -1460,17 +1483,30 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       // піти, поки ПРРО лежав; так було з 2900664712). Накладна лишається
       // РЕЗЕРВОМ, а рішення пробити/не пробити ухвалює фармацевт вручну у
       // «Витратах по касі» (сервіс Каті). Тому:
-      // - з журналу A3 запис прибираємо: чека точно немає, шукати його в
-      //   зміні на старті нема чого;
+      // - з журналу A3 запис прибираємо, коли чека ТОЧНО немає (X-звіт
+      //   відповів і нашого local_number у зміні нема); якщо звірку виконати
+      //   не вдалося — чек міг зареєструватись, запис лишається, і recover()
+      //   дозвірить його на старті (код-рев'ю 22.09, п.4);
       // - кошик очищаємо (накладна вже існує — повторне «Провести» створило
       //   б дублікат), але замість вікна з чеком — модальне попередження.
-      await SaleJournal.abort(
-          numNakl, 'ПРРО недоступний — накладна лишена резервом');
-      FiscalLog.log('ПРРО недоступний: чек НЕ пробито, накладна $numNakl '
-          'лишена резервом (Витрати по касі); ${result.error}');
+      if (result.checkUnknown) {
+        await SaleJournal.markNote(numNakl,
+            'ПРРО недоступний, звірка X-звіту не вдалась — чек міг бути '
+            'зареєстрований');
+        FiscalLog.log('ПРРО недоступний, звірку НЕ виконано: накладна $numNakl '
+            'лишена резервом, запис журналу лишається на дозвірку; '
+            '${result.error}');
+      } else {
+        await SaleJournal.abort(
+            numNakl, 'ПРРО недоступний — накладна лишена резервом');
+        FiscalLog.log('ПРРО недоступний: чек НЕ пробито, накладна $numNakl '
+            'лишена резервом (Витрати по касі); ${result.error}');
+      }
       if (mounted) {
         await showPrroUnavailableDialog(context,
-            numNakl: numNakl, error: result.error);
+            numNakl: numNakl,
+            error: result.error,
+            checkUnknown: result.checkUnknown);
       }
       return mounted;
     }

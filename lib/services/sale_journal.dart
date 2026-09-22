@@ -205,8 +205,18 @@ class SaleJournal {
   }
 
   /// Продаж завершено повністю — прибрати з журналу.
+  ///
+  /// Закриває лише запис на стадії [SaleStage.fixed] (PutKasa підтверджено).
+  /// Інакше запис лишається: чек у ПРРО є, а в Caché не відмічений — саме
+  /// цей хвіст журнал і має добити на старті (код-рев'ю 22.09, п.3).
   static Future<void> finish(String numNakl) async {
-    if (_items.isEmpty) return;
+    final r = _find(numNakl);
+    if (r == null) return;
+    if (r.stage != SaleStage.fixed) {
+      FiscalLog.log('A3 ⚠️ finish на стадії ${r.stage.name} проігноровано '
+          '(${r.label}) — запис лишається на відновлення');
+      return;
+    }
     _items.removeWhere((e) => e.numNakl == numNakl);
     await _persist();
   }
@@ -265,23 +275,28 @@ class SaleJournal {
         // добиваємо PutKasa. Не знайшли → НЕ стверджуємо «продажу не було»
         // (ПРРО міг бути недоступний або зміна вже закрита) — лишаємо запис
         // людині.
-        final check = await PrroService.findRegisteredCheck(
+        final lookup = await PrroService.findRegisteredCheck(
           localNumber: r.localNumber,
           attempts: 1,
         );
+        final check = lookup.check;
         if (check == null) {
-          if (r.stage == SaleStage.paid) {
+          final tail = '(спроб: ${r.recoverAttempts}'
+              '${r.note != null ? ", ${r.note}" : ""})';
+          if (lookup.unknown) {
+            // Звірка не вдалась (ПРРО недоступний / X-звіт без local_number)
+            // — нічого не стверджуємо, спробуємо на наступному старті.
+            FiscalLog.log('A3 ${r.numNakl}: звірку з ПРРО не виконано '
+                '(${lookup.reason ?? "невідомо"}) — чек міг бути '
+                'зареєстрований. Запис лишається $tail.');
+          } else if (r.stage == SaleStage.paid) {
             FiscalLog.log('A3 ⚠️ ${r.numNakl}: КАРТКУ СПИСАНО (rrn=${r.rrn}, '
                 'auth=${r.authCode}, сума ${r.total}), а чека в зміні НЕМАЄ. '
                 'Потрібне ручне врегулювання: провести накладну через '
-                '«Витрати по касі» АБО повернути кошти на терміналі '
-                '(спроб: ${r.recoverAttempts}'
-                '${r.note != null ? ", ${r.note}" : ""}).');
+                '«Витрати по касі» АБО повернути кошти на терміналі $tail.');
           } else {
             FiscalLog.log('A3 ${r.numNakl}: чека в зміні НЕМАЄ — продаж, схоже, '
-                'обірвався до фіскалізації. Запис лишено на розгляд '
-                '(спроб: ${r.recoverAttempts}'
-                '${r.note != null ? ", ${r.note}" : ""}). '
+                'обірвався до фіскалізації. Запис лишено на розгляд $tail. '
                 'Перевірте накладну в Caché.');
           }
           return false;

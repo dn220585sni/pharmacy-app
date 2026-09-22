@@ -246,5 +246,31 @@ void main() {
       expect(r.recovered, isFalse);
       expect(r.success, isFalse);
     });
+
+    // Код-рев'ю 22.09, п.4: «не знайдено» ≠ «не змогли перевірити».
+    test('withCheckUnknown зберігає помилку і ставить прапорець', () {
+      const base = PrroResult.failure(
+        error: 'Таймаут',
+        errorKind: PrroErrorKind.connection,
+      );
+      expect(base.checkUnknown, isFalse);
+      final u = base.withCheckUnknown();
+      expect(u.checkUnknown, isTrue);
+      expect(u.success, isFalse);
+      expect(u.error, 'Таймаут');
+      expect(u.errorKind, PrroErrorKind.connection);
+    });
+
+    test('CheckLookup: found / absent / unknown взаємовиключні', () {
+      const absent = CheckLookup.absent();
+      expect(absent.found, isFalse);
+      expect(absent.absent, isTrue);
+      expect(absent.unknown, isFalse);
+      const unk = CheckLookup.unknown('X-звіт недоступний');
+      expect(unk.found, isFalse);
+      expect(unk.absent, isFalse);
+      expect(unk.unknown, isTrue);
+      expect(unk.reason, 'X-звіт недоступний');
+    });
   });
 }

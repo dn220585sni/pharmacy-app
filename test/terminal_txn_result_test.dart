@@ -117,5 +117,85 @@ void main() {
       expect(r.approved, isFalse);
       expect(r.errorKind, EcrErrorKind.timeout);
     });
+
+    test('невідомий результат (запит пішов, відповіді нема) — не відмова', () {
+      final r = TerminalTxnResult.localError(
+          EcrErrorKind.unknown, 'термінал не відповів');
+      expect(r.approved, isFalse);
+      expect(r.resultUnknown, isTrue);
+    });
+  });
+
+  // Звірка після невідомого результату: GetReceiptInfo віддає останній чек
+  // терміналу; наш — лише схвалена Purchase на ту саму суму й не старіша за
+  // момент надсилання.
+  group('isPurchaseOf (звірка через GetReceiptInfo)', () {
+    TerminalTxnResult receipt({
+      String amount = '0.60',
+      String rc = '0000',
+      String txnType = '1',
+      String date = '02.10.2019',
+      String time = '09:11:07',
+    }) =>
+        TerminalTxnResult.fromResponse({
+          'method': 'GetReceiptInfo',
+          'params': {
+            'amount': amount,
+            'responseCode': rc,
+            'txnType': txnType,
+            'date': date,
+            'time': time,
+            'rrn': '1',
+          },
+          'error': false,
+        });
+    final sent = DateTime(2019, 10, 2, 9, 10, 30);
+
+    test('dateTime з date+time терміналу', () {
+      expect(receipt().dateTime, DateTime(2019, 10, 2, 9, 11, 7));
+      expect(receipt(date: '', time: '').dateTime, isNull);
+    });
+
+    test('наш чек: сума збігається, час після надсилання', () {
+      expect(receipt().isPurchaseOf(Money.fromHryvnia(0.60), notBefore: sent),
+          isTrue);
+    });
+
+    test('сума з комою теж читається', () {
+      expect(
+          receipt(amount: '0,60')
+              .isPurchaseOf(Money.fromHryvnia(0.60), notBefore: sent),
+          isTrue);
+    });
+
+    test('інша сума — чужий чек', () {
+      expect(receipt().isPurchaseOf(Money.fromHryvnia(199.99), notBefore: sent),
+          isFalse);
+    });
+
+    test('чек старіший за надсилання (понад 5 хв) — не наш', () {
+      expect(
+          receipt(time: '08:50:00')
+              .isPurchaseOf(Money.fromHryvnia(0.60), notBefore: sent),
+          isFalse);
+    });
+
+    test('розбіжність годинників до 5 хв — ще наш', () {
+      expect(
+          receipt(time: '09:07:00')
+              .isPurchaseOf(Money.fromHryvnia(0.60), notBefore: sent),
+          isTrue);
+    });
+
+    test('Refund або відхилена — не оплата', () {
+      expect(
+          receipt(txnType: '2')
+              .isPurchaseOf(Money.fromHryvnia(0.60), notBefore: sent),
+          isFalse);
+      expect(
+          receipt(rc: '0005')
+              .isPurchaseOf(Money.fromHryvnia(0.60), notBefore: sent),
+          isFalse);
+    });
   });
 }

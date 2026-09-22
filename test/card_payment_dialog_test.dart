@@ -71,4 +71,46 @@ void main() {
 
     await tester.pumpAndSettle();
   });
+
+  // Невідомий результат (таймаут після Purchase) — НЕ відмова: звичайних
+  // кнопок «Повторити/готівка» немає, а новий платіж лише після того, як
+  // касир підтвердить, що перевірив термінал.
+  testWidgets('демо-невідомо: новий платіж лише через підтвердження',
+      (tester) async {
+    // Три кнопки + пояснення не вміщаються у типовий 800×600 тест-екран.
+    tester.view.physicalSize = const Size(1000, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpDialog(tester, 'unknown');
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.pump(const Duration(milliseconds: 1200));
+    expect(find.text('Перевіряю результат на терміналі…'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 1000));
+    expect(find.text('РЕЗУЛЬТАТ ОПЛАТИ НЕВІДОМИЙ'), findsOneWidget);
+    expect(find.text('Повторити спробу оплати карткою'), findsNothing);
+    expect(find.text('Відміна БГ / оплата готівкою'), findsNothing);
+    expect(find.text('Оплати не було — повторити карткою'), findsOneWidget);
+    expect(find.text('Оплати не було — оплата готівкою'), findsOneWidget);
+
+    // Кнопка готівки НЕ закриває вікно сама — спершу підтвердження.
+    await tester.tap(find.text('Оплати не було — оплата готівкою'));
+    await tester.pumpAndSettle();
+    expect(find.text('Перевірте термінал'), findsOneWidget);
+    expect(find.text('Оплата банк.карткою'), findsOneWidget);
+
+    // «Назад» — лишаємось у вікні з невідомим результатом.
+    await tester.tap(find.text('Назад'));
+    await tester.pumpAndSettle();
+    expect(find.text('РЕЗУЛЬТАТ ОПЛАТИ НЕВІДОМИЙ'), findsOneWidget);
+
+    // Підтвердили — вікно закривається як «готівка» (null).
+    await tester.tap(find.text('Оплати не було — оплата готівкою'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Так, оплати не було'));
+    await tester.pumpAndSettle();
+    expect(find.text('Оплата банк.карткою'), findsNothing);
+  });
 }

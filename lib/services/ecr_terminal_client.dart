@@ -187,6 +187,73 @@ class EcrTerminalClient {
     return res;
   }
 
+  /// Дані чека терміналу за номером (`GetReceiptInfo`); порожній
+  /// [invoiceNumber] — ОСТАННІЙ чек. Поля відповіді ті самі, що в Purchase
+  /// (amount/rrn/approvalCode/date/time/txnType…), тому результат можна віддати
+  /// далі як результат оплати. Використовується для звірки після невідомого
+  /// результату Purchase (таймаут/розрив після надсилання).
+  Future<TerminalTxnResult> getReceiptInfo({String invoiceNumber = ''}) async {
+    FiscalLog.log('ECR GetReceiptInfo → invoice="${invoiceNumber.isEmpty ? "останній" : invoiceNumber}"');
+    final res = await _command(
+      responseMethod: 'GetReceiptInfo',
+      request: {
+        'method': 'GetReceiptInfo',
+        'step': 0,
+        'params': {'invoiceNumber': invoiceNumber},
+      },
+    );
+    FiscalLog.log('ECR GetReceiptInfo ← kind=${res.errorKind.name} '
+        'rc=${res.responseCode} txnType=${res.txnType} amount=${res.amount} '
+        '${res.date} ${res.time} rrn=${res.rrn}'
+        '${res.errorDescription.isNotEmpty ? ' err=${res.errorDescription}' : ''}');
+    return res;
+  }
+
+  /// Звірити, чи Purchase на [amount], надіслана о [sentAt], усе-таки пройшла
+  /// (після [EcrErrorKind.unknown]). За потреби перепідключається.
+  ///
+  /// Повертає:
+  /// - approved-результат — оплата БУЛА (останній чек терміналу — наш);
+  /// - результат з `errorKind == none`, але не approved — оплати НЕ було
+  ///   (останній чек терміналу чужий/старий або його немає);
+  /// - `errorKind != none` — звірка не вдалась, результат і далі невідомий.
+  Future<TerminalTxnResult> verifyPurchase(Money amount,
+      {required DateTime sentAt}) async {
+    if (!isConnected) {
+      final ok = await connect();
+      if (!ok) {
+        return TerminalTxnResult.localError(
+            EcrErrorKind.socket, 'немає звʼязку для звірки',
+            method: 'GetReceiptInfo');
+      }
+    }
+    final info = await getReceiptInfo();
+    if (info.errorKind != EcrErrorKind.none) return info;
+    if (info.terminalError) {
+      // «Cannot get receipt» — чеків у пакеті немає → нашої оплати теж.
+      // Але це може бути і збій самого запиту → лишаємо «невідомо».
+      return TerminalTxnResult.localError(
+          EcrErrorKind.unknown, 'GetReceiptInfo: ${info.errorDescription}',
+          method: 'GetReceiptInfo');
+    }
+    if (info.isPurchaseOf(amount, notBefore: sentAt)) {
+      FiscalLog.log('ECR ЗВІРКА: оплата ${_grn(amount)} ЗНАЙДЕНА в терміналі '
+          '(rrn=${info.rrn} ${info.date} ${info.time}) — відповідь Purchase '
+          'загубилась, повторно НЕ списуємо');
+      return info;
+    }
+    FiscalLog.log('ECR ЗВІРКА: останній чек терміналу '
+        '(${info.amount} ${info.date} ${info.time} txnType=${info.txnType} '
+        'rc=${info.responseCode}) — не наша оплата ${_grn(amount)}; '
+        'оплати НЕ було');
+    return TerminalTxnResult(
+      method: 'Purchase',
+      responseCode: info.responseCode.isEmpty ? '9999' : info.responseCode,
+      errorDescription: 'оплати не було (останній чек терміналу — '
+          '${info.amount} о ${info.time})',
+    );
+  }
+
   /// Перевірка зв'язку з терміналом (`PingDevice`).
   Future<bool> ping() async {
     final res = await _command(
@@ -233,8 +300,13 @@ class EcrTerminalClient {
     try {
       return await completer.future.timeout(timeout ?? commandTimeout);
     } on TimeoutException {
+      // Запит уже пішов у термінал — результат НЕВІДОМИЙ, а не «відмова»:
+      // термінал міг списати гроші, а відповідь загубилась.
+      FiscalLog.log('ECR $responseMethod: немає відповіді за '
+          '${(timeout ?? commandTimeout).inSeconds} с — результат невідомий');
       return TerminalTxnResult.localError(
-          EcrErrorKind.timeout, 'термінал не відповів', method: responseMethod);
+          EcrErrorKind.unknown, 'термінал не відповів',
+          method: responseMethod);
     } finally {
       _pending = null;
     }
@@ -282,6 +354,13 @@ class EcrTerminalClient {
     final p = _pending;
     if (p != null && !p.completer.isCompleted && method == p.responseMethod) {
       p.completer.complete(TerminalTxnResult.fromResponse(msg));
+    } else if (method == 'Purchase' || method == 'Refund') {
+      // Фінальна відповідь прийшла ПІСЛЯ таймауту — ніхто її вже не чекає.
+      // Саме для цього випадку є звірка GetReceiptInfo; тут лише слід у лозі.
+      final lateRes = TerminalTxnResult.fromResponse(msg);
+      FiscalLog.log('ECR ⚠️ ПІЗНЯ відповідь $method: '
+          'approved=${lateRes.approved} rc=${lateRes.responseCode} '
+          'amount=${lateRes.amount} rrn=${lateRes.rrn}');
     } else {
       // Проміжний статус (deviceBusy / ServiceMessage / інший method) —
       // логуємо і віддаємо в UI (напр. «ОЧІКУЮ КАРТКУ»).
@@ -298,13 +377,15 @@ class EcrTerminalClient {
     }
   }
 
+  // Розрив ПІСЛЯ надсилання запиту: команда вже в терміналі, результат
+  // невідомий (як і при таймауті) — не «відмова».
   void _onSocketError(Object e) {
     FiscalLog.log('ECR socket error: $e');
     final p = _pending;
     _pending = null;
     if (p != null && !p.completer.isCompleted) {
       p.completer.complete(TerminalTxnResult.localError(
-          EcrErrorKind.socket, 'помилка сокета: $e',
+          EcrErrorKind.unknown, 'помилка сокета: $e',
           method: p.responseMethod));
     }
     _socket = null;
@@ -316,7 +397,7 @@ class EcrTerminalClient {
     _pending = null;
     if (p != null && !p.completer.isCompleted) {
       p.completer.complete(TerminalTxnResult.localError(
-          EcrErrorKind.socket, 'термінал розірвав зʼєднання',
+          EcrErrorKind.unknown, 'термінал розірвав зʼєднання',
           method: p.responseMethod));
     }
     _socket = null;

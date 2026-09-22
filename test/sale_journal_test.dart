@@ -99,6 +99,45 @@ void main() {
       expect(SaleJournal.count, 0);
     });
 
+    // Стадія `paid` (код-рев'ю 22.09, п.2): картку списано, чека ще немає.
+    // Запис має пережити будь-який abort і зберегти RRN для врегулювання.
+    test('markPaid → стадія paid з RRN; abort її НЕ прибирає', () async {
+      await SaleJournal.start(
+        numNakl: '2900661785',
+        localNumber: 2900661785,
+        total: 93,
+        isCard: true,
+      );
+      await SaleJournal.markPaid('2900661785',
+          rrn: '9999999999999', authCode: '999999');
+      final r = SaleJournal.pending.single;
+      expect(r.stage, SaleStage.paid);
+      expect(r.rrn, '9999999999999');
+      expect(r.authCode, '999999');
+
+      // Далі GetDataRRO/ПРРО впали, а хтось викликав abort — гроші вже в
+      // банку, запис лишається.
+      await SaleJournal.abort('2900661785', 'ПРРО відхилив чек');
+      expect(SaleJournal.count, 1);
+      expect(SaleJournal.pending.single.stage, SaleStage.paid);
+      expect(SaleJournal.find('2900661785')?.rrn, '9999999999999');
+    });
+
+    test('paid → fiscalized → fixed → finish; RRN у round-trip', () async {
+      SaleJournal.resetForTest([rec()]);
+      await SaleJournal.markPaid('2900661785', rrn: 'R1', authCode: 'A1');
+      final back = SaleRecord.fromJson(SaleJournal.pending.single.toJson());
+      expect(back.stage, SaleStage.paid);
+      expect(back.rrn, 'R1');
+      expect(back.authCode, 'A1');
+      expect(back.label, contains('rrn=R1'));
+
+      await SaleJournal.markFiscalized('2900661785', orderNum: 'X');
+      await SaleJournal.markFixed('2900661785');
+      await SaleJournal.finish('2900661785');
+      expect(SaleJournal.count, 0);
+    });
+
     test('abort ПІСЛЯ фіскалізації ігнорується — гроші вже взято', () async {
       // Якби abort спрацював, продаж із реальним чеком зник би з журналу і
       // ніхто б не добив PutKasa.

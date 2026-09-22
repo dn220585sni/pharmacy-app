@@ -4,9 +4,14 @@ import 'money.dart';
 /// НЕ відмова банку, а проблема транспорту/логіки на нашому боці.
 enum EcrErrorKind {
   none, // немає локальної помилки (дивись responseCode/error від терміналу)
-  socket, // не вдалось під'єднатись/розрив зв'язку
-  timeout, // термінал не відповів у відведений час
+  socket, // не вдалось під'єднатись — запит до термінала НЕ дійшов
+  timeout, // термінал не відповів у відведений час (запит ще не надсилався)
   badResponse, // відповідь не розпарсилась
+
+  /// Запит НАДІСЛАНО, а відповіді немає (таймаут або розрив після надсилання).
+  /// Термінал міг виконати операцію — результат НЕВІДОМИЙ. Для Purchase це
+  /// означає: не «відмова», а «звірити через GetReceiptInfo або руками».
+  unknown,
 }
 
 /// Результат транзакції на платіжному терміналі (ECR JSON, ПриватБанк).
@@ -129,6 +134,44 @@ class TerminalTxnResult {
 
   /// Скасовано користувачем на терміналі (responseCode 1001).
   bool get cancelledByUser => responseCode == '1001';
+
+  /// Результат операції невідомий: запит пішов у термінал, відповіді немає.
+  bool get resultUnknown => errorKind == EcrErrorKind.unknown;
+
+  /// `date` + `time` терміналу як момент часу (локальний); `null`, якщо
+  /// не розпарсились.
+  DateTime? get dateTime {
+    final d = date.split('.');
+    final t = time.split(':');
+    if (d.length != 3 || t.length < 2) return null;
+    final day = int.tryParse(d[0]), mon = int.tryParse(d[1]);
+    var year = int.tryParse(d[2]);
+    final hh = int.tryParse(t[0]), mm = int.tryParse(t[1]);
+    final ss = t.length >= 3 ? int.tryParse(t[2]) ?? 0 : 0;
+    if (day == null || mon == null || year == null || hh == null || mm == null) {
+      return null;
+    }
+    if (year < 100) year += 2000;
+    return DateTime(year, mon, day, hh, mm, ss);
+  }
+
+  /// Сума транзакції як [Money]; `null`, якщо не число.
+  Money? get amountMoney => Money.tryParse(amount.replaceAll(',', '.'));
+
+  /// Чи цей чек (з `GetReceiptInfo`) — саме наша оплата: схвалена Purchase на
+  /// [amount], проведена не раніше [notBefore] (момент, коли ми надіслали
+  /// Purchase, з запасом на розбіжність годинників). Використовується після
+  /// невідомого результату, щоб відрізнити «оплата пройшла, відповідь
+  /// загубилась» від «останній чек терміналу — чужий/старий».
+  bool isPurchaseOf(Money amount, {required DateTime notBefore}) {
+    if (!approved) return false;
+    // txnType порожній у старих прошивках — не відкидаємо, лише явний не-Purchase.
+    if (txnType.isNotEmpty && txnType != '1') return false;
+    if (amountMoney != amount) return false;
+    final at = dateTime;
+    if (at == null) return false;
+    return !at.isBefore(notBefore.subtract(const Duration(minutes: 5)));
+  }
 
   // ── Похідні поля для pay_terminal / PutTermData ───────────────────────────
 

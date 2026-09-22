@@ -13,6 +13,11 @@ enum SaleStage {
   /// Накладна створена (є NumNakl), фіскального документа ЩЕ немає.
   started,
 
+  /// Картка списана на терміналі (є RRN), чека ПРРО ЩЕ немає. Гроші вже
+  /// взяті — повторний Purchase за цим продажем ЗАБОРОНЕНО; можна лише
+  /// продовжити фіскалізацію або врегулювати вручну.
+  paid,
+
   /// Чек ПРРО зареєстровано (є фіскальний номер). Гроші вже взяті.
   fiscalized,
 
@@ -35,6 +40,10 @@ class SaleRecord {
   int recoverAttempts;
   String? note;
 
+  /// Картка: RRN і код авторизації списання (стадія [SaleStage.paid] і далі).
+  String? rrn;
+  String? authCode;
+
   SaleRecord({
     required this.numNakl,
     required this.localNumber,
@@ -46,6 +55,8 @@ class SaleRecord {
     this.link,
     this.recoverAttempts = 0,
     this.note,
+    this.rrn,
+    this.authCode,
   });
 
   Map<String, dynamic> toJson() => {
@@ -59,6 +70,8 @@ class SaleRecord {
         'link': link,
         'recover_attempts': recoverAttempts,
         'note': note,
+        'rrn': rrn,
+        'auth_code': authCode,
       };
 
   factory SaleRecord.fromJson(Map<String, dynamic> j) => SaleRecord(
@@ -76,11 +89,14 @@ class SaleRecord {
         link: j['link']?.toString(),
         recoverAttempts: flexInt(j['recover_attempts']) ?? 0,
         note: j['note']?.toString(),
+        rrn: j['rrn']?.toString(),
+        authCode: j['auth_code']?.toString(),
       );
 
   /// Короткий опис для журналу/діагностики.
   String get label => 'nakl=$numNakl сума=$total '
       '${isCard ? "картка" : "готівка"} стадія=${stage.name}'
+      '${rrn != null && rrn!.isNotEmpty ? " rrn=$rrn" : ""}'
       '${orderNum != null ? " чек=$orderNum" : ""}';
 }
 
@@ -142,6 +158,21 @@ class SaleJournal {
     await _persist();
   }
 
+  /// Картка списана на терміналі — гроші взято, чека ще немає. З цієї миті
+  /// `abort` запис не прибирає, а повторна оплата за цим NumNakl заборонена.
+  static Future<void> markPaid(
+    String numNakl, {
+    required String rrn,
+    required String authCode,
+  }) async {
+    final r = _find(numNakl);
+    if (r == null) return;
+    r.stage = SaleStage.paid;
+    r.rrn = rrn;
+    r.authCode = authCode;
+    await _persist();
+  }
+
   /// Чек ПРРО зареєстровано.
   static Future<void> markFiscalized(
     String numNakl, {
@@ -180,12 +211,17 @@ class SaleJournal {
     await _persist();
   }
 
-  /// Продаж не відбувся ДО фіскалізації (скасована оплата карткою, відмова
-  /// ПРРО) — фіскального сліду немає, добивати нічого.
+  /// Запис за [numNakl], якщо він є (для продовження продажу після збою).
+  static SaleRecord? find(String numNakl) => _find(numNakl);
+
+  /// Продаж не відбувся ДО оплати/фіскалізації (скасована оплата карткою,
+  /// відмова ПРРО за готівку) — грошового й фіскального сліду немає,
+  /// добивати нічого.
   static Future<void> abort(String numNakl, String reason) async {
     final r = _find(numNakl);
     if (r == null) return;
-    // Захист від помилки виклику: якщо чек уже пробитий, це НЕ abort.
+    // Захист від помилки виклику: якщо картку вже списано або чек пробитий,
+    // це НЕ abort — гроші взято, запис має дожити до врегулювання.
     if (r.stage != SaleStage.started) {
       FiscalLog.log('A3 ⚠️ abort на стадії ${r.stage.name} проігноровано '
           '(${r.label}) — запис лишається на відновлення');
@@ -223,6 +259,7 @@ class SaleJournal {
   static Future<bool> _recoverOne(SaleRecord r) async {
     switch (r.stage) {
       case SaleStage.started:
+      case SaleStage.paid:
         // Найнеприємніший випадок: не знаємо, чи встиг пройти чек. Питаємо
         // ПРРО (та сама звірка, що й у A1). Знайшли → продаж реальний,
         // добиваємо PutKasa. Не знайшли → НЕ стверджуємо «продажу не було»
@@ -233,11 +270,20 @@ class SaleJournal {
           attempts: 1,
         );
         if (check == null) {
-          FiscalLog.log('A3 ${r.numNakl}: чека в зміні НЕМАЄ — продаж, схоже, '
-              'обірвався до фіскалізації. Запис лишено на розгляд '
-              '(спроб: ${r.recoverAttempts}'
-              '${r.note != null ? ", ${r.note}" : ""}). '
-              'Перевірте накладну в Caché.');
+          if (r.stage == SaleStage.paid) {
+            FiscalLog.log('A3 ⚠️ ${r.numNakl}: КАРТКУ СПИСАНО (rrn=${r.rrn}, '
+                'auth=${r.authCode}, сума ${r.total}), а чека в зміні НЕМАЄ. '
+                'Потрібне ручне врегулювання: провести накладну через '
+                '«Витрати по касі» АБО повернути кошти на терміналі '
+                '(спроб: ${r.recoverAttempts}'
+                '${r.note != null ? ", ${r.note}" : ""}).');
+          } else {
+            FiscalLog.log('A3 ${r.numNakl}: чека в зміні НЕМАЄ — продаж, схоже, '
+                'обірвався до фіскалізації. Запис лишено на розгляд '
+                '(спроб: ${r.recoverAttempts}'
+                '${r.note != null ? ", ${r.note}" : ""}). '
+                'Перевірте накладну в Caché.');
+          }
           return false;
         }
         FiscalLog.log('A3 ${r.numNakl}: чек ЗНАЙДЕНО в зміні (№${check.orderNum}) '

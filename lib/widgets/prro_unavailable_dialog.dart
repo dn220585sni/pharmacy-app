@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../models/money.dart';
+
 /// ПРРО недоступний у момент оплати — чек НЕ пробито.
 ///
 /// Чому не плашка на 3 секунди і не черга з автопробиттям (як було до
@@ -45,6 +47,66 @@ Future<void> showPrroUnavailableDialog(
                 style: const TextStyle(
                     fontSize: 12, color: Color(0xFF6B7280)),
               ),
+          ],
+        ),
+      ),
+      actions: [
+        ElevatedButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Зрозуміло'),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Картку списано на терміналі, а чек ПРРО НЕ зареєстровано (збій після
+/// Purchase). Це не «резерв без оплати»: гроші вже в банку, тому повторно
+/// приймати оплату НЕ можна. Кошик лишається — «Провести оплату» ще раз
+/// продовжить з фіскалізації за тією ж накладною без нового списання.
+///
+/// Модальне, лише кнопкою: касир має прочитати, що гроші вже списано.
+Future<void> showCardPaidNotFiscalizedDialog(
+  BuildContext context, {
+  required String numNakl,
+  required Money amount,
+  required String rrn,
+  required String reason,
+}) {
+  return showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      icon: const Icon(Icons.credit_card_off_rounded,
+          color: Color(0xFFB45309), size: 36),
+      title: const Text('Гроші списано, чек НЕ пробито',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+      content: Text.rich(
+        TextSpan(
+          style: const TextStyle(fontSize: 13.5, height: 1.45),
+          children: [
+            const TextSpan(text: 'З картки клієнта списано '),
+            TextSpan(
+                text: amount.format(symbol: true),
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+            TextSpan(text: ' (RRN $rrn), але фіскальний чек за накладною '),
+            TextSpan(
+                text: '№$numNakl',
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+            const TextSpan(
+              text: ' не зареєстровано.\n\n'
+                  'Повторно приймати гроші НЕ можна — ні карткою, ні '
+                  'готівкою.\n\n'
+                  'Кошик збережено. Коли причину усунуто, натисніть '
+                  '«Провести оплату» ще раз: картка повторно не '
+                  'списуватиметься, каса продовжить з фіскалізації.\n'
+                  'Якщо продовжити не вдається — викличте адміністратора.',
+            ),
+            TextSpan(
+              text: '\n\n$reason',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+            ),
           ],
         ),
       ),

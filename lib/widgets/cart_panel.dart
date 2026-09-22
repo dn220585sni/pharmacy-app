@@ -13,6 +13,7 @@ import '../models/money.dart';
 import '../models/payment_method.dart';
 import '../models/prescription.dart';
 import '../models/payment_terminal.dart';
+import '../models/terminal_txn_result.dart';
 import '../models/social_project.dart';
 import '../models/stop_price_action.dart';
 import '../services/api_config.dart';
@@ -141,6 +142,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   // ── Two-screen mode ────────────────────────────────────────────────────────
   bool _checkoutMode = false;
   bool _isProcessingPayment = false;
+
+  /// Продаж, за який картку вже списано, а чек не пробито (збій після
+  /// Purchase). Поки не `null`, «Провести оплату» продовжує ЙОГО (без нової
+  /// накладної й без нового Purchase), а не починає новий продаж.
+  _PaidSale? _paidSale;
 
   // Cash withdrawal (видача готівки з картки)
   bool _cashWithdrawal = false;
@@ -717,6 +723,28 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     // Кошик/клієнт змінились → фактичний бонус міг обрізатись стелею —
     // сервер має знати актуальну суму (SetBonusOpl → GetSumSkid).
     _notifyBonus();
+    // Оплачений, але не пробитий продаж прив'язаний до СВОГО кошика. Кошик
+    // очистили (наступний клієнт) → продовжити з каси вже не можна; запис
+    // журналу (стадія paid) лишається для recover()/адміністратора.
+    final paid = _paidSale;
+    if (paid != null && widget.cart.isEmpty) {
+      _paidSale = null;
+      FiscalLog.log('⚠️ ПРОДОВЖЕННЯ nakl=${paid.numNakl} втрачено: кошик '
+          'очищено. Картку списано (rrn=${paid.card.rrn}, '
+          '${paid.amount.format()}), чека немає — врегулювати вручну '
+          '(«Витрати по касі» або повернення на терміналі)');
+    }
+  }
+
+  /// Короткий SnackBar-попередження (бурштиновий: не помилка, а блокування).
+  void _snack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(text),
+      duration: const Duration(seconds: 6),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: const Color(0xFFB45309),
+    ));
   }
 
   // ── Списання бонусів: сервер має знати суму (Катя, 14.09) ──────────────
@@ -943,88 +971,170 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       }
     }
 
-    // Накладна перед фіскалізацією: SaveSgVNakl → NumNakl (→ local_number ПРРО).
-    // KodKli: готівка=код каси, картка=код банку (kodterm). TypeNakl: 2/5.
-    final numNakl = await SessionService.saveNakladna(
-      kodKli: isCard ? (_selectedTerminal?.kodterm ?? '') : ApiConfig.ekkKodKli,
-      typeNakl: isCard ? '5' : '2',
-      sumClient: sumClient,
-      sumChange: sumChange,
-      sumChangeSpl: sumChangeSpl,
-    );
-    if (!mounted) return false;
-    // A3: накладна не збереглась → продаж БЛОКУЄМО. Раніше тут був фолбек
-    // `local_number = timestamp`: чек ішов у ПРРО, але продажу не існувало в
-    // Caché — ні списання залишку, ні відмітки в касі, ні звірки за NumNakl
-    // (на цьому ж номері тримається відсікання дублікатів A1).
-    final localNumber = int.tryParse(numNakl ?? '');
-    if (numNakl == null || numNakl.isEmpty || localNumber == null) {
-      FiscalLog.log('A3 БЛОКУВАННЯ: накладна не збереглась '
-          '(SaveSgVNakl → "${numNakl ?? "null"}") — продаж не проводимо');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Накладна не збереглась на сервері — продаж '
-                'заблоковано. Спробуйте ще раз або викличте адміністратора.'),
-            duration: Duration(seconds: 5),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: Color(0xFFDC2626),
-          ),
-        );
+    // ── Продовження ОПЛАЧЕНОГО продажу ──
+    // Картку вже списано за цей кошик, а чек не пробито (збій після Purchase).
+    // Накладну й Purchase НЕ повторюємо — продовжуємо з фіскалізації за тим
+    // самим NumNakl. Інакше повтор «Провести оплату» списував би з клієнта
+    // вдруге (код-рев'ю 22.09, п.2).
+    final resume = _paidSale;
+    final String numNakl;
+    final int localNumber;
+    TerminalTxnResult? cardRes; // != null → гроші вже списано з картки
+    if (resume != null) {
+      if (!isCard) {
+        FiscalLog.log('ПРОДОВЖЕННЯ nakl=${resume.numNakl}: касир обрав готівку, '
+            'але картку вже списано (rrn=${resume.card.rrn}) — блокуємо');
+        _snack('За цей продаж уже списано ${resume.amount.format(symbol: true)} '
+            'з картки (RRN ${resume.card.rrn}). Оплата готівкою неможлива — '
+            'оберіть «Картка» і проведіть оплату ще раз.');
+        return false;
       }
-      return false;
+      final nowTotal = Money.fromHryvnia(finalTotal);
+      if (nowTotal != resume.amount) {
+        FiscalLog.log('ПРОДОВЖЕННЯ nakl=${resume.numNakl}: сума кошика '
+            '${nowTotal.format()} ≠ списаної ${resume.amount.format()} — блокуємо');
+        _snack('Сума кошика (${nowTotal.format(symbol: true)}) не збігається '
+            'зі списаною з картки (${resume.amount.format(symbol: true)}). '
+            'Поверніть кошик до попереднього складу або викличте '
+            'адміністратора.');
+        return false;
+      }
+      numNakl = resume.numNakl;
+      localNumber = resume.localNumber;
+      cardRes = resume.card;
+      FiscalLog.log('ПРОДОВЖЕННЯ продажу nakl=$numNakl: картку вже списано '
+          '(rrn=${cardRes.rrn}, ${resume.reason}) — накладну й Purchase '
+          'не повторюємо, йдемо на фіскалізацію');
+    } else {
+      // Накладна перед фіскалізацією: SaveSgVNakl → NumNakl (→ local_number
+      // ПРРО). KodKli: готівка=код каси, картка=код банку (kodterm).
+      // TypeNakl: 2/5.
+      final saved = await SessionService.saveNakladna(
+        kodKli:
+            isCard ? (_selectedTerminal?.kodterm ?? '') : ApiConfig.ekkKodKli,
+        typeNakl: isCard ? '5' : '2',
+        sumClient: sumClient,
+        sumChange: sumChange,
+        sumChangeSpl: sumChangeSpl,
+      );
+      if (!mounted) return false;
+      // A3: накладна не збереглась → продаж БЛОКУЄМО. Раніше тут був фолбек
+      // `local_number = timestamp`: чек ішов у ПРРО, але продажу не існувало в
+      // Caché — ні списання залишку, ні відмітки в касі, ні звірки за NumNakl
+      // (на цьому ж номері тримається відсікання дублікатів A1).
+      final parsed = int.tryParse(saved ?? '');
+      if (saved == null || saved.isEmpty || parsed == null) {
+        FiscalLog.log('A3 БЛОКУВАННЯ: накладна не збереглась '
+            '(SaveSgVNakl → "${saved ?? "null"}") — продаж не проводимо');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Накладна не збереглась на сервері — продаж '
+                  'заблоковано. Спробуйте ще раз або викличте адміністратора.'),
+              duration: Duration(seconds: 5),
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: Color(0xFFDC2626),
+            ),
+          );
+        }
+        return false;
+      }
+      numNakl = saved;
+      localNumber = parsed;
+
+      // Write-ahead: намір продати лягає на диск ДО фіскалізації, щоб падіння
+      // між «гроші взято» і «продаж зафіксовано» не загубило чек мовчки.
+      await SaleJournal.start(
+        numNakl: numNakl,
+        localNumber: localNumber,
+        total: finalTotal,
+        isCard: isCard,
+      );
+      if (!mounted) return false;
+
+      // ── КАРТКА (Етап 2): оплата на терміналі ПЕРЕД фіскалізацією ──
+      // Вікно «Оплата банк.карткою» з'являється тут, коли фармацевт натиснув
+      // «Провести оплату». Лише для JSON-терміналів з адресою (ПриватБанк):
+      //   approved → журнал `paid` → PutTermData(деталі) → GetDataRRO нижче
+      //   підхопить pay_terminal;
+      //   відхилено/скасовано → фіскалізацію НЕ проводимо (return false — касир
+      //   може обрати готівку).
+      // BPOS/Ощад і термінали без адреси — поки без реального ECR-проведення
+      // (TODO).
+      if (isCard) {
+        final term = _selectedTerminal;
+        if (term != null && term.isSupported) {
+          final cardAmount = Money.fromHryvnia(finalTotal);
+          final res = await CardPaymentDialog.show(context,
+              terminal: term, amount: cardAmount);
+          if (!mounted) return false;
+          if (res == null || !res.approved) {
+            FiscalLog.log('Картка: оплату на терміналі не проведено — '
+                'фіскалізацію скасовано (nakl=$localNumber)');
+            // Грошового й фіскального сліду немає — добивати нічого.
+            await SaleJournal.abort(numNakl, 'оплату карткою не проведено');
+            // `res == null` = касир натиснув «Оплатити готівкою» у вікні
+            // помилки. Раніше тип оплати лишався «Картка», і його доводилось
+            // перемикати руками (беклог Юлії). Відхилену транзакцію
+            // (`!approved`) НЕ чіпаємо — там касир може захотіти повторити
+            // карткою.
+            if (res == null && mounted) {
+              setState(() => paymentMethod = PaymentMethod.cash);
+            }
+            return false;
+          }
+          cardRes = res;
+          // Гроші взято — стадія на диск ДО будь-якого наступного кроку.
+          // З цієї миті abort не спрацює, а повторний Purchase заборонено.
+          await SaleJournal.markPaid(numNakl,
+              rrn: res.rrn, authCode: res.approvalCode);
+          // Деталі оплати → Caché (PutTermData); GetDataRRO візьме
+          // pay_terminal. Результат лише в лог: без нього чек усе одно можна
+          // пробити, а гроші вже списано.
+          final termOk = await SessionService.putTermData(
+            numNakl,
+            res.buildParamsPayCard(ssum: cardAmount, codeKsTerm: term.kodterm),
+            res.receipt,
+          );
+          if (!termOk) {
+            FiscalLog.log('⚠️ PutTermData не пройшов (nakl=$numNakl, '
+                'rrn=${res.rrn}) — банк-дані в накладній відсутні');
+          }
+          if (!mounted) return false;
+        } else {
+          FiscalLog.log('Картка: термінал "${term?.displayName ?? "не обрано"}" '
+              'без ECR-проведення (${term?.protocol.name ?? "null"}) — '
+              'фіскалізація без Purchase');
+        }
+      }
     }
 
-    // Write-ahead: намір продати лягає на диск ДО фіскалізації, щоб падіння
-    // між «гроші взято» і «продаж зафіксовано» не загубило чек мовчки.
-    await SaleJournal.start(
-      numNakl: numNakl,
-      localNumber: localNumber,
-      total: finalTotal,
-      isCard: isCard,
-    );
-    if (!mounted) return false;
-
-    // ── КАРТКА (Етап 2): оплата на терміналі ПЕРЕД фіскалізацією ──
-    // Вікно «Оплата банк.карткою» з'являється тут, коли фармацевт натиснув
-    // «Провести оплату». Лише для JSON-терміналів з адресою (ПриватБанк):
-    //   approved → PutTermData(деталі) → GetDataRRO нижче підхопить pay_terminal;
-    //   відхилено/скасовано → фіскалізацію НЕ проводимо (return false — касир
-    //   може обрати готівку).
-    // BPOS/Ощад і термінали без адреси — поки без реального ECR-проведення (TODO).
-    if (isCard) {
-      final term = _selectedTerminal;
-      if (term != null && term.isSupported) {
-        final cardAmount = Money.fromHryvnia(finalTotal);
-        final res = await CardPaymentDialog.show(context,
-            terminal: term, amount: cardAmount);
-        if (!mounted) return false;
-        if (res == null || !res.approved) {
-          FiscalLog.log('Картка: оплату на терміналі не проведено — '
-              'фіскалізацію скасовано (nakl=$localNumber)');
-          // Фіскального сліду немає — добивати нічого.
-          await SaleJournal.abort(numNakl, 'оплату карткою не проведено');
-          // `res == null` = касир натиснув «Оплатити готівкою» у вікні помилки.
-          // Раніше тип оплати лишався «Картка», і його доводилось перемикати
-          // руками (беклог Юлії). Відхилену транзакцію (`!approved`) НЕ чіпаємо
-          // — там касир може захотіти повторити карткою.
-          if (res == null && mounted) {
-            setState(() => paymentMethod = PaymentMethod.cash);
-          }
-          return false;
-        }
-        // Деталі оплати → Caché (PutTermData); GetDataRRO візьме pay_terminal.
-        await SessionService.putTermData(
-          numNakl,
-          res.buildParamsPayCard(ssum: cardAmount, codeKsTerm: term.kodterm),
-          res.receipt,
-        );
-        if (!mounted) return false;
-      } else {
-        FiscalLog.log('Картка: термінал "${term?.displayName ?? "не обрано"}" '
-            'без ECR-проведення (${term?.protocol.name ?? "null"}) — '
-            'фіскалізація без Purchase');
+    /// Збій ПІСЛЯ списання картки: продаж НЕ скасовуємо і повторну оплату
+    /// НЕ пропонуємо. Контекст зберігаємо — наступне «Провести оплату»
+    /// продовжить з фіскалізації за тим самим NumNakl без нового Purchase.
+    /// Запис журналу лишається на стадії `paid` (abort його не прибирає) —
+    /// якщо застосунок перезапустять, `recover()` дозвірить чек.
+    Future<bool> paidStop(String reason, {_LoyaltyCtx? loyalty}) async {
+      final card = cardRes!;
+      final amount = Money.fromHryvnia(finalTotal);
+      _paidSale = _PaidSale(
+        numNakl: numNakl,
+        localNumber: localNumber,
+        amount: amount,
+        card: card,
+        reason: reason,
+        loyalty: loyalty,
+      );
+      FiscalLog.log('⚠️ КАРТКУ СПИСАНО, ЧЕК НЕ ПРОБИТО: nakl=$numNakl '
+          'rrn=${card.rrn} auth=${card.approvalCode} сума=${amount.format()} — '
+          '$reason. Кошик збережено на продовження; повторний Purchase '
+          'заборонено');
+      await SaleJournal.markNote(numNakl, reason);
+      if (mounted) {
+        await showCardPaidNotFiscalizedDialog(context,
+            numNakl: numNakl, amount: amount, rrn: card.rrn, reason: reason);
       }
+      return false;
     }
 
     // ── ЛАЙК: Sparta tx/order (pending) ПЕРЕД ПРРО — бонуси в коментар чека.
@@ -1040,13 +1150,33 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         splCoupons = const [];
     num splPaidByPoints = 0, splAmountGross = 0, splDiscountGross = 0;
     final loyalty = widget.loyalty;
+    final resumedLoyalty = resume?.loyalty;
     // Діагностика: чому Лайк не активувався (щоб не гадати за журналом).
-    if (loyalty?.cardNo == null || loyalty!.cardNo!.isEmpty) {
+    if (resumedLoyalty == null &&
+        (loyalty?.cardNo == null || loyalty!.cardNo!.isEmpty)) {
       FiscalLog.log('Лайк пропущено: клієнт не прив\'язаний '
           '(loyalty=${loyalty == null ? "null" : "phone=${loyalty.phone} "
               "cardNo=порожній"}) — чек без бонусів');
     }
-    if (loyalty?.cardNo != null && loyalty!.cardNo!.isNotEmpty) {
+    if (resumedLoyalty != null) {
+      // Продовження: order у Спарті вже pending — не реєструємо вдруге
+      // (бали нарахувались би двічі), беремо збережений контекст.
+      sparta = resumedLoyalty.sparta;
+      orderNo = resumedLoyalty.orderNo;
+      prId = resumedLoyalty.prId;
+      loyaltyComment = resumedLoyalty.comment;
+      loyaltyCard = resumedLoyalty.cardNo;
+      orderDate = resumedLoyalty.orderDate;
+      splBasket = resumedLoyalty.basket;
+      splMops = resumedLoyalty.mops;
+      splParamsList = resumedLoyalty.params;
+      splCoupons = resumedLoyalty.coupons;
+      splPaidByPoints = resumedLoyalty.paidByPoints;
+      splAmountGross = resumedLoyalty.amountGross;
+      splDiscountGross = resumedLoyalty.discountGross;
+      FiscalLog.log('ПРОДОВЖЕННЯ nakl=$numNakl: SPL order $orderNo уже pending '
+          '(prId=$prId) — повторно не реєструємо');
+    } else if (loyalty?.cardNo != null && loyalty!.cardNo!.isNotEmpty) {
       loyaltyCard = loyalty.cardNo;
       final splParams = await SplParamsService.fetch();
       final spl = await SessionService.getDataSPL(numNakl);
@@ -1113,6 +1243,26 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       if (!mounted) return false;
     }
 
+    // Контекст Лайка для продовження після збою (лише коли order pending
+    // справді зареєстровано — інакше на повторі реєструємо заново).
+    _LoyaltyCtx? loyaltyCtx() => sparta == null || orderNo == null
+        ? null
+        : _LoyaltyCtx(
+            sparta: sparta,
+            orderNo: orderNo,
+            prId: prId,
+            comment: loyaltyComment,
+            cardNo: loyaltyCard!,
+            orderDate: orderDate,
+            basket: splBasket,
+            mops: splMops,
+            params: splParamsList,
+            coupons: splCoupons,
+            paidByPoints: splPaidByPoints,
+            amountGross: splAmountGross,
+            discountGross: splDiscountGross,
+          );
+
     // Основний шлях: готові products/payments з GetDataRRO (Caché проставляє
     // tax_prc/letters і вже округлює payments.sum). Fallback — клієнтська збірка.
     final rro = await SessionService.getDataRRO(numNakl);
@@ -1145,6 +1295,13 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       if (effectiveBonusAmount > 0) {
         FiscalLog.log('SALE СТОП: GetDataRRO недоступний, а в чеку бонус '
             '$effectiveBonusAmount — fallback його не врахує; nakl=$localNumber');
+        if (cardRes != null) {
+          // Картку вже списано — «повторіть оплату» тут означало б друге
+          // списання. Зберігаємо продаж на продовження.
+          return paidStop(
+              'не вдалося отримати дані чека з бонусом від сервера (GetDataRRO)',
+              loyalty: loyaltyCtx());
+        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Не вдалося отримати дані чека з бонусом від сервера. '
@@ -1252,6 +1409,10 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       }
       // Продаж пройшов усі стадії — знімаємо з журналу незавершених.
       await SaleJournal.finish(numNakl);
+      if (resume != null) {
+        FiscalLog.log('ПРОДОВЖЕННЯ nakl=$numNakl завершено: чек №$fiscN');
+      }
+      _paidSale = null;
       // Зберегти PDF чека в архів (папка receipts) — той самий контент, що у
       // вікні. Best-effort, у фоні, не блокує показ.
       unawaited(ReceiptArchive.savePdf(result));
@@ -1278,6 +1439,17 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         await PrroReceiptDialog.show(context, result);
       }
       return mounted;
+    }
+
+    if (cardRes != null) {
+      // Картку списано, а ПРРО чек не зареєстрував (недоступний або відхилив).
+      // Це НЕ «резерв без оплати» і не «повторіть»: гроші вже в банку. Кошик
+      // лишається, наступне «Провести оплату» продовжить з фіскалізації.
+      return paidStop(
+          result.errorKind == PrroErrorKind.connection
+              ? 'ПРРО недоступний: ${result.error ?? "немає зв'язку"}'
+              : 'ПРРО відхилив чек: ${result.error ?? "невідома помилка"}',
+          loyalty: loyaltyCtx());
     }
 
     if (result.errorKind == PrroErrorKind.connection) {
@@ -3081,4 +3253,64 @@ class _SmallButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Оплачений карткою, але не пробитий продаж — усе, щоб продовжити його з
+/// фіскалізації без нової накладної й нового Purchase.
+class _PaidSale {
+  const _PaidSale({
+    required this.numNakl,
+    required this.localNumber,
+    required this.amount,
+    required this.card,
+    required this.reason,
+    this.loyalty,
+  });
+
+  final String numNakl;
+  final int localNumber;
+
+  /// Сума, яку списано з картки; кошик має лишитись саме на неї.
+  final Money amount;
+  final TerminalTxnResult card;
+
+  /// Чому зупинились (для логу/діалогу).
+  final String reason;
+
+  /// Order Лайка, якщо він уже pending — щоб не реєструвати вдруге.
+  final _LoyaltyCtx? loyalty;
+}
+
+/// Контекст зареєстрованого (pending) order-а Спарти — те, що потрібно для
+/// orderModify/orderStatusChange/PutKasaSPL після чека.
+class _LoyaltyCtx {
+  const _LoyaltyCtx({
+    required this.sparta,
+    required this.orderNo,
+    required this.prId,
+    required this.comment,
+    required this.cardNo,
+    required this.orderDate,
+    required this.basket,
+    required this.mops,
+    required this.params,
+    required this.coupons,
+    required this.paidByPoints,
+    required this.amountGross,
+    required this.discountGross,
+  });
+
+  final SpartaService sparta;
+  final String orderNo;
+  final String? prId;
+  final String? comment;
+  final String cardNo;
+  final DateTime orderDate;
+  final List<Map<String, dynamic>> basket;
+  final List<Map<String, dynamic>> mops;
+  final List<Map<String, dynamic>> params;
+  final List<Map<String, dynamic>> coupons;
+  final num paidByPoints;
+  final num amountGross;
+  final num discountGross;
 }

@@ -215,11 +215,24 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   /// Whether payment can be processed.
   /// For cash/mixed: requires entered amount ≥ finalTotal.
   /// For card: always allowed.
+  /// Ціна в кошику — локальна заглушка, а не відповідь GetSumSkid. У демо
+  /// (stub/mock) заглушка і є джерелом, тому там оплату не блокуємо.
+  bool get _pricingNotConfirmed {
+    final sp = widget.serverPricing;
+    if (sp == null) return true;
+    if (CartPriceService.isStubMode || ApiConfig.useMock) return false;
+    return !sp.fromServer;
+  }
+
   /// Завжди вимагає актуальної ціни з сервера (бо інакше можемо взяти
   /// застарілу/локальну калькуляцію).
   bool get _canProcessPayment {
     if (widget.cart.isEmpty) return false;
     if (widget.isLoadingPricing || widget.serverPricing == null) return false;
+    // Локальна заглушка замість GetSumSkid (сервер не відповів) — це НЕ
+    // підтверджена ціна: без серверних знижок термінал списав би одну суму,
+    // а чек GetDataRRO вийшов би на іншу (код-рев'ю 22.09, п.10).
+    if (_pricingNotConfirmed) return false;
     // Сканування обовʼязкове для КОЖНОГО продажу: поки лишилась хоч одна
     // незвірена позиція, оплата недоступна. Гейт `_allCartScanned` існував
     // з самого початку, але ніде не використовувався — кнопка була активна
@@ -950,6 +963,17 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   Future<bool> _sendFiscalReceipt() async {
     final isCard = paymentMethod == PaymentMethod.card;
 
+    // Страховка до гейта кнопки: між натисканням і цим місцем перерахунок
+    // міг упасти в заглушку. З непідтвердженою сумою ні накладну, ні
+    // термінал не чіпаємо.
+    if (_pricingNotConfirmed) {
+      FiscalLog.log('SALE СТОП: сума кошика не підтверджена сервером '
+          '(GetSumSkid недоступний) — продаж не починаємо');
+      _snack('Сума не підтверджена сервером (GetSumSkid). Змініть кошик, '
+          'щоб перерахувати, або викличте адміністратора.');
+      return false;
+    }
+
     // Готівка: сума від клієнта + решта (+ решта на Лайк-бонуси) — обов'язкові
     // поля накладної (Катя). Для картки готівки нема → не передаємо.
     Money? sumClient, sumChange, sumChangeSpl;
@@ -1288,24 +1312,24 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
           '${isCard ? "картка" : "готівка"} позиції: '
           '${rawProducts.map((p) => '${p['code']}=${p['cost']}').join('; ')}');
     } else {
-      // Клієнтська збірка про бонус не знає: 15.09 GetDataRRO віддав битий
-      // JSON, fallback пробив у ПРРО 482,50 при серверній сумі 442,00 — клієнт
-      // заплатив без знижки, а бали пішли в списання. З бонусом без даних
-      // сервера чек не проводимо взагалі.
-      if (effectiveBonusAmount > 0) {
-        FiscalLog.log('SALE СТОП: GetDataRRO недоступний, а в чеку бонус '
-            '$effectiveBonusAmount — fallback його не врахує; nakl=$localNumber');
+      // Клієнтська збірка лише коли вона гарантовано дорівнює серверній
+      // (_tryFallbackReceipt): 15.09 GetDataRRO віддав битий JSON, fallback
+      // пробив у ПРРО 482,50 при серверній сумі 442,00 — клієнт заплатив без
+      // знижки, а бали пішли в списання.
+      final fb = _tryFallbackReceipt(isCard, why: 'GetDataRRO недоступний');
+      if (fb == null) {
         if (cardRes != null) {
           // Картку вже списано — «повторіть оплату» тут означало б друге
           // списання. Зберігаємо продаж на продовження.
           return paidStop(
-              'не вдалося отримати дані чека з бонусом від сервера (GetDataRRO)',
+              'не вдалося отримати дані чека від сервера (GetDataRRO), а '
+              'клієнтська збірка не гарантує суму',
               loyalty: loyaltyCtx());
         }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Не вдалося отримати дані чека з бонусом від сервера. '
-                'Повторіть оплату або вимкніть списання бонусів.'),
+            content: Text('Не вдалося отримати дані чека від сервера. '
+                'Повторіть оплату; якщо є бонус — вимкніть списання.'),
             duration: Duration(seconds: 6),
             behavior: SnackBarBehavior.floating,
             backgroundColor: Color(0xFFB45309),
@@ -1313,7 +1337,6 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         }
         return false;
       }
-      final fb = _buildFallbackReceipt(isCard);
       fbProducts = fb.products;
       fbPayments = fb.payments;
       saleTotal = fb.totalSum;
@@ -1345,24 +1368,32 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     // tax_prc/letters у даних Caché — «БЕЗ ПДВ має бути 0%») → повторюємо
     // клієнтською збіркою, щоб каса не ставала. ⚠️ Маскує серверний баг
     // GetDataRRO — причина лишається в лозі; Лайк-коментар у fallback не йде.
+    // Той самий критерій допустимості, що й вище (код-рев'ю 22.09, п.11):
+    // раніше ця гілка обходила перевірку бонусу й суми.
     var usedRaw = isRaw;
     if (isRaw && !result.success && result.errorKind == PrroErrorKind.logical) {
-      FiscalLog.log('SALE raw ВІДХИЛЕНО логічно: ${result.error} → '
-          'повтор клієнтською збіркою (nakl=$localNumber)');
-      final fb = _buildFallbackReceipt(isCard);
-      fbProducts = fb.products;
-      fbPayments = fb.payments;
-      saleTotal = fb.totalSum;
-      roundSum = fb.roundSum;
-      result = await PrroService.createSaleReceipt(
-        products: fbProducts,
-        payments: fbPayments,
-        totalSum: saleTotal,
-        roundSum: roundSum,
-        localNumber: localNumber,
-      );
-      if (!mounted) return false;
-      usedRaw = false;
+      final fb = _tryFallbackReceipt(isCard,
+          why: 'raw-чек відхилено логічно: ${result.error}');
+      if (fb == null) {
+        FiscalLog.log('SALE raw ВІДХИЛЕНО логічно: ${result.error}; клієнтська '
+            'збірка не дозволена — лишаємо відмову (nakl=$localNumber)');
+      } else {
+        FiscalLog.log('SALE raw ВІДХИЛЕНО логічно: ${result.error} → '
+            'повтор клієнтською збіркою (nakl=$localNumber)');
+        fbProducts = fb.products;
+        fbPayments = fb.payments;
+        saleTotal = fb.totalSum;
+        roundSum = fb.roundSum;
+        result = await PrroService.createSaleReceipt(
+          products: fbProducts,
+          payments: fbPayments,
+          totalSum: saleTotal,
+          roundSum: roundSum,
+          localNumber: localNumber,
+        );
+        if (!mounted) return false;
+        usedRaw = false;
+      }
     }
 
     FiscalLog.log(result.success
@@ -1557,12 +1588,37 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   /// округлює готівку до 10 коп. Основний шлях — готові дані з GetDataRRO;
   /// це лише fallback, щоб каса не стала при збої Caché (може містити наші
   /// хаки округлення, тому НЕ tax_prc бойових РРО).
-  ({
-    List<PrroProduct> products,
-    List<PrroPayment> payments,
-    double totalSum,
-    double roundSum,
-  }) _buildFallbackReceipt(bool isCard) {
+  /// Чи можна пробити чек клієнтською збіркою замість даних GetDataRRO.
+  /// Єдиний критерій для обох гілок (GetDataRRO недоступний / raw-чек
+  /// відхилено логічно), код-рев'ю 22.09, п.11:
+  /// 1. бонусу в чеку немає — збірка про нього не знає;
+  /// 2. сума збірки збігається з підтвердженою серверною (GetSumSkid) до
+  ///    копійки — саме її вже списав термінал і бачив клієнт. Розбіжність до
+  ///    50 коп `_buildFallbackReceipt` вшиває в ціни; більшу (серверні
+  ///    знижки/правила) збірка відтворити не може → `null`.
+  _FallbackReceipt? _tryFallbackReceipt(bool isCard, {required String why}) {
+    if (effectiveBonusAmount > 0) {
+      FiscalLog.log('FALLBACK ЗАБОРОНЕНО ($why): у чеку бонус '
+          '$effectiveBonusAmount, клієнтська збірка його не врахує');
+      return null;
+    }
+    final fb = _buildFallbackReceipt(isCard);
+    final sp = widget.serverPricing;
+    if (sp != null && sp.fromServer) {
+      final target = Money.fromHryvnia(
+          isCard ? sp.total + sp.roundingDiscount : sp.total);
+      final got = Money.fromHryvnia(fb.totalSum);
+      if (got != target) {
+        FiscalLog.log('FALLBACK ЗАБОРОНЕНО ($why): сума збірки '
+            '${got.format()} ≠ серверної ${target.format()} — чек розійшовся б '
+            'зі списаною сумою');
+        return null;
+      }
+    }
+    return fb;
+  }
+
+  _FallbackReceipt _buildFallbackReceipt(bool isCard) {
     var products = _buildPrroProducts();
     var productsSum =
         products.fold(Money.zero, (Money s, p) => s + Money.fromHryvnia(p.cost));
@@ -3189,7 +3245,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                       ? 'Скануйте товар ($_unscannedCount)'
                       : (widget.bonusSyncFailed && effectiveBonusAmount > 0)
                           ? 'Бонус не зафіксовано — вимкніть списання'
-                          : 'Провести оплату',
+                          : (widget.cart.isNotEmpty &&
+                                  !widget.isLoadingPricing &&
+                                  _pricingNotConfirmed)
+                              ? 'Сума не підтверджена сервером'
+                              : 'Провести оплату',
                   style: TextStyle(
                     color: enabled
                         ? Colors.white
@@ -3350,3 +3410,11 @@ class _LoyaltyCtx {
   final num amountGross;
   final num discountGross;
 }
+
+/// Клієнтська збірка чека (аварійний шлях замість GetDataRRO).
+typedef _FallbackReceipt = ({
+  List<PrroProduct> products,
+  List<PrroPayment> payments,
+  double totalSum,
+  double roundSum,
+});

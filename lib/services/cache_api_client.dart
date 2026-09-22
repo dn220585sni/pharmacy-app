@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'api_config.dart';
+import 'api_scheduler.dart';
 import 'fiscal_log.dart';
+
+export 'api_scheduler.dart' show ApiPriority;
 
 /// Відповідь від Caché CSP сервера.
 ///
@@ -63,29 +66,17 @@ class CacheApiClient {
   /// Rlz sessionId — передається в кожному запиті після LoginRlz.
   String? sessionId;
 
-  /// Обмеження паралельних запитів до Caché (ліц��нзії обмежені).
-  /// Максимум 3 одноч��сних запити — запобігає вичерпанню ліцензій.
-  static const _maxConcurrent = 3;
-  int _activeRequests = 0;
-  final _requestQueue = <Completer<void>>[];
+  /// Обмеження паралельних запитів до Caché (ліцензії обмежені): максимум
+  /// 3 одночасних, з них фон — не більше 1; інтерактивні йдуть попереду
+  /// фонових (див. [ApiScheduler], код-рев'ю 22.09, п.12).
+  final _scheduler = ApiScheduler(maxConcurrent: 3, maxBackground: 1);
 
-  Future<void> _acquireSlot() async {
-    if (_activeRequests < _maxConcurrent) {
-      _activeRequests++;
-      return;
-    }
-    final completer = Completer<void>();
-    _requestQueue.add(completer);
-    await completer.future;
-    _activeRequests++;
-  }
+  /// Текст помилки для запиту, скасованого як застарілий ще в черзі.
+  static const cancelledResult = 'скасовано: запит застарів у черзі';
 
-  void _releaseSlot() {
-    _activeRequests--;
-    if (_requestQueue.isNotEmpty) {
-      _requestQueue.removeAt(0).complete();
-    }
-  }
+  /// Інтерактивний запит чекав у черзі довше — пишемо в журнал: це і є
+  /// джерело «повільного пошуку», яке інакше не видно.
+  static const _queueWaitReport = Duration(milliseconds: 500);
 
   /// Кодек windows-1251 для декодування кирилиці.
   /// Caché може віддавати в цьому кодуванні (залежить від настройки).
@@ -115,15 +106,29 @@ class CacheApiClient {
     'SetFlRRO',     // флаг пробиття накладній (ручне проведення резерву)
   };
 
+  /// [priority] — фон не займає слоти інтерактивних. [isStale] — для фону:
+  /// якщо до старту запит уже нікому не потрібен (результати пошуку
+  /// змінились), він не виконується, а повертає [cancelledResult].
   Future<CacheResponse> call(
     String serviceName, {
     Map<String, String>? params,
+    ApiPriority priority = ApiPriority.interactive,
+    bool Function()? isStale,
   }) async {
-    await _acquireSlot();
+    final sw = Stopwatch()..start();
+    final started = await _scheduler.acquire(priority, isStale: isStale);
+    if (!started) return CacheResponse.error(cancelledResult);
+    final queueWait = sw.elapsed;
+    if (priority == ApiPriority.interactive && queueWait >= _queueWaitReport) {
+      FiscalLog.log('API-ЧЕРГА $serviceName: чекав ${queueWait.inMilliseconds} '
+          'мс (активних ${_scheduler.active}, з них фон '
+          '${_scheduler.activeBackground}; у черзі '
+          '${_scheduler.queuedInteractive}+${_scheduler.queuedBackground} фон)');
+    }
     try {
       return await _callInternal(serviceName, params: params);
     } finally {
-      _releaseSlot();
+      _scheduler.release(priority);
     }
   }
 

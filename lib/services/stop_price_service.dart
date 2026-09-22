@@ -31,15 +31,21 @@ class StopPriceService {
     return (best * 100).round() / 100;
   }
 
-  /// Отримати акції — з кешу, інакше fetch.
-  static Future<List<StopPriceAction>> fetchActions(String ukod) async {
+  /// Отримати акції — з кешу, інакше fetch. За замовчуванням у ФОНІ (не
+  /// займає слоти пошуку/каси); [isStale] — скасувати, якщо до старту
+  /// запит уже не потрібен (див. [ApiScheduler]).
+  static Future<List<StopPriceAction>> fetchActions(
+    String ukod, {
+    ApiPriority priority = ApiPriority.background,
+    bool Function()? isStale,
+  }) async {
     if (ukod.isEmpty) return const [];
     final cached = _cache[ukod];
     if (cached != null) return cached;
     final inFlight = _inFlight[ukod];
     if (inFlight != null) return inFlight;
 
-    final future = _doFetch(ukod);
+    final future = _doFetch(ukod, priority: priority, isStale: isStale);
     _inFlight[ukod] = future;
     try {
       return await future;
@@ -48,10 +54,19 @@ class StopPriceService {
     }
   }
 
-  static Future<List<StopPriceAction>> _doFetch(String ukod) async {
+  static Future<List<StopPriceAction>> _doFetch(
+    String ukod, {
+    required ApiPriority priority,
+    bool Function()? isStale,
+  }) async {
     try {
-      final r = await CacheApiClient()
-          .call('GetStopPriceUKod', params: {'ukod': ukod});
+      final r = await CacheApiClient().call('GetStopPriceUKod',
+          params: {'ukod': ukod}, priority: priority, isStale: isStale);
+      // Скасовано в черзі (результати пошуку змінились) — у кеш НЕ пишемо:
+      // це не відповідь сервера, наступний показ товару дотягне.
+      if (!r.isOk && r.result == CacheApiClient.cancelledResult) {
+        return const [];
+      }
       if (!r.isOk) {
         debugPrint('GetStopPriceUKod FAIL ukod=$ukod: ${r.result}');
         return _cache[ukod] = const [];
@@ -76,10 +91,17 @@ class StopPriceService {
   /// одночасних HTTP-запитів. [onBatch] викликається після кожного батча —
   /// для прогресивного оновлення UI (таблиця показує акційні ціни по мірі
   /// надходження). Future завершується коли всі fetch-и закінчаться.
+  ///
+  /// [priority] за замовчуванням фоновий: у [ApiScheduler] фон займає лише
+  /// один слот із трьох, тож [concurrency] — це розмір батча в черзі, а не
+  /// реальна паралельність. [isStale] — між батчами й для кожного запиту:
+  /// коли результати пошуку змінились, решту не тягнемо.
   static Future<void> prefetch(
     Iterable<String> ukods, {
     int concurrency = 8,
     void Function()? onBatch,
+    ApiPriority priority = ApiPriority.background,
+    bool Function()? isStale,
   }) async {
     final unique = ukods.where((u) => u.isNotEmpty).toSet();
     final missing = unique
@@ -87,8 +109,10 @@ class StopPriceService {
         .toList(growable: false);
     if (missing.isEmpty) return;
     for (var i = 0; i < missing.length; i += concurrency) {
+      if (isStale?.call() == true) return;
       final batch = missing.skip(i).take(concurrency);
-      await Future.wait(batch.map(fetchActions));
+      await Future.wait(batch.map(
+          (u) => fetchActions(u, priority: priority, isStale: isStale)));
       onBatch?.call();
     }
   }

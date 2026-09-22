@@ -4,6 +4,7 @@ import '../models/money.dart';
 import '../utils/scan_keymap.dart';
 import '../utils/fuzzy_search.dart';
 import '../utils/keyed_task_chain.dart';
+import '../services/api_scheduler.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../data/cart_offers.dart';
@@ -1748,7 +1749,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       debugPrint('TopDrugsCache: loaded ${items.length} items');
       // Гібрид: фоновий префетч стоп-цін для топ-500 (де сконцентровані акції) —
       // популярні товари показують акційну ціну в таблиці миттєво.
-      _prefetchStopPriceUkods(items.map((i) => i.ukod));
+      _prefetchStopPriceUkods(items.map((i) => i.ukod), cancellable: false);
     }).catchError((e) {
       debugPrint('TopDrugsCache: error — $e');
     });
@@ -3525,27 +3526,40 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (ukodsKey == _lastStopPriceUkods) return;
     _lastStopPriceUkods = ukodsKey;
     if (ukods.isEmpty) return;
+    // Кошик — інтерактивно: акції в кошику фармацевт бачить одразу, а
+    // позицій там одиниці.
     unawaited(
-      StopPriceService.prefetch(ukods).then((_) {
+      StopPriceService.prefetch(ukods, priority: ApiPriority.interactive)
+          .then((_) {
         if (!mounted) return;
         setState(() => _stopPriceVersion++);
       }),
     );
   }
 
+  /// Покоління префетчу для видимих результатів: кожен новий набір результатів
+  /// робить попередні, ще не стартовані запити застарілими — планувальник їх
+  /// не виконує (код-рев'ю 22.09, п.12).
+  int _visiblePrefetchGen = 0;
+
   /// Префетч стоп-цін для довільного набору ukod-ів (таблиця пошуку / топ-500).
   /// Гібрид: топ-500 тягнемо у фоні після логіну, видимі результати — ліниво.
   /// Прогресивно інкрементуємо версію → таблиця rebuild'иться з акційними цінами
-  /// по мірі надходження даних.
-  void _prefetchStopPriceUkods(Iterable<String?> ukods) {
+  /// по мірі надходження даних. Усе у ФОНІ: пошук і каса йдуть попереду.
+  /// [cancellable] — для видимих результатів (застарівають при новому пошуку);
+  /// топ-500 не застаріває.
+  void _prefetchStopPriceUkods(Iterable<String?> ukods,
+      {bool cancellable = true}) {
     final set = <String>{};
     for (final u in ukods) {
       if (u != null && u.isNotEmpty) set.add(u);
     }
     if (set.isEmpty) return;
+    final gen = cancellable ? ++_visiblePrefetchGen : null;
     unawaited(
       StopPriceService.prefetch(
         set,
+        isStale: gen == null ? null : () => gen != _visiblePrefetchGen,
         onBatch: () {
           if (mounted) setState(() => _stopPriceVersion++);
         },

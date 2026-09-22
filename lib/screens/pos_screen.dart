@@ -3,6 +3,7 @@ import 'dart:ui' show AppExitType;
 import '../models/money.dart';
 import '../utils/scan_keymap.dart';
 import '../utils/fuzzy_search.dart';
+import '../utils/keyed_task_chain.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../data/cart_offers.dart';
@@ -2826,6 +2827,56 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     return DrugService.setStockLock(skod, qty);
   }
 
+  /// Ланцюжки резервувань по товару (код-рев'ю 22.09, п.6): зміни однієї
+  /// позиції йдуть на сервер ПОСЛІДОВНО. Два швидких «+» раніше обидва
+  /// встигали порахувати `qty=2` до першої відповіді, а в кошик писали `++`
+  /// двічі — UI 3, сервер 2, і GetDataRRO пробивав чек на 2. Тіло
+  /// [_serializedReserve] рахує бажану кількість у момент відправки і
+  /// записує в кошик підтверджену сервером.
+  final _reserveChains = KeyedTaskChain();
+
+  Future<T> _serializedReserve<T>(String drugId, Future<T> Function() body) =>
+      _reserveChains.run(drugId, body);
+
+  /// Скільки одиниць позиції (упаковок або блістерів) відповідає резерву
+  /// [granted] (у частках упаковки). Дробові — з допуском на 1/дільник у
+  /// десятковому вигляді (0.0333… × 30 = 0.99999…).
+  int _grantedUnits(CartItem item, double granted) {
+    if (item.isFractional && item.drug.unitsPerPackage != null) {
+      return (granted * item.drug.unitsPerPackage! + 1e-6).floor();
+    }
+    return granted.round();
+  }
+
+  /// Записати в позицію кошика ПІДТВЕРДЖЕНУ сервером кількість (абсолютну,
+  /// не `++`). 0 → позицію прибираємо: сервер за нами нічого не тримає.
+  /// Повертає записану кількість у одиницях позиції.
+  int _applyGrantedQty(CartItem item, double granted) {
+    final units = _grantedUnits(item, granted);
+    setState(() {
+      if (units <= 0) {
+        _cart.remove(item);
+      } else if (item.isFractional) {
+        item.fractionalQty = units;
+      } else {
+        item.quantity = units;
+      }
+    });
+    return units;
+  }
+
+  String _unitsLabel(CartItem item, int units) =>
+      item.isFractional ? '$units' : '$units шт';
+
+  void _showQtySnack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(text),
+      duration: const Duration(seconds: 3),
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
   /// Оновити залишок товару в таблиці (колонка «Наявність») після резервування —
   /// `kolStock` з sgVRoznSetLock (напр. було 5, відпустили 1 → стало 4).
   void _applyKolStock(String drugId, double? kolStock) {
@@ -2895,8 +2946,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (maxQty < 1) return;
     final clamped = qty.clamp(1, maxQty);
 
-    // Спочатку резервуємо на сервері
-    final result = await _lockStock(drug, clamped.toDouble());
+    // Спочатку резервуємо на сервері (у черзі цього товару — щоб не
+    // переплутатись із «+»/«−», які могли піти перед цим).
+    final result = await _serializedReserve(
+        drug.id, () => _lockStock(drug, clamped.toDouble()));
     if (!mounted) return;
 
     if (!result.ok) {
@@ -2916,6 +2969,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // Сервер міг видати менше ніж запитали (інша каса вже зарезервувала)
     final granted = result.grantedQty.round();
     if (granted <= 0) {
+      // Сервер за нами нічого не тримає — у кошику позиції теж бути не має
+      // (раніше лишалась стара кількість без резерву).
+      setState(() => _cart.removeWhere((item) => item.drug.id == drug.id));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${drug.name} — залишок зарезервовано іншою касою'),
@@ -2984,9 +3040,16 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final availUnits = ((drug.stockRaw ?? drug.stock.toDouble()) * upp).round();
     final clamped = blisters.clamp(1, availUnits > 0 ? availUnits : blisters);
     final lockQty = clamped / upp;
-    final result = await _lockStock(drug, lockQty);
+    final result =
+        await _serializedReserve(drug.id, () => _lockStock(drug, lockQty));
     if (!mounted) return;
-    if (!result.ok || result.grantedQty <= 0) {
+    // Код-рев'ю 22.09, п.7: у кошик іде НАДАНИЙ резерв у блістерах, а не
+    // запитаний. Просили 5 з упаковки по 10, інша каса тримає решту → сервер
+    // дав 0,2 = 2 блістери; раніше UI писав 5, чек ішов би на 2.
+    final grantedUnits =
+        result.ok ? (result.grantedQty * upp + 1e-6).floor() : 0;
+    if (!result.ok || grantedUnits <= 0) {
+      setState(() => _cart.removeWhere((item) => item.drug.id == drug.id));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${drug.name} — залишок зарезервовано іншою касою'),
@@ -2996,10 +3059,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       );
       return;
     }
-    if (clamped < blisters) {
+    if (grantedUnits < blisters) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${drug.name} — доступно лише $clamped'),
+          content: Text('${drug.name} — доступно лише $grantedUnits'
+              '${grantedUnits < clamped ? " (решта зарезервована)" : ""}'),
           duration: const Duration(seconds: 3),
           behavior: SnackBarBehavior.floating,
         ),
@@ -3009,10 +3073,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     setState(() {
       final idx = _cart.indexWhere((item) => item.drug.id == drug.id);
       if (idx >= 0) {
-        _cart[idx].fractionalQty = clamped;
+        _cart[idx].fractionalQty = grantedUnits;
         _cart[idx].quantity = 0;
       } else {
-        _cart.add(CartItem(drug: drug, quantity: 0, fractionalQty: clamped));
+        _cart.add(
+            CartItem(drug: drug, quantity: 0, fractionalQty: grantedUnits));
       }
     });
     if (!wasInCart && blisters > 0) _tryShowEdk(drug);
@@ -3329,76 +3394,86 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void _removeFromCart(int index) async {
     final drug = _cart[index].drug;
     setState(() => _cart.removeAt(index));
-    final r = await _lockStock(drug, 0.0);
+    final r = await _serializedReserve(drug.id, () => _lockStock(drug, 0.0));
     if (mounted) _applyKolStock(drug.id, r.kolStock); // відновити «Наявність»
   }
 
   void _increaseQty(int index) async {
     final item = _cart[index];
-
-    if (!item.isFractional && item.quantity >= item.drug.stock) return;
-    if (item.isFractional && item.fractionalQty! >= item.drug.unitsPerPackage!) return;
-
-    // Обчислити нову кількість для резервування (десятковий дріб)
-    final double newLockQty;
-    if (item.isFractional && item.drug.unitsPerPackage != null) {
-      newLockQty = (item.fractionalQty! + 1) / item.drug.unitsPerPackage!;
-    } else {
-      newLockQty = (item.quantity + 1).toDouble();
-    }
-
-    final result = await _lockStock(item.drug, newLockQty);
-    if (!mounted) return;
-    if (result.grantedQty < newLockQty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result.grantedQty > 0
-              ? '${item.drug.name} — доступно лише ${result.grantedQty.round()} шт'
-              : '${item.drug.name} — залишок зарезервовано іншою касою'),
-          duration: const Duration(seconds: 3),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-    _applyKolStock(item.drug.id, result.kolStock);
-    setState(() {
-      if (item.isFractional) {
-        item.fractionalQty = item.fractionalQty! + 1;
+    final drug = item.drug;
+    await _serializedReserve(drug.id, () async {
+      // Усе рахуємо ТУТ — після попередніх змін цієї позиції, а не в момент
+      // кліку: другий швидкий «+» має просити 3, а не знову 2.
+      if (!mounted || !_cart.contains(item)) return;
+      if (!item.isFractional && item.quantity >= drug.stock) return;
+      if (item.isFractional && item.fractionalQty! >= drug.unitsPerPackage!) {
+        return;
+      }
+      final double want;
+      if (item.isFractional && drug.unitsPerPackage != null) {
+        want = (item.fractionalQty! + 1) / drug.unitsPerPackage!;
       } else {
-        item.quantity++;
+        want = (item.quantity + 1).toDouble();
+      }
+      final result = await _lockStock(drug, want);
+      if (!mounted || !_cart.contains(item)) return;
+      if (!result.ok) {
+        _showQtySnack('Помилка резервування: ${drug.name}');
+        return;
+      }
+      _applyKolStock(drug.id, result.kolStock);
+      // У кошик — підтверджена абсолютна кількість (може бути й менша за
+      // поточну, якщо інша каса встигла забрати залишок).
+      final units = _applyGrantedQty(item, result.grantedQty);
+      if (result.grantedQty + 1e-6 < want) {
+        _showQtySnack(units > 0
+            ? '${drug.name} — доступно лише ${_unitsLabel(item, units)}'
+            : '${drug.name} — залишок зарезервовано іншою касою');
       }
     });
   }
 
   void _decreaseQty(int index) async {
     final item = _cart[index];
-    Drug? removedDrug;
+    final drug = item.drug;
+    // UI — одразу (зменшення завжди можливе), сервер — у черзі позиції з
+    // кількістю на момент відправки.
+    var removed = false;
     setState(() {
       if (item.isFractional) {
         if (item.fractionalQty! > 1) {
           item.fractionalQty = item.fractionalQty! - 1;
         } else {
-          removedDrug = item.drug;
+          removed = true;
           _cart.removeAt(index);
         }
       } else {
         if (item.quantity > 1) {
           item.quantity--;
         } else {
-          removedDrug = item.drug;
+          removed = true;
           _cart.removeAt(index);
         }
       }
     });
-    if (removedDrug != null) {
-      final r = await _lockStock(removedDrug!, 0.0);
-      if (mounted) _applyKolStock(removedDrug!.id, r.kolStock);
-    } else if (index < _cart.length) {
-      final drug = _cart[index].drug;
-      final r = await _lockStock(drug, _cartItemLockQty(_cart[index]));
-      if (mounted) _applyKolStock(drug.id, r.kolStock);
-    }
+    await _serializedReserve(drug.id, () async {
+      if (!mounted) return;
+      if (removed || !_cart.contains(item)) {
+        final r = await _lockStock(drug, 0.0);
+        if (mounted) _applyKolStock(drug.id, r.kolStock);
+        return;
+      }
+      final want = _cartItemLockQty(item);
+      final r = await _lockStock(drug, want);
+      if (!mounted || !_cart.contains(item)) return;
+      _applyKolStock(drug.id, r.kolStock);
+      if (r.ok && r.grantedQty + 1e-6 < want) {
+        final units = _applyGrantedQty(item, r.grantedQty);
+        _showQtySnack(units > 0
+            ? '${drug.name} — доступно лише ${_unitsLabel(item, units)}'
+            : '${drug.name} — залишок зарезервовано іншою касою');
+      }
+    });
   }
 
   double get _cartTotal => _cart.fold(0, (s, i) => s + i.total);
@@ -3515,10 +3590,32 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Довести серверний сеанс до [_bonusToSpend]. Повертає true, якщо сеанс
   /// уже актуальний або оновлено успішно.
-  Future<bool> _syncBonusToServer() async {
-    if (_bonusOnServer == _bonusToSpend) return true;
-    final ok = await SessionService.setBonusOpl(_bonusToSpend);
-    if (ok) _bonusOnServer = _bonusToSpend;
+  ///
+  /// Один активний цикл (код-рев'ю 22.09, п.9): раніше після `await`
+  /// записувалось `_bonusOnServer = _bonusToSpend` — уже НОВЕ значення, якщо
+  /// касир змінив суму, поки йшов запит (сервер 10, у нас «10=20», наступна
+  /// синхронізація пропускалась). Тепер записуємо саме надіслану суму, а
+  /// цикл крутиться, поки сеанс не дожене актуальну.
+  Future<bool> _syncBonusToServer() {
+    final inFlight = _bonusSync;
+    if (inFlight != null) return inFlight;
+    return _bonusSync = _runBonusSync();
+  }
+
+  Future<bool>? _bonusSync;
+
+  Future<bool> _runBonusSync() async {
+    var ok = true;
+    try {
+      while (_bonusOnServer != _bonusToSpend) {
+        final sent = _bonusToSpend;
+        ok = await SessionService.setBonusOpl(sent);
+        if (!ok) break;
+        _bonusOnServer = sent;
+      }
+    } finally {
+      _bonusSync = null;
+    }
     // Стан сеансу після падіння SetBonusOpl невідомий (15.09: бонус у сеанс
     // потрапляв, знижка в чеку була, а Спарта бали НЕ спалила — клієнт
     // заплатив менше «за так»). Тому поки сервер не підтвердив суму —

@@ -47,8 +47,6 @@ import '../widgets/clear_cart_dialog.dart';
 import '../widgets/drug_detail_panel.dart';
 import '../widgets/edk_panel.dart';
 import '../widgets/customer_auth_card.dart';
-import '../data/mock_orders.dart';
-import '../models/internet_order.dart';
 import '../widgets/orders_panel.dart';
 import '../widgets/pharmacist_picker_dialog.dart';
 import '../widgets/expenses_panel.dart';
@@ -4371,13 +4369,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                   ActionSidebar(
                     onOrdersTap: _toggleOrders,
                     ordersActive: _ordersOpen,
-                    urgentCount: mockOrders
-                        .where((o) =>
-                            o.isUrgent &&
-                            o.status != OrderStatus.collected &&
-                            o.status != OrderStatus.paidOnline &&
-                            o.status != OrderStatus.dispensed)
-                        .length,
                     onExpensesTap: _toggleExpenses,
                     expensesActive: _expensesOpen,
                     onPrescriptionTap: _togglePrescription,

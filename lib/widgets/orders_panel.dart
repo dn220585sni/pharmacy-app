@@ -1,5 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/money.dart';
+import '../models/order_extras.dart';
+import '../services/order_extras_service.dart';
+import '../services/fiscal_log.dart';
+import 'orders/order_indicators.dart';
+import 'orders/order_messages_dialog.dart';
+import 'orders/order_duplicate_dialog.dart';
+import 'orders/order_issue_block.dart';
+import 'orders/orders_grid.dart';
 import '../mixins/checkout_mixin.dart';
 import '../mixins/edk_state_mixin.dart';
 import '../models/internet_order.dart';
@@ -54,6 +64,10 @@ class OrdersPanel extends StatefulWidget {
   /// Called when the user changes the layout mode.
   final void Function(OrdersPanelLayout layout)? onLayoutChanged;
 
+  /// Лише для тестів: готовий список замість GetOrders.
+  @visibleForTesting
+  final List<InternetOrder>? debugOrders;
+
   const OrdersPanel({
     super.key,
     required this.onClose,
@@ -64,6 +78,7 @@ class OrdersPanel extends StatefulWidget {
     this.onFocusPhone,
     this.layout = OrdersPanelLayout.right,
     this.onLayoutChanged,
+    this.debugOrders,
   });
 
   @override
@@ -89,21 +104,52 @@ class OrdersPanelState extends State<OrdersPanel>
   /// Whether the "Розформовані замовлення" screen is open.
   bool _showDisbandedOrders = false;
 
-  /// Active filter chip labels (multi-select, OR logic).
-  Set<String> _activeFilters = {'Нові', 'В обробці', 'Зібрані', 'В роботі'};
+  /// Обраний фільтр списку. Рівно ОДИН (ТЗ Юлії §2: статуси, що виключають
+  /// один одного, не можна обрати разом).
+  String _activeFilter = _filterAll;
 
-  /// All available filter labels.
+  static const _filterAll = 'Всі';
+  static const _filterNotCollected = 'Не зібрані';
+  static const _filterPaid = 'Оплачені';
+  static const _filterRefused = 'Відмови';
+
+  /// Плашки фільтра (Микола 22.09): лише ці чотири.
   static const List<String> _filterLabels = [
-    'Всі',
-    'Нові',
-    'В обробці',
-    'Зібрані',
-    'В роботі',
-    'Відпущено',
-    'Завислі',
-    'Відмова клієнта',
-    'Відмова аптеки',
+    _filterAll,
+    _filterNotCollected,
+    _filterPaid,
+    _filterRefused,
   ];
+
+  /// Службові фільтри — без плашки; вмикаються кліком по сигналу над
+  /// списком (переписка, час на збір, Glovo) і показуються тимчасовою
+  /// плашкою з хрестиком.
+  static const _filterWithMessages = 'З перепискою';
+  static const _filterSla = 'Час на збір';
+  static const _filterGlovo = 'Glovo';
+
+  /// Ознаки замовлень, яких GetOrders ще не віддає (переписка з КЦ,
+  /// автопідтвердження, час на збір, Glovo №, передоплата) — поки мок.
+  Map<String, OrderExtras> _extras = {};
+
+  OrderExtras _extrasOf(InternetOrder o) => _extras[o.id] ?? OrderExtras.empty;
+
+  /// Замовлення, позначені чекбоксом «Об'єднати» (ТЗ §9).
+  final Set<String> _checkedIds = {};
+
+  /// Останній введений номер телефону — живе до закриття програми, щоб при
+  /// відпуску 2+ замовлень одному покупцеві не перепитувати номер (ТЗ §2).
+  static String? _lastPhone;
+
+  /// Замовлення з перевіреним кодом видачі (передоплата, ТЗ §10).
+  final Set<String> _issueVerifiedIds = {};
+  final TextEditingController _prescriptionCtrl = TextEditingController();
+
+  /// Захист від дублювання останніх 4 цифр номера: запит, за яким відкриття
+  /// через Enter заблоковане, доки касир не уточнить повний номер.
+  String? _dupBlockedQuery;
+  Timer? _dupTimer;
+  bool _dupDialogOpen = false;
 
   /// Whether the search field has non-empty text (drives highlight).
   bool get _hasQuery => _searchController.text.trim().isNotEmpty;
@@ -116,7 +162,27 @@ class OrdersPanelState extends State<OrdersPanel>
   bool _orderDataLoading = false;
 
   /// Selected date for orders (defaults to today).
-  DateTime _ordersDate = DateTime.now();
+  /// Період запиту GetOrders «від — до» (як у «Витратах по касі»). null =
+  /// сьогодні; «до» раніше за «від» — міняємо місцями при запиті.
+  ///
+  /// За замовчуванням — останні 7 діб (ТЗ Юлії §1): незібране замовлення
+  /// живе в аптеці до 3 діб, плюс ті, що лишились нерозформованими.
+  DateTime? _dateFrom = DateTime.now().subtract(const Duration(days: 7));
+  DateTime? _dateTo = DateTime.now();
+
+  static String _fmtDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
+
+  /// Нормалізований період: (від, до) без часу, від ≤ до.
+  (DateTime, DateTime) get _period {
+    final now = DateTime.now();
+    var from = _dateFrom ?? now;
+    var to = _dateTo ?? from;
+    from = DateTime(from.year, from.month, from.day);
+    to = DateTime(to.year, to.month, to.day);
+    if (to.isBefore(from)) (from, to) = (to, from);
+    return (from, to);
+  }
 
   // ── CheckoutMixin overrides ─────────────────────────────────────────────
 
@@ -193,20 +259,29 @@ class OrdersPanelState extends State<OrdersPanel>
 
   /// Load orders from GetOrders API (or mock fallback).
   Future<void> _loadOrders() async {
+    final debugOrders = widget.debugOrders;
+    if (debugOrders != null) {
+      setState(() {
+        _orders = List<InternetOrder>.from(debugOrders);
+        _filteredOrders = _sorted(_orders);
+      });
+      await _loadExtras();
+      return;
+    }
     if (ApiConfig.useMock) {
       setState(() {
         _orders = List<InternetOrder>.from(mockOrders);
         _filteredOrders = _sorted(_orders);
       });
+      await _loadExtras();
       return;
     }
     setState(() => _isLoading = true);
-    final dateStr =
-        '${_ordersDate.day.toString().padLeft(2, '0')}.${_ordersDate.month.toString().padLeft(2, '0')}.${_ordersDate.year}';
+    final (from, to) = _period;
     try {
       final orders = await OrderService.fetchOrders(
-        dateFrom: dateStr,
-        dateTo: dateStr,
+        dateFrom: _fmtDate(from),
+        dateTo: _fmtDate(to),
       );
       if (!mounted) return;
       setState(() {
@@ -214,6 +289,7 @@ class OrdersPanelState extends State<OrdersPanel>
         _filteredOrders = _sorted(_orders);
         _isLoading = false;
       });
+      await _loadExtras();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -227,10 +303,61 @@ class OrdersPanelState extends State<OrdersPanel>
   /// Public — reload orders from API (pull-to-refresh / manual).
   void refreshOrders() => _loadOrders();
 
-  Future<void> _pickOrdersDate() async {
+  /// Дотягнути ознаки замовлень і оновити сигнал на бічній панелі.
+  Future<void> _loadExtras() async {
+    final extras = await OrderExtrasService.fetchExtras(_orders);
+    if (!mounted) return;
+    setState(() {
+      _extras = extras;
+      _checkedIds.removeWhere((id) => !_orders.any((o) => o.id == id));
+    });
+    _filterOrders();
+    _publishAlerts();
+  }
+
+  int get _slaCount => _orders
+      .where((o) => OrderExtrasService.slaFor(o, _extrasOf(o)) != OrderSla.none)
+      .length;
+  bool get _slaOverdue => _orders.any(
+      (o) => OrderExtrasService.slaFor(o, _extrasOf(o)) == OrderSla.overdue);
+  int get _unreadCount => _orders.where((o) => _extrasOf(o).hasUnread).length;
+  int get _newGlovoCount => _orders
+      .where((o) =>
+          o.type == OrderType.glovo && o.status == OrderStatus.newOrder)
+      .length;
+
+  /// Скільки замовлень потребують уваги — на кнопку «Інтернет-замовлення».
+  void _publishAlerts() {
+    final ids = <String>{
+      for (final o in _orders)
+        if (OrderExtrasService.slaFor(o, _extrasOf(o)) != OrderSla.none ||
+            _extrasOf(o).hasUnread ||
+            (o.type == OrderType.glovo && o.status == OrderStatus.newOrder))
+          o.id,
+    };
+    OrdersAlerts.state.value =
+        OrdersAlertState(count: ids.length, pulse: _slaOverdue);
+  }
+
+  /// Спеціальне замовлення (страхова, доставка, оплачене онлайн): у картці
+  /// замовлення показуємо блок видачі/атрибутів. Окремого вікна немає —
+  /// усе в одному інтерфейсі (Микола 22.09).
+  bool _isSpecial(InternetOrder o) =>
+      o.type == OrderType.likTas ||
+      o.type == OrderType.glovo ||
+      o.type == OrderType.novaPoshta ||
+      _extrasOf(o).prepaid;
+
+  /// Передоплата: ознака зі списку (мок) або підтверджена GetOrderData.
+  bool _isPrepaid(InternetOrder o) =>
+      _extrasOf(o).prepaid ||
+      (_selectedOrder?.id == o.id && _orderData?.isPaidOnline == true);
+
+  Future<void> _pickOrdersDate({required bool isFrom}) async {
+    final initial = isFrom ? _dateFrom : _dateTo;
     final picked = await showDatePicker(
       context: context,
-      initialDate: _ordersDate,
+      initialDate: initial ?? DateTime.now(),
       firstDate: DateTime(2024),
       lastDate: DateTime.now(),
       builder: (context, child) => Theme(
@@ -245,8 +372,72 @@ class OrdersPanelState extends State<OrdersPanel>
       ),
     );
     if (picked == null || !mounted) return;
-    setState(() => _ordersDate = picked);
+    setState(() {
+      if (isFrom) {
+        _dateFrom = picked;
+      } else {
+        _dateTo = picked;
+      }
+    });
+    // Період — параметр запиту, а не локальний фільтр: тягнемо заново.
     _loadOrders();
+  }
+
+  /// Чип дати «від»/«до» — такий самий, як у «Витратах по касі».
+  Widget _buildDateChip(String label, DateTime? value, {required bool isFrom}) {
+    final hasValue = value != null;
+    final text = hasValue ? _fmtDate(value) : label;
+    return GestureDetector(
+      onTap: () => _pickOrdersDate(isFrom: isFrom),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: hasValue ? const Color(0xFFE8F3FB) : const Color(0xFFF4F5F8),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: hasValue ? const Color(0xFF1E7DC8) : const Color(0xFFE5E7EB),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.calendar_today_rounded,
+                size: 12,
+                color: hasValue
+                    ? const Color(0xFF1E7DC8)
+                    : const Color(0xFF9CA3AF)),
+            const SizedBox(width: 4),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: hasValue ? FontWeight.w600 : FontWeight.w400,
+                color: hasValue
+                    ? const Color(0xFF1E7DC8)
+                    : const Color(0xFF6B7280),
+              ),
+            ),
+            if (hasValue) ...[
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    if (isFrom) {
+                      _dateFrom = null;
+                    } else {
+                      _dateTo = null;
+                    }
+                  });
+                  _loadOrders();
+                },
+                child: const Icon(Icons.close_rounded,
+                    size: 12, color: Color(0xFF1E7DC8)),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -262,6 +453,8 @@ class OrdersPanelState extends State<OrdersPanel>
 
   @override
   void dispose() {
+    _dupTimer?.cancel();
+    _prescriptionCtrl.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     disposeCheckout();
@@ -270,28 +463,56 @@ class OrdersPanelState extends State<OrdersPanel>
 
   /// Whether an order matches any of the active filter chips.
   bool _matchesFilters(InternetOrder o) {
-    if (_activeFilters.contains('Всі')) return true;
-    for (final f in _activeFilters) {
-      switch (f) {
-        case 'Нові':
-          if (o.status == OrderStatus.newOrder) return true;
-        case 'В обробці':
-          if (o.status == OrderStatus.inProgress) return true;
-        case 'Зібрані':
-          if (o.status == OrderStatus.collected) return true;
-        case 'В роботі':
-          if (o.status == OrderStatus.atWork) return true;
-        case 'Відпущено':
-          if (o.status == OrderStatus.paidOnline) return true;
-        case 'Завислі':
-          if (o.isStale) return true;
-        case 'Відмова клієнта':
-          if (o.status == OrderStatus.customerRefusal) return true;
-        case 'Відмова аптеки':
-          if (o.status == OrderStatus.pharmacyRefusal) return true;
-      }
+    switch (_activeFilter) {
+      case _filterAll:
+        return true;
+      case _filterNotCollected:
+        return o.status == OrderStatus.newOrder ||
+            o.status == OrderStatus.inProgress ||
+            o.status == OrderStatus.atWork;
+      case _filterPaid:
+        return o.status == OrderStatus.paidOnline ||
+            o.status == OrderStatus.dispensed;
+      case _filterRefused:
+        return o.status == OrderStatus.customerRefusal ||
+            o.status == OrderStatus.pharmacyRefusal ||
+            o.status == OrderStatus.refused;
+      case _filterWithMessages:
+        return _extrasOf(o).hasMessages;
+      case _filterSla:
+        return OrderExtrasService.slaFor(o, _extrasOf(o)) != OrderSla.none;
+      case _filterGlovo:
+        return o.type == OrderType.glovo;
+    }
+    return true;
+  }
+
+  static String _digits(String s) => s.replaceAll(RegExp(r'\D'), '');
+
+  /// Пошук лише за прямими ідентифікаторами (ТЗ §2): телефон клієнта, номер
+  /// замовлення, П.І.Б., номер доставки Glovo. За назвою товару — НЕ шукаємо:
+  /// це провокує видачу чужого замовлення.
+  bool _matchesQuery(InternetOrder o, String query) {
+    if (o.reserveNumber.toLowerCase().contains(query)) return true;
+    final name = o.customerName?.toLowerCase();
+    if (name != null && name.contains(query)) return true;
+    final glovo = _extrasOf(o).glovoNumber?.toLowerCase();
+    if (glovo != null && glovo.contains(query)) return true;
+    // Телефон: запит складається лише з цифр і знаків набору номера.
+    final qDigits = _digits(query);
+    final onlyPhoneChars = RegExp(r'^[\d\s()+\-]+$').hasMatch(query);
+    if (onlyPhoneChars && qDigits.length >= 4) {
+      final phone = _digits(o.customerPhone ?? '');
+      if (phone.isNotEmpty && phone.contains(qDigits)) return true;
     }
     return false;
+  }
+
+  /// Схоже на повний номер телефону (0XXXXXXXXX / 380XXXXXXXXX).
+  static bool _looksLikePhone(String query) {
+    final d = _digits(query);
+    return (d.length == 10 && d.startsWith('0')) ||
+        (d.length == 12 && d.startsWith('380'));
   }
 
   /// Sort: urgent non-collected first, then the rest chronologically.
@@ -315,37 +536,78 @@ class OrdersPanelState extends State<OrdersPanel>
         _highlightedIndex = -1;
       } else {
         _filteredOrders = _sorted(
-          _orders
-              .where((o) => o.reserveNumber.toLowerCase().contains(query))
-              .toList(),
+          _orders.where((o) => _matchesQuery(o, query)).toList(),
         );
         // Auto-highlight the first match
         _highlightedIndex = _filteredOrders.isNotEmpty ? 0 : -1;
       }
     });
+    if (_looksLikePhone(query)) _lastPhone = _digits(query);
+    _checkDuplicateDigits(query);
   }
 
+  // ── Захист від дублювання останніх 4 цифр номера ─────────────────────────
+
+  /// Чинні замовлення, номер яких закінчується на [digits].
+  List<InternetOrder> _duplicatesFor(String digits) => _orders
+      .where((o) =>
+          o.reserveNumber.endsWith(digits) &&
+          (o.status == OrderStatus.newOrder ||
+              o.status == OrderStatus.collected ||
+              o.status == OrderStatus.inProgress))
+      .toList();
+
+  /// Рівно 4 цифри і 2+ чинних замовлень → Enter блокується, з'являється
+  /// вікно уточнення. Вікно чекає 0,7 с без набору: інакше воно вискакувало
+  /// б посеред введення повного номера (повний номер механізм не чіпає).
+  void _checkDuplicateDigits(String query) {
+    _dupTimer?.cancel();
+    final isFour = RegExp(r'^\d{4}$').hasMatch(query);
+    final blocked = isFour && _duplicatesFor(query).length >= 2;
+    final next = blocked ? query : null;
+    if (next != _dupBlockedQuery) setState(() => _dupBlockedQuery = next);
+    if (blocked) {
+      _dupTimer = Timer(const Duration(milliseconds: 700), () {
+        if (mounted && _searchController.text.trim() == query) {
+          _showDuplicateDialog(query);
+        }
+      });
+    }
+  }
+
+  Future<void> _showDuplicateDialog(String digits) async {
+    if (_dupDialogOpen || _selectedOrder != null) return;
+    final dups = _duplicatesFor(digits);
+    if (dups.length < 2) return;
+    _dupDialogOpen = true;
+    final full = await showOrderDuplicateDialog(context,
+        lastDigits: digits, duplicates: dups);
+    _dupDialogOpen = false;
+    if (!mounted) return;
+    // ОК → повний номер у пошук (Enter розблоковано); Скасувати → пошук
+    // очищується, відкривати нема чого.
+    _searchController.text = full ?? '';
+    _searchController.selection =
+        TextSelection.collapsed(offset: _searchController.text.length);
+    _searchFocusNode.requestFocus();
+  }
+
+  /// Один вибір; повторний клік по обраному повертає «Всі».
   void _toggleFilter(String label) {
     setState(() {
-      if (label == 'Всі') {
-        // "Всі" is exclusive — clear others
-        _activeFilters = {'Всі'};
-      } else {
-        _activeFilters.remove('Всі');
-        if (_activeFilters.contains(label)) {
-          _activeFilters.remove(label);
-          // If none left, auto-select "Всі"
-          if (_activeFilters.isEmpty) _activeFilters = {'Всі'};
-        } else {
-          _activeFilters.add(label);
-        }
-      }
+      _activeFilter = _activeFilter == label ? _filterAll : label;
     });
     _filterOrders();
   }
 
   /// Open highlighted order (Enter from search field).
   void _openHighlighted() {
+    final blocked = _dupBlockedQuery;
+    if (blocked != null && blocked == _searchController.text.trim()) {
+      _dupTimer?.cancel();
+      _showDuplicateDialog(blocked);
+      return;
+    }
     if (_highlightedIndex >= 0 &&
         _highlightedIndex < _filteredOrders.length) {
       _selectOrder(_filteredOrders[_highlightedIndex]);
@@ -390,10 +652,17 @@ class OrdersPanelState extends State<OrdersPanel>
 
     for (final item in order.items) {
       if (item.isEnriched) continue;
+      // «Знижка на чек» та інші службові рядки — без кодів, збагачувати нічого.
+      if (item.isServiceLine) {
+        item.isEnriched = true;
+        continue;
+      }
       try {
-        // Fetch detail (image, series, expiry) and price (storage locations) in parallel
+        // GetSKUdetail — за кодом СЦ (ids) або ukod; GetSKUprice (стелажі) —
+        // за s-кодом партії (skod). Раніше в обидва йшов ids (код СЦ), і
+        // GetSKUprice стелажів не давав — він приймає лише s-код/штрихкод.
         final results = await Future.wait([
-          DrugService.fetchSKUDetail(item.sku),
+          DrugService.fetchSKUDetail(item.detailIds),
           DrugService.getStockAndPrices(item.sku),
         ]);
         final detail = results[0] as SKUDetailResult?;
@@ -410,7 +679,16 @@ class OrdersPanelState extends State<OrdersPanel>
         } else {
           imageUrl = detail?.imageUrl;
 
-          // Fallback: якщо Caché не повернув зображення — шукаємо через anc.ua
+          // anc.ua за кодом СЦ — детермінований шлях без звірки назв
+          // (той самий, що в картці товару з 1f36d0c).
+          final kodSc = item.kodSc ?? detail?.kodSc;
+          if ((imageUrl == null || imageUrl.isEmpty) && kodSc != null) {
+            final byKod = await ProductBrowserService.fetchByKodSc(kodSc);
+            imageUrl = byKod?.imageUrl;
+            if (!mounted) return;
+          }
+
+          // Fallback: якщо ні Caché, ні код СЦ не дали зображення — пошук за назвою
           if (imageUrl == null || imageUrl.isEmpty) {
             try {
               List<ProductSearchResult> searchResults = [];
@@ -684,6 +962,18 @@ class OrdersPanelState extends State<OrdersPanel>
   void _enterOrderCheckout() {
     final order = _selectedOrder;
     if (order == null) return;
+    // Передоплачене (LiqPay): каса заблокована, доки код видачі з SMS
+    // покупця не пройшов перевірку (ТЗ §10).
+    if (_isPrepaid(order) && !_issueVerifiedIds.contains(order.id)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Спершу введіть і перевірте код видачі замовлення '
+            'з SMS покупця.'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Color(0xFFB45309),
+        duration: Duration(seconds: 4),
+      ));
+      return;
+    }
     // Collected/paidOnline orders skip scan check (already collected).
     // Non-collected orders require all items to be scanned first.
     // TODO: paidOnline — skip register payment step (separate task)
@@ -730,10 +1020,12 @@ class OrdersPanelState extends State<OrdersPanel>
 
   // ── Refusal flow ──────────────────────────────────────────────────────────
 
+  /// Регламентовані причини (ТЗ Юлії §5). «Негабарит» потрібен для
+  /// кур'єрських замовлень: Glovo великогабаритні позиції не відсікає.
   static const _refusalReasons = [
-    'Продано (немає на залишку)',
+    'Товару немає на залишку',
     'Пересорт',
-    'Неможлива доставка',
+    'Негабарит',
   ];
 
   /// Show refusal reason picker dialog.
@@ -877,15 +1169,20 @@ class OrdersPanelState extends State<OrdersPanel>
     }
 
     // Оновлюємо статус на сервері
-    OrderService.updateOrderStatus(
-      orderId: order.id,
-      newStatus: 'apteka pay',
-      user: AuthService.currentUser ?? '',
-    ).then((response) {
-      if (!response.isOk) {
-        debugPrint('UpdateOrderStatus (pay) failed: ${response.result}');
-      }
-    });
+    // Об'єднаний чек: статус оновлюється по кожному вихідному замовленню.
+    final paidIds =
+        order.isMerged ? order.mergedFrom.map((r) => r.id) : [order.id];
+    for (final id in paidIds) {
+      OrderService.updateOrderStatus(
+        orderId: id,
+        newStatus: 'apteka pay',
+        user: AuthService.currentUser ?? '',
+      ).then((response) {
+        if (!response.isOk) {
+          debugPrint('UpdateOrderStatus (pay) $id failed: ${response.result}');
+        }
+      });
+    }
 
     setState(() => showPaymentSuccess = true);
     Future.delayed(const Duration(seconds: 2), () {
@@ -1024,11 +1321,31 @@ class OrdersPanelState extends State<OrdersPanel>
         _buildListHeader(),
         const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
         _buildSearchField(),
+        _buildDateRow(),
+        _buildAlertRow(),
         _buildFilterChips(),
         const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
         Expanded(child: _buildOrdersList()),
         _buildListFooter(),
       ],
+    );
+  }
+
+  /// Рядок періоду «від — до» під пошуком (як у «Витратах по касі»).
+  Widget _buildDateRow() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+      child: Row(
+        children: [
+          _buildDateChip('від', _dateFrom, isFrom: true),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4),
+            child: Text('—',
+                style: TextStyle(color: Color(0xFF6B7280), fontSize: 12)),
+          ),
+          _buildDateChip('до', _dateTo, isFrom: false),
+        ],
+      ),
     );
   }
 
@@ -1068,35 +1385,6 @@ class OrdersPanelState extends State<OrdersPanel>
             ),
           ),
           const Spacer(),
-          // Date picker button
-          GestureDetector(
-            onTap: _pickOrdersDate,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF4F5F8),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0xFFE5E7EB)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.calendar_today_rounded,
-                      size: 12, color: Color(0xFF6B7280)),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${_ordersDate.day.toString().padLeft(2, '0')}.${_ordersDate.month.toString().padLeft(2, '0')}.${_ordersDate.year}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF374151),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
           // Refresh button
           if (!_isLoading)
             HoverIconButton(
@@ -1137,9 +1425,109 @@ class OrdersPanelState extends State<OrdersPanel>
     );
   }
 
+  /// Сигнали списку (ТЗ §6–8): час на збір, непрочитані від кол-центру, нові
+  /// Glovo. Рядка немає, доки немає жодного сигналу. Клік — фільтр списку.
+  Widget _buildAlertRow() {
+    final sla = _slaCount;
+    final unread = _unreadCount;
+    final glovo = _newGlovoCount;
+    if (sla == 0 && unread == 0 && glovo == 0) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        children: [
+          if (sla > 0)
+            Blink(
+              active: _slaOverdue,
+              child: OrderPill(
+                icon: Icons.timer_outlined,
+                text: 'Час на збір · $sla',
+                color: _slaOverdue ? Colors.white : const Color(0xFFDC2626),
+                background: _slaOverdue
+                    ? const Color(0xFFDC2626)
+                    : const Color(0xFFFEE2E2),
+                border: _slaOverdue
+                    ? const Color(0xFFDC2626)
+                    : const Color(0xFFFECACA),
+                tooltip: 'Замовлення, у яких спливає або вийшов час на збір'
+                    '${OrderExtrasService.isMock ? ' (демо)' : ''}',
+                onTap: () => _toggleFilter(_filterSla),
+              ),
+            ),
+          if (unread > 0)
+            OrderPill(
+              icon: Icons.mark_email_unread_rounded,
+              text: 'Від кол-центру · $unread',
+              color: const Color(0xFF1E7DC8),
+              background: const Color(0xFFE8F3FB),
+              border: const Color(0xFFBFDBFE),
+              tooltip: 'Показати замовлення з перепискою'
+                  '${OrderExtrasService.isMock ? ' (демо)' : ''}',
+              onTap: () => _toggleFilter(_filterWithMessages),
+            ),
+          if (glovo > 0)
+            OrderPill(
+              icon: Icons.delivery_dining_rounded,
+              text: 'Glovo · $glovo',
+              color: const Color(0xFFEA580C),
+              background: const Color(0xFFFFF7ED),
+              border: const Color(0xFFFED7AA),
+              tooltip: 'Нові замовлення Glovo',
+              onTap: () => _toggleFilter(_filterGlovo),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSearchField() {
+    final last = _lastPhone;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      child: Row(
+        children: [
+          Expanded(child: _buildSearchInput()),
+          const SizedBox(width: 6),
+          // «Останній №» — номер телефону, введений раніше в цій сесії.
+          Tooltip(
+            message: last == null
+                ? 'Номер телефону ще не вводили'
+                : 'Підставити $last',
+            child: SizedBox(
+              height: 34,
+              child: OutlinedButton(
+                onPressed: last == null
+                    ? null
+                    : () {
+                        _searchController.text = last;
+                        _searchController.selection =
+                            TextSelection.collapsed(offset: last.length);
+                        _searchFocusNode.requestFocus();
+                      },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1E7DC8),
+                  disabledForegroundColor: const Color(0xFF9CA3AF),
+                  side: const BorderSide(color: Color(0xFFE5E7EB)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  textStyle: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+                child: const Text('Останній №'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchInput() {
+    return Padding(
+      padding: EdgeInsets.zero,
       child: SizedBox(
         height: 34,
         child: TextField(
@@ -1148,7 +1536,7 @@ class OrdersPanelState extends State<OrdersPanel>
           style: const TextStyle(fontSize: 13, color: Color(0xFF1C1C2E)),
           onSubmitted: (_) => _openHighlighted(),
           decoration: InputDecoration(
-            hintText: 'Номер замовлення, П.І.Б., Glovo',
+            hintText: 'Телефон, № замовлення, П.І.Б., Glovo',
             hintStyle:
                 const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
             prefixIcon: const Icon(Icons.search_rounded,
@@ -1193,8 +1581,12 @@ class OrdersPanelState extends State<OrdersPanel>
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-        children: _filterLabels.map((label) {
-          final isSelected = _activeFilters.contains(label);
+        children: [
+          ..._filterLabels,
+          if (!_filterLabels.contains(_activeFilter)) _activeFilter,
+        ].map((label) {
+          final isSelected = _activeFilter == label;
+          final isTemporary = !_filterLabels.contains(label);
           return Padding(
             padding: const EdgeInsets.only(right: 6),
             child: GestureDetector(
@@ -1213,14 +1605,25 @@ class OrdersPanelState extends State<OrdersPanel>
                         : const Color(0xFFE5E7EB),
                   ),
                 ),
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    color:
-                        isSelected ? Colors.white : const Color(0xFF6B7280),
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w500,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: isSelected
+                            ? Colors.white
+                            : const Color(0xFF6B7280),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (isTemporary) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.close_rounded,
+                          size: 12, color: Colors.white),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -1275,6 +1678,20 @@ class OrdersPanelState extends State<OrdersPanel>
       );
     }
 
+    final dupBlocked = _dupBlockedQuery != null;
+    if (widget.layout == OrdersPanelLayout.fullscreen) {
+      return OrdersGrid(
+        orders: _filteredOrders,
+        extras: _extras,
+        checkedIds: _checkedIds,
+        canCheck: _canCheck,
+        onToggleCheck: _toggleCheck,
+        onOpen: _selectOrder,
+        onOpenMessages: _openMessages,
+        highlightedIndex: _hasQuery && !dupBlocked ? _highlightedIndex : -1,
+      );
+    }
+
     return ListView.separated(
       padding: const EdgeInsets.symmetric(vertical: 2),
       itemCount: _filteredOrders.length,
@@ -1282,9 +1699,16 @@ class OrdersPanelState extends State<OrdersPanel>
           const Divider(height: 1, thickness: 1, color: Color(0xFFF4F5F8)),
       itemBuilder: (context, index) {
         final order = _filteredOrders[index];
+        final extras = _extrasOf(order);
         return _OrderListTile(
           order: order,
-          highlighted: _hasQuery && index == _highlightedIndex,
+          extras: extras,
+          sla: OrderExtrasService.slaFor(order, extras),
+          checked: _checkedIds.contains(order.id),
+          onCheck: _canCheck(order) ? () => _toggleCheck(order) : null,
+          onOpenMessages: () => _openMessages(order),
+          highlighted:
+              _hasQuery && !dupBlocked && index == _highlightedIndex,
           onTap: () => _selectOrder(order),
         );
       },
@@ -1292,6 +1716,144 @@ class OrdersPanelState extends State<OrdersPanel>
   }
 
   Widget _buildListFooter() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_checkedIds.isNotEmpty) _buildMergeBar(),
+        _buildDisbandedFooter(),
+      ],
+    );
+  }
+
+  /// «Об'єднати (N)» — відпуск 2+ замовлень одного клієнта одним чеком.
+  Widget _buildMergeBar() {
+    final n = _checkedIds.length;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF0F7FF),
+        border: Border(top: BorderSide(color: Color(0xFFBFDBFE))),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: SizedBox(
+              height: 36,
+              child: ElevatedButton.icon(
+                onPressed: n >= 2 ? _mergeChecked : null,
+                icon: const _MergeIcon(size: 15),
+                label: Text(n >= 2
+                    ? 'Об\'єднати ($n)'
+                    : 'Оберіть ще одне'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E7DC8),
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: const Color(0xFFE5E7EB),
+                  disabledForegroundColor: const Color(0xFF6B7280),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  textStyle: const TextStyle(
+                      fontSize: 12.5, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: () => setState(_checkedIds.clear),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF6B7280),
+              textStyle: const TextStyle(fontSize: 12),
+            ),
+            child: const Text('Зняти позначки'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Об'єднувати можна лише чинні, ще не об'єднані замовлення.
+  bool _canCheck(InternetOrder o) =>
+      !o.isMerged &&
+      (o.status == OrderStatus.newOrder ||
+          o.status == OrderStatus.inProgress ||
+          o.status == OrderStatus.collected ||
+          o.status == OrderStatus.atWork);
+
+  void _toggleCheck(InternetOrder o) {
+    setState(() {
+      if (!_checkedIds.remove(o.id)) _checkedIds.add(o.id);
+    });
+  }
+
+  /// Об'єднання позначених замовлень в один чек (ТЗ §9).
+  Future<void> _mergeChecked() async {
+    final list = _orders.where((o) => _checkedIds.contains(o.id)).toList()
+      ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
+    if (list.length < 2) return;
+
+    // Один чек — один клієнт: різні телефони об'єднувати не даємо.
+    final phones = {
+      for (final o in list)
+        if (_digits(o.customerPhone ?? '').isNotEmpty)
+          _digits(o.customerPhone!).replaceFirst(RegExp(r'^38'), ''),
+    };
+    if (phones.length > 1) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Обрані замовлення належать різним клієнтам — '
+            'в один чек об\'єднуються лише замовлення одного клієнта.'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Color(0xFFB45309),
+        duration: Duration(seconds: 5),
+      ));
+      return;
+    }
+
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('Об\'єднання замовлень',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        content: Text(
+          'Ви дійсно бажаєте об\'єднати обрані інтернет замовлення в один '
+          'чек ? Клієнт має надати згоду.\n\n'
+          '${list.map((o) => '№${o.reserveNumber} — ${o.total.asMoney} ₴').join('\n')}',
+          style: const TextStyle(fontSize: 13, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Скасувати'),
+          ),
+          ElevatedButton(
+            autofocus: true,
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E7DC8),
+              foregroundColor: Colors.white,
+              elevation: 0,
+            ),
+            child: const Text('Так'),
+          ),
+        ],
+      ),
+    );
+    if (yes != true || !mounted) return;
+    _mergeOrderList(list);
+  }
+
+  Future<void> _openMessages(InternetOrder order) async {
+    final next = await showOrderMessagesDialog(context, order);
+    if (!mounted) return;
+    setState(() => _extras = {..._extras, order.id: next});
+    _filterOrders();
+    _publishAlerts();
+  }
+
+  Widget _buildDisbandedFooter() {
     final refusedCount = _refusedOrders.length;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
@@ -1350,6 +1912,23 @@ class OrdersPanelState extends State<OrdersPanel>
               // Only shown when there are extra fields not in the header
               // (payment, delivery, insurance, medical programs, etc.)
               _buildOrderDataSection(),
+              if (_isSpecial(order) || _isPrepaid(order))
+                OrderIssueBlock(
+                  key: ValueKey('issue_${order.id}'),
+                  order: order,
+                  extras: _extrasOf(order),
+                  paidOnlineConfirmed: _orderData?.isPaidOnline == true,
+                  verified: _issueVerifiedIds.contains(order.id),
+                  onVerifiedChanged: (ok) => setState(() {
+                    if (ok) {
+                      _issueVerifiedIds.add(order.id);
+                    } else {
+                      _issueVerifiedIds.remove(order.id);
+                    }
+                  }),
+                  prescriptionController: _prescriptionCtrl,
+                ),
+              if (order.isMerged) _buildMergedSummary(order),
               for (final item in order.items)
                 _OrderItemRow(
                   item: item,
@@ -1498,6 +2077,16 @@ class OrdersPanelState extends State<OrdersPanel>
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (_extrasOf(order).autoConfirm) ...[
+                const AutoConfirmMark(size: 16),
+                const SizedBox(width: 6),
+              ],
+              if (OrderExtrasService.slaFor(order, _extrasOf(order)) !=
+                  OrderSla.none) ...[
+                SlaBadge(
+                    sla: OrderExtrasService.slaFor(order, _extrasOf(order))),
+                const SizedBox(width: 6),
+              ],
               _OrderStatusBadge(status: order.status),
             ],
           ),
@@ -1638,8 +2227,12 @@ class OrdersPanelState extends State<OrdersPanel>
               children: [
                 const Icon(Icons.point_of_sale_rounded, size: 16),
                 const SizedBox(width: 8),
-                const Text('Розрахувати',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                Text(
+                    _selectedOrder != null && _isPrepaid(_selectedOrder!)
+                        ? 'Пробити по касі'
+                        : 'Розрахувати',
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600)),
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
@@ -1713,10 +2306,9 @@ class OrdersPanelState extends State<OrdersPanel>
         builder: (ctx, setDialogState) {
           final filtered = searchQuery.isEmpty
               ? candidates
-              : candidates.where((o) =>
-                  o.reserveNumber.toLowerCase().contains(searchQuery) ||
-                  o.id.contains(searchQuery) ||
-                  o.items.any((item) => item.name.toLowerCase().contains(searchQuery))).toList();
+              : candidates
+                  .where((o) => _matchesQuery(o, searchQuery))
+                  .toList();
 
           return Dialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -1763,7 +2355,7 @@ class OrdersPanelState extends State<OrdersPanel>
                       searchQuery = v.trim().toLowerCase();
                     }),
                     decoration: InputDecoration(
-                      hintText: 'Пошук по номеру замовлення',
+                      hintText: 'Телефон, № замовлення, П.І.Б.',
                       hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
                       prefixIcon: const Icon(Icons.search, size: 16, color: Color(0xFF9CA3AF)),
                       prefixIconConstraints: const BoxConstraints(minWidth: 36),
@@ -1922,50 +2514,67 @@ class OrdersPanelState extends State<OrdersPanel>
   }
 
   void _mergeOrders(InternetOrder target, Set<String> sourceIds) {
+    _mergeOrderList([
+      target,
+      ..._orders.where((o) => sourceIds.contains(o.id)),
+    ]);
+  }
+
+  /// Звести кілька замовлень в одне (перше — цільове). Об'єднання поки
+  /// ЛОКАЛЬНЕ: серверної зведеної накладної немає, статуси після оплати
+  /// оновлюються по кожному вихідному замовленню окремо.
+  void _mergeOrderList(List<InternetOrder> list) {
+    if (list.length < 2) return;
+    final target = list.first;
     final targetIdx = _orders.indexWhere((o) => o.id == target.id);
     if (targetIdx < 0) return;
 
-    // Collect items from source orders
-    final newItems = <OrderItem>[];
-    double addedTotal = 0;
-    for (final srcId in sourceIds) {
-      final srcIdx = _orders.indexWhere((o) => o.id == srcId);
-      if (srcIdx < 0) continue;
-      final srcOrder = _orders[srcIdx];
-      newItems.addAll(srcOrder.items);
-      addedTotal += srcOrder.total;
-    }
-
-    if (newItems.isEmpty) return;
-
-    // Create merged order with combined items
-    final mergedItems = [...target.items, ...newItems];
+    final refs = <MergedOrderRef>[
+      for (final o in list)
+        if (o.isMerged)
+          ...o.mergedFrom
+        else
+          MergedOrderRef(
+              id: o.id, reserveNumber: o.reserveNumber, total: o.total),
+    ];
+    final allCollected =
+        list.every((o) => o.status == OrderStatus.collected);
     final merged = InternetOrder(
       id: target.id,
       reserveNumber: target.reserveNumber,
       dateTime: target.dateTime,
-      total: target.total + addedTotal,
-      status: target.status,
+      total: list.fold(0.0, (s, o) => s + o.total),
+      // Якщо хоч одне ще не зібране — об'єднане треба досканувати.
+      status: allCollected ? OrderStatus.collected : OrderStatus.inProgress,
       lockerCell: target.lockerCell,
       type: target.type,
-      items: mergedItems,
-      customerPhone: target.customerPhone,
-      customerName: target.customerName,
-      isUrgent: target.isUrgent,
-      isLockerEligible: target.isLockerEligible,
+      items: [for (final o in list) ...o.items],
+      customerPhone: target.customerPhone ??
+          list.map((o) => o.customerPhone).whereType<String>().firstOrNull,
+      customerName: target.customerName ??
+          list.map((o) => o.customerName).whereType<String>().firstOrNull,
+      isUrgent: list.any((o) => o.isUrgent),
+      isLockerEligible: false,
       refusalReason: target.refusalReason,
+      mergedFrom: refs,
     );
 
+    final sourceIds = {for (final o in list.skip(1)) o.id};
+    FiscalLog.log('ІЗ об\'єднання в один чек: '
+        '${refs.map((r) => '№${r.reserveNumber}').join(' + ')} = '
+        '${merged.total.asMoney} ₴ (локально)');
     setState(() {
       _orders[targetIdx] = merged;
-      // Remove source orders from the list
       _orders.removeWhere((o) => sourceIds.contains(o.id));
+      _checkedIds.clear();
       _selectedOrder = merged;
-      _filterOrders();
+      _scannedSkus.clear();
+      _orderData = null;
+      _orderDataLoading = false;
+      // Усе зібране → одразу форма оплати об'єднаного замовлення.
+      _orderCheckoutMode = allCollected;
     });
-
-    debugPrint('Merged ${sourceIds.length} orders into ${target.id}: '
-        '${mergedItems.length} items, total=${merged.total}');
+    _filterOrders();
   }
 
   // ── Not-collected order actions: Розрахувати + Лікомат + Відмовити + Відсутність
@@ -2335,7 +2944,9 @@ class OrdersPanelState extends State<OrdersPanel>
               ),
             ),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
+          _buildMessagesButton(order),
+          const SizedBox(height: 8),
           // Action buttons — depend on order status
           if (order.status == OrderStatus.paidOnline ||
               order.status == OrderStatus.dispensed)
@@ -2363,10 +2974,143 @@ class OrdersPanelState extends State<OrdersPanel>
         const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
         Expanded(
           child: SingleChildScrollView(
-            child: _buildCheckoutBody(order),
+            child: Column(
+              children: [
+                if (order.isMerged) _buildMergedSummary(order),
+                _buildCheckoutBody(order),
+              ],
+            ),
           ),
         ),
       ],
+    );
+  }
+
+  /// «Перелік замовлень» об'єднаного чека (ТЗ §9): № резерву й сума
+  /// кожного, кількість і загальна сума. Накладні з'являться, коли сервер
+  /// навчиться створювати зведену.
+  Widget _buildMergedSummary(InternetOrder order) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F7FF),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFBFDBFE)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const _MergeIcon(size: 15),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  'Об\'єднане замовлення · ${order.mergedFrom.length} шт.',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1C1C2E),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final r in order.mergedFrom)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text('№ резерву ${r.reserveNumber}',
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFF374151))),
+                  ),
+                  Text('${r.total.asMoney} ₴',
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1C1C2E))),
+                ],
+              ),
+            ),
+          const Divider(height: 12, color: Color(0xFFBFDBFE)),
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Сума замовлень',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1C1C2E))),
+              ),
+              Text('${order.total.asMoney} ₴',
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1E7DC8))),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// «Повідомлення» — переписка з кол-центром (ТЗ §5). Читати можна завжди;
+  /// писати першим — лише по замовленнях понад 1000 грн.
+  Widget _buildMessagesButton(InternetOrder order) {
+    final extras = _extrasOf(order);
+    final canOpen = extras.hasMessages || OrderExtrasService.canSend(order);
+    final count = extras.messages.length;
+    return SizedBox(
+      width: double.infinity,
+      height: 34,
+      child: OutlinedButton.icon(
+        onPressed: () {
+          if (canOpen) {
+            _openMessages(order);
+            return;
+          }
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Написати кол-центру можна лише по замовленнях на '
+                'суму понад ${OrderExtrasService.outgoingMinTotal.asMoney} ₴ '
+                '(обмеження передачі персональних даних).'),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: const Color(0xFFB45309),
+            duration: const Duration(seconds: 4),
+          ));
+        },
+        icon: Icon(
+          extras.hasUnread
+              ? Icons.mark_email_unread_rounded
+              : Icons.mail_outline_rounded,
+          size: 15,
+        ),
+        label: Text(
+          extras.hasUnread
+              ? 'Повідомлення · нове від кол-центру'
+              : count > 0
+                  ? 'Повідомлення · $count'
+                  : 'Повідомлення',
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor:
+              canOpen ? const Color(0xFF1E7DC8) : const Color(0xFF9CA3AF),
+          side: BorderSide(
+              color: extras.hasUnread
+                  ? const Color(0xFF1E7DC8)
+                  : const Color(0xFFE5E7EB)),
+          backgroundColor:
+              extras.hasUnread ? const Color(0xFFE8F3FB) : Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          textStyle:
+              const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+        ),
+      ),
     );
   }
 
@@ -2700,10 +3444,22 @@ class _OrderSmallButton extends StatelessWidget {
 
 class _OrderListTile extends StatefulWidget {
   final InternetOrder order;
+  final OrderExtras extras;
+  final OrderSla sla;
+  final bool checked;
+
+  /// null — замовлення не можна об'єднувати (чекбокса немає).
+  final VoidCallback? onCheck;
+  final VoidCallback? onOpenMessages;
   final bool highlighted;
   final VoidCallback onTap;
   const _OrderListTile({
     required this.order,
+    this.extras = OrderExtras.empty,
+    this.sla = OrderSla.none,
+    this.checked = false,
+    this.onCheck,
+    this.onOpenMessages,
     this.highlighted = false,
     required this.onTap,
   });
@@ -2719,16 +3475,17 @@ class _OrderListTileState extends State<_OrderListTile> {
   Widget build(BuildContext context) {
     final order = widget.order;
     final isHighlighted = widget.highlighted;
-    // Build product names subtitle: full name for 1 item, first 10 chars each for multiple
-    final realItems = order.items.where((i) => i.total >= 0).toList();
-    final String itemsSummary;
-    if (realItems.length == 1) {
-      itemsSummary = realItems.first.name;
-    } else {
-      itemsSummary = realItems
-          .map((i) => i.name.length > 10 ? '${i.name.substring(0, 10)}…' : i.name)
-          .join(', ');
-    }
+    // Склад замовлення: одна позиція — повна назва, кілька — перші 15
+    // символів кожної через кому (ТЗ §3).
+    final realItems = order.items.where((i) => !i.isServiceLine).toList();
+    final itemsSummary = realItems.length == 1
+        ? realItems.first.name
+        : orderItemsPreview(order);
+    final extras = widget.extras;
+    final t = order.dateTime;
+    final dateLabel =
+        '${t.day.toString().padLeft(2, '0')}.${t.month.toString().padLeft(2, '0')} '
+        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -2752,6 +3509,23 @@ class _OrderListTileState extends State<_OrderListTile> {
           ),
           child: Row(
             children: [
+              // «Об'єднати» — відпуск кількох замовлень одним чеком
+              if (widget.onCheck != null) ...[
+                Tooltip(
+                  message: 'Позначити для об\'єднання в один чек',
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: Checkbox(
+                      value: widget.checked,
+                      onChanged: (_) => widget.onCheck!(),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      activeColor: const Color(0xFF1E7DC8),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
               // Status dot
               _StatusDot(status: order.status, isUrgent: order.isUrgent),
               const SizedBox(width: 10),
@@ -2760,7 +3534,9 @@ class _OrderListTileState extends State<_OrderListTile> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      runSpacing: 3,
                       children: [
                         Text(
                           order.reserveNumber,
@@ -2802,27 +3578,6 @@ class _OrderListTileState extends State<_OrderListTile> {
                                     ),
                                   ),
                                 ],
-                              ),
-                            ),
-                          ] else if (order.type == OrderType.glovo) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 5, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFFF7ED),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                    color: const Color(0xFFFED7AA)),
-                              ),
-                              child: const Text(
-                                'Glovo',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFFEA580C),
-                                  letterSpacing: 0.2,
-                                ),
                               ),
                             ),
                           ],
@@ -2908,12 +3663,48 @@ class _OrderListTileState extends State<_OrderListTile> {
                             ),
                           ),
                         ],
+                        // ── Glovo: окрема позначка завжди (ТЗ §8) ──
+                        if (order.type == OrderType.glovo) ...[
+                          const SizedBox(width: 6),
+                          const OrderPill(
+                            icon: Icons.delivery_dining_rounded,
+                            text: 'Glovo',
+                            color: Color(0xFFEA580C),
+                            background: Color(0xFFFFF7ED),
+                            border: Color(0xFFFED7AA),
+                          ),
+                        ],
+                        if (order.isMerged) ...[
+                          const SizedBox(width: 6),
+                          OrderPill(
+                            text: 'Об\'єднано ${order.mergedFrom.length}',
+                            color: const Color(0xFF1E7DC8),
+                            background: const Color(0xFFF0F7FF),
+                            border: const Color(0xFFBFDBFE),
+                          ),
+                        ],
+                        if (extras.autoConfirm) ...[
+                          const SizedBox(width: 6),
+                          const AutoConfirmMark(),
+                        ],
+                        if (widget.sla != OrderSla.none) ...[
+                          const SizedBox(width: 6),
+                          SlaBadge(sla: widget.sla),
+                        ],
+                        if (extras.hasMessages) ...[
+                          const SizedBox(width: 6),
+                          MessageEnvelope(
+                            unread: extras.hasUnread,
+                            onTap: widget.onOpenMessages,
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 2),
-                    // Source + customer name + items summary
+                    // Date-time + source + customer name + items summary
                     Text(
                       [
+                        dateLabel,
                         order.typeLabel,
                         if (order.customerName != null) order.customerName!,
                         itemsSummary,
@@ -3127,10 +3918,19 @@ class _OrderItemRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDiscount = item.total < 0;
-    final qtyStr = item.fraction ??
-        (item.quantity % 1 == 0
-            ? item.quantity.toInt().toString()
-            : item.quantity.toString());
+    final qtyStr = item.quantity % 1 == 0
+        ? item.quantity.toInt().toString()
+        : item.quantity.toString().replaceAll('.', ',');
+    // Код · виробник · термін із замовлення (ТЗ §4). Термін із замовлення
+    // показуємо, лише якщо збагачення не дало точнішого терміну партії.
+    final metaLine = isDiscount
+        ? ''
+        : [
+            if (item.sku.isNotEmpty) 'Код ${item.sku}',
+            if ((item.manufacturer ?? '').isNotEmpty) item.manufacturer!,
+            if (item.expiryDate != null && item.enrichedExpiryDate == null)
+              'до ${item.expiryDate}',
+          ].join(' · ');
 
     // INVERTED: unscanned = blue (attention needed), scanned = green (done)
     final Color bgColor;
@@ -3337,9 +4137,31 @@ class _OrderItemRow extends StatelessWidget {
                         ),
                       ],
                     ],
+                    if (metaLine.isNotEmpty) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        metaLine,
+                        style: const TextStyle(
+                            fontSize: 10.5, color: Color(0xFF6B7280)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    if ((item.refusalReason ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        'Причина відмови: ${item.refusalReason}',
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFDC2626),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 2),
                     Text(
-                      '${item.price.asMoney} ₴ × $qtyStr',
+                      '${item.price.asMoney} ₴ × $qtyStr'
+                      '${item.fraction != null ? ' · дріб ${item.fraction}' : ''}',
                       style: TextStyle(
                         color: isScanned
                             ? const Color(0xFF86EFAC)

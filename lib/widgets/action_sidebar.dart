@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../services/order_extras_service.dart';
+import 'orders/order_indicators.dart';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Vertical quick-action sidebar shown on the far right of the POS screen.
 // Most buttons are stubs — functionality wired later.
@@ -12,8 +15,6 @@ class ActionSidebar extends StatelessWidget {
   /// Whether the orders panel is currently open (shows active state).
   final bool ordersActive;
 
-  /// Number of urgent non-collected orders (red dot badge on button).
-  final int urgentCount;
 
   /// Callback when "Витрати по касі" button is tapped.
   final VoidCallback? onExpensesTap;
@@ -58,7 +59,6 @@ class ActionSidebar extends StatelessWidget {
     super.key,
     this.onOrdersTap,
     this.ordersActive = false,
-    this.urgentCount = 0,
     this.onExpensesTap,
     this.expensesActive = false,
     this.onPrescriptionTap,
@@ -74,8 +74,17 @@ class ActionSidebar extends StatelessWidget {
     this.hasRobot = false,
   });
 
+  /// Лічильник на «Інтернет-замовлення» приходить із [OrdersAlerts]:
+  /// панель замовлень публікує, скільки замовлень потребують уваги.
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<OrdersAlertState>(
+      valueListenable: OrdersAlerts.state,
+      builder: (context, alerts, _) => _buildButtons(context, alerts),
+    );
+  }
+
+  Widget _buildButtons(BuildContext context, OrdersAlertState alerts) {
     final buttons = [
       _SidebarItem(
         icon: Icons.mail_outline_rounded,
@@ -90,7 +99,8 @@ class ActionSidebar extends StatelessWidget {
         tooltip: 'Інтернет-замовлення',
         onTap: onOrdersTap,
         isActive: ordersActive,
-        badgeCount: urgentCount,
+        badgeCount: alerts.count,
+        badgeAlarm: alerts.pulse,
         hotkeyLabel: 'Ctrl I',
       ),
       _SidebarItem(
@@ -161,6 +171,9 @@ class _SidebarItem {
   final VoidCallback? onTap;
   final bool isActive;
   final int badgeCount;
+
+  /// Лічильник-тривога: червоний і миготить (вийшов час на збір ІЗ).
+  final bool badgeAlarm;
   /// Точкова мітка (для бінарних станів типу "обрана соц-програма").
   final bool hasIndicator;
 
@@ -172,6 +185,7 @@ class _SidebarItem {
     this.onTap,
     this.isActive = false,
     this.badgeCount = 0,
+    this.badgeAlarm = false,
     this.hasIndicator = false,
   }) : assert(icon != null || customChild != null);
 }
@@ -274,15 +288,20 @@ class _SidebarButtonState extends State<_SidebarButton> {
                 Positioned(
                   top: -4,
                   right: -4,
-                  child: Container(
+                  child: Blink(
+                    active: widget.item.badgeAlarm,
+                    child: Container(
                     width: 18,
                     height: 18,
                     // Лічильник — це «є нове», а не помилка: синій, як усе,
-                    // що кличе до дії; червоний лишаємо блокуванням.
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF1E7DC8),
+                    // що кличе до дії. Червоний і миготливий — лише тривога
+                    // (вийшов нормативний час на збір інтернет-замовлення).
+                    decoration: BoxDecoration(
+                      color: widget.item.badgeAlarm
+                          ? const Color(0xFFDC2626)
+                          : const Color(0xFF1E7DC8),
                       shape: BoxShape.circle,
-                      boxShadow: [
+                      boxShadow: const [
                         BoxShadow(
                           color: Color(0x331E7DC8),
                           blurRadius: 4,
@@ -301,6 +320,7 @@ class _SidebarButtonState extends State<_SidebarButton> {
                         ),
                       ),
                     ),
+                  ),
                   ),
                 )
               else if (widget.item.hasIndicator)

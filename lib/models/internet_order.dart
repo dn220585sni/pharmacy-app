@@ -3,13 +3,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/foundation.dart';
+import '../services/fiscal_log.dart';
 
+/// Статус замовлення. Сервер (GetOrders, переписаний Катею 16.09.2026) віддає
+/// його як текст українською з пробілом на початку (" Зібране"); старий
+/// контракт — коди "apteka make" тощо. Парсер приймає обидва.
 enum OrderStatus {
-  newOrder,           // "" (пусто) — Нове, ще не оброблялося
-  inProgress,         // "apteka got" / "apteka read" — В обробці
-  collected,          // "apteka make" — Зібране в резерв
-  atWork,             // "apteka work" — В роботі (є питання по замовленню)
-  paidOnline,         // "apteka pay" — Відпущено (оплачено в аптеці)
+  newOrder,           // "" (пусто) / "Нове" — ще не оброблялося
+  inProgress,         // "apteka got" / "apteka read" / "В обробці"
+  collected,          // "apteka make" / "Зібране" — зібране в резерв
+  atWork,             // "apteka work" / "В роботі" — є питання по замовленню
+  paidOnline,         // "apteka pay" / "Відпущено" — оплачено в аптеці
   dispensed,          // LEGACY — keep for local checkout flow
   refused,            // LEGACY — keep for backward compat
   customerRefusal,    // "client otkaz" — Відмова клієнта (або 2 доби без приходу)
@@ -30,7 +34,14 @@ enum OrderType {
 }
 
 class OrderItem {
-  final String sku;     // ids (s-код)
+  /// s-код партії (поле `skod` GetOrders, з 16.09.2026). Це код приходу, на
+  /// якому тримаються GetSKUprice (стелажі), резерв і чек. Якщо сервер поле не
+  /// віддав — сюди лягає `ids` (старий контракт), щоб нічого не зламати.
+  final String sku;
+  /// Код СЦ («сервер цін», поле `ids` GetOrders) = id товару на anc.ua.
+  /// Саме він іде в GetSKUdetail і у фото/властивості з сайту. null, якщо
+  /// `ids` порожній або містить «*» (тоді це ukod).
+  final String? kodSc;
   final String? ukod;
   final String name;
   final String? manufacturer;
@@ -50,6 +61,7 @@ class OrderItem {
 
   OrderItem({
     required this.sku,
+    this.kodSc,
     this.ukod,
     required this.name,
     this.manufacturer,
@@ -63,15 +75,40 @@ class OrderItem {
 
   factory OrderItem.fromJson(Map<String, dynamic> json) {
     final qty = double.tryParse(json['qty']?.toString() ?? '') ?? 0;
+    final ids = (json['ids']?.toString() ?? '').trim();
+    final skod = (json['skod']?.toString() ?? '').trim();
+    final ukodRaw = (json['ukod']?.toString() ?? '').trim();
     return OrderItem(
-      sku: json['ids']?.toString() ?? '',
-      ukod: json['ukod']?.toString(),
+      sku: skod.isNotEmpty ? skod : ids,
+      kodSc: ids.isNotEmpty && !ids.contains('*') ? ids : null,
+      ukod: ukodRaw.isNotEmpty ? ukodRaw : null,
       name: json['name']?.toString() ?? '',
       quantity: qty,
       price: double.tryParse(json['price']?.toString() ?? '') ?? 0,
       total: double.tryParse(json['total']?.toString() ?? '') ?? 0,
     );
   }
+
+  /// Службовий рядок («Знижка на чек» тощо): без кодів товару або з від'ємною
+  /// сумою. Такі не збагачуємо, не скануємо й не резервуємо.
+  bool get isServiceLine =>
+      total < 0 || (sku.isEmpty && kodSc == null && ukod == null);
+
+  /// Що слати в GetSKUdetail (`ids`): код СЦ, інакше ukod, інакше s-код.
+  /// За спекою Каті `ids` без «*» — код серверу цін, з «*» — ukod.
+  String get detailIds => kodSc ?? ukod ?? sku;
+}
+
+/// Замовлення, що увійшло до об'єднаного чека (ТЗ §9).
+class MergedOrderRef {
+  final String id;
+  final String reserveNumber;
+  final double total;
+  const MergedOrderRef({
+    required this.id,
+    required this.reserveNumber,
+    required this.total,
+  });
 }
 
 class InternetOrder {
@@ -95,6 +132,12 @@ class InternetOrder {
   /// Reason for pharmacy refusal (set when status == pharmacyRefusal).
   final String? refusalReason;
 
+  /// Непорожній — це об'єднання кількох замовлень одного клієнта в один чек
+  /// (включно з цим); [total] та [items] уже зведені.
+  final List<MergedOrderRef> mergedFrom;
+
+  bool get isMerged => mergedFrom.length > 1;
+
   const InternetOrder({
     required this.id,
     required this.reserveNumber,
@@ -109,6 +152,7 @@ class InternetOrder {
     this.isUrgent = false,
     this.isLockerEligible = false,
     this.refusalReason,
+    this.mergedFrom = const [],
   });
 
   // ── JSON parsing from GetOrders API ──────────────────────────────────────
@@ -151,9 +195,34 @@ class InternetOrder {
     );
   }
 
+  static final _loggedUnknownStatuses = <String>{};
+
   static OrderStatus _parseStatus(String raw) {
     switch (raw.toLowerCase().trim()) {
-      // ── New API contract ──
+      // ── Текст українською (GetOrders з 16.09.2026, напр. " Зібране") ──
+      case 'нове':
+      case 'новий':
+        return OrderStatus.newOrder;
+      case 'в обробці':
+      case 'обробляється':
+      case 'прочитане':
+        return OrderStatus.inProgress;
+      case 'зібране':
+      case 'зібрано':
+        return OrderStatus.collected;
+      case 'в роботі':
+        return OrderStatus.atWork;
+      case 'відпущено':
+      case 'оплачено':
+      case 'оплачене':
+        return OrderStatus.paidOnline;
+      case 'відмова аптеки':
+        return OrderStatus.pharmacyRefusal;
+      case 'відмова клієнта':
+      case 'відмова':
+        return OrderStatus.customerRefusal;
+
+      // ── Коди старого контракту ──
       case '':
         return OrderStatus.newOrder;
       case 'apteka got':
@@ -191,6 +260,9 @@ class InternetOrder {
 
       default:
         debugPrint('Unknown order status: "$raw"');
+        if (_loggedUnknownStatuses.add(raw)) {
+          FiscalLog.log('GetOrders: невідомий статус "$raw" → показуємо як «Нове»');
+        }
         return OrderStatus.newOrder;
     }
   }
@@ -211,6 +283,11 @@ class InternetOrder {
         return OrderType.otherShop;
       case 'optimtabl':
         return OrderType.optimTabl;
+      case 'glovo':
+        return OrderType.glovo;
+      case 'novaposhta':
+      case 'nova-poshta':
+        return OrderType.novaPoshta;
       default:
         debugPrint('Unknown order type: $raw');
         return OrderType.unknown;
@@ -302,6 +379,7 @@ class InternetOrder {
       isLockerEligible: isLockerEligible,
       refusalReason:
           clearRefusalReason ? null : (refusalReason ?? this.refusalReason),
+      mergedFrom: mergedFrom,
     );
   }
 }

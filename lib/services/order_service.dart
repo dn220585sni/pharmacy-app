@@ -3,6 +3,7 @@ import '../models/internet_order.dart';
 import 'api_config.dart';
 import 'auth_service.dart';
 import 'cache_api_client.dart';
+import 'fiscal_log.dart';
 
 /// Сервіс інтернет-замовлень — працює з GetOrders / UpdateOrderStatus API Caché.
 class OrderService {
@@ -35,11 +36,26 @@ class OrderService {
     }
 
     final ordersJson = response.data['Orders'] as List<dynamic>?;
-    if (ordersJson == null) return [];
+    if (ordersJson == null) {
+      FiscalLog.log('GetOrders $dateFrom–$dateTo: без масиву Orders');
+      return [];
+    }
 
-    return ordersJson
+    final orders = ordersJson
         .map((e) => InternetOrder.fromJson(e as Map<String, dynamic>))
         .toList();
+    // Один рядок у журнал, щоб бачити реальні коди й статуси з сервера
+    // (16.09.2026 контракт змінився: skod = s-код, ids = код СЦ, статус — текст).
+    final first = orders.isEmpty ? null : orders.first;
+    final firstItem = first?.items.where((i) => !i.isServiceLine).firstOrNull;
+    FiscalLog.log(
+      'GetOrders $dateFrom–$dateTo: ${orders.length} замовл.'
+      '${first == null ? '' : '; перше №${first.reserveNumber} '
+          'статус "${(ordersJson.first as Map)['status']}" → ${first.statusLabel}'}'
+      '${firstItem == null ? '' : ', товар s-код ${firstItem.sku} '
+          'код СЦ ${firstItem.kodSc ?? '—'} ukod ${firstItem.ukod ?? '—'}'}',
+    );
+    return orders;
   }
 
   /// Змінити статус замовлення.

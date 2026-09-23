@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../services/order_extras_service.dart';
@@ -101,6 +103,7 @@ class ActionSidebar extends StatelessWidget {
         isActive: ordersActive,
         badgeCount: alerts.count,
         badgeAlarm: alerts.pulse,
+        badgeEnvelope: alerts.hasUnread,
         hotkeyLabel: 'Ctrl I',
       ),
       _SidebarItem(
@@ -174,6 +177,9 @@ class _SidebarItem {
 
   /// Лічильник-тривога: червоний і миготить (вийшов час на збір ІЗ).
   final bool badgeAlarm;
+
+  /// Є нове повідомлення: лічильник кожні 3 с на 1 с стає синім конвертом.
+  final bool badgeEnvelope;
   /// Точкова мітка (для бінарних станів типу "обрана соц-програма").
   final bool hasIndicator;
 
@@ -186,6 +192,7 @@ class _SidebarItem {
     this.isActive = false,
     this.badgeCount = 0,
     this.badgeAlarm = false,
+    this.badgeEnvelope = false,
     this.hasIndicator = false,
   }) : assert(icon != null || customChild != null);
 }
@@ -288,7 +295,9 @@ class _SidebarButtonState extends State<_SidebarButton> {
                 Positioned(
                   top: -4,
                   right: -4,
-                  child: Blink(
+                  child: _EnvelopeCycle(
+                    active: widget.item.badgeEnvelope,
+                    child: Blink(
                     active: widget.item.badgeAlarm,
                     child: Container(
                     width: 18,
@@ -320,6 +329,7 @@ class _SidebarButtonState extends State<_SidebarButton> {
                         ),
                       ),
                     ),
+                  ),
                   ),
                   ),
                 )
@@ -571,4 +581,78 @@ class _AiSparklePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Лічильник ↔ синій конверт: 3 с лічильник, 1 с конверт (Микола 23.09).
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _EnvelopeCycle extends StatefulWidget {
+  final bool active;
+  final Widget child;
+
+  const _EnvelopeCycle({required this.active, required this.child});
+
+  @override
+  State<_EnvelopeCycle> createState() => _EnvelopeCycleState();
+}
+
+class _EnvelopeCycleState extends State<_EnvelopeCycle> {
+  static const _countFor = Duration(seconds: 3);
+  static const _envelopeFor = Duration(seconds: 1);
+
+  Timer? _timer;
+  bool _showEnvelope = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.active) _schedule();
+  }
+
+  @override
+  void didUpdateWidget(_EnvelopeCycle old) {
+    super.didUpdateWidget(old);
+    if (widget.active == old.active) return;
+    _timer?.cancel();
+    _timer = null;
+    _showEnvelope = false;
+    if (widget.active) _schedule();
+  }
+
+  void _schedule() {
+    _timer = Timer(_showEnvelope ? _envelopeFor : _countFor, () {
+      if (!mounted) return;
+      setState(() => _showEnvelope = !_showEnvelope);
+      _schedule();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_showEnvelope) return widget.child;
+    return Container(
+      width: 18,
+      height: 18,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x331E7DC8),
+            blurRadius: 4,
+            offset: Offset(0, 1),
+          ),
+        ],
+      ),
+      child: const Icon(Icons.mail_rounded,
+          size: 13, color: Color(0xFF1E7DC8)),
+    );
+  }
 }

@@ -171,14 +171,32 @@ class OrderExtrasService {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class OrdersAlertState {
-  /// Скільки замовлень потребують уваги (час спливає, непрочитане від КЦ,
-  /// нове Glovo).
+  /// Скільки замовлень потребують реакції фармацевта — ті, що підняті вгору
+  /// «Не оплачених»: Glovo, Лікомат, Нова пошта (ще не зібрані) і з новими
+  /// повідомленнями.
   final int count;
 
   /// Є замовлення з вичерпаним часом — значок миготить.
   final bool pulse;
 
-  const OrdersAlertState({this.count = 0, this.pulse = false});
+  /// Є непрочитане повідомлення — лічильник кожні 3 с на 1 с змінюється
+  /// синім конвертом.
+  final bool hasUnread;
+
+  const OrdersAlertState(
+      {this.count = 0, this.pulse = false, this.hasUnread = false});
+
+  // Публікуємо на кожне оновлення списку — рівність, щоб кнопка не
+  // перебудовувалась без змін.
+  @override
+  bool operator ==(Object other) =>
+      other is OrdersAlertState &&
+      other.count == count &&
+      other.pulse == pulse &&
+      other.hasUnread == hasUnread;
+
+  @override
+  int get hashCode => Object.hash(count, pulse, hasUnread);
 }
 
 class OrdersAlerts {

@@ -5,6 +5,7 @@ import '../../models/money.dart';
 import '../../models/order_extras.dart';
 import '../../services/order_extras_service.dart';
 import 'order_indicators.dart';
+import 'merge_checkbox.dart';
 
 /// Прев'ю складу замовлення: назви через кому, з кожної — перші 15 символів
 /// (ТЗ §3, колонка «Перелік товарів у замовленні»).
@@ -121,15 +122,9 @@ class OrdersGrid extends StatelessWidget {
               width: _wCheck,
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: Checkbox(
-                    value: checkedIds.contains(o.id),
-                    onChanged: checkable ? (_) => onToggleCheck(o) : null,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    activeColor: const Color(0xFF1E7DC8),
-                  ),
+                child: MergeCheckbox(
+                  value: checkedIds.contains(o.id),
+                  onChanged: checkable ? () => onToggleCheck(o) : null,
                 ),
               ),
             ),

@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pharmacy_app/models/internet_order.dart';
 import 'package:pharmacy_app/widgets/orders_panel.dart';
+import 'package:pharmacy_app/services/order_extras_service.dart';
 
 InternetOrder _order(String id, String reserve,
         {String phone = '380671234567',
         String name = 'Іваненко Іван',
         OrderStatus status = OrderStatus.collected,
+        OrderType type = OrderType.tabletkiUA,
         double total = 200}) =>
     InternetOrder(
       id: id,
@@ -14,7 +16,7 @@ InternetOrder _order(String id, String reserve,
       dateTime: DateTime.now().subtract(const Duration(hours: 2)),
       total: total,
       status: status,
-      type: OrderType.tabletkiUA,
+      type: type,
       customerPhone: phone,
       customerName: name,
       items: [
@@ -71,8 +73,26 @@ void main() {
 
     await t.enterText(find.byType(TextField), 'довга назва');
     await t.pump(const Duration(milliseconds: 50));
-    expect(find.text('Замовлень не знайдено'), findsOneWidget);
+    expect(find.textContaining('серед Не оплачених не знайдено'),
+        findsOneWidget);
     expect(t.takeException(), isNull);
+  });
+
+  testWidgets('не знайдено серед Не оплачених → «Шукати» переходить на Всі',
+      (t) async {
+    await _pump(t, [
+      _order('1', '164431111', status: OrderStatus.newOrder),
+      _order('2', '164442222', status: OrderStatus.paidOnline),
+    ]);
+    await t.enterText(find.byType(TextField), '164442222');
+    await t.pump(const Duration(milliseconds: 50));
+    expect(find.textContaining('серед Не оплачених не знайдено'),
+        findsOneWidget);
+    await t.tap(find.text('Шукати'));
+    await t.pump(const Duration(milliseconds: 50));
+    // Поле пошуку + рядок списку.
+    expect(find.text('164442222'), findsNWidgets(2));
+    expect(find.textContaining('серед Не оплачених'), findsNothing);
   });
 
   testWidgets('«Останній №» підставляє номер, введений раніше в сесії',
@@ -105,13 +125,12 @@ void main() {
     expect(t.takeException(), isNull);
   });
 
-  testWidgets('фільтр статусів — один вибір', (t) async {
+  testWidgets('фільтр статусів — один вибір, за замовчуванням Не оплачені',
+      (t) async {
     await _pump(t, [
       _order('1', '164431111', status: OrderStatus.newOrder),
       _order('2', '164442222', status: OrderStatus.paidOnline),
     ]);
-    await t.tap(find.text('Не зібрані'));
-    await t.pump(const Duration(milliseconds: 50));
     expect(find.text('164431111'), findsOneWidget);
     expect(find.text('164442222'), findsNothing);
     await t.ensureVisible(find.text('Оплачені'));
@@ -120,6 +139,41 @@ void main() {
     await t.pump(const Duration(milliseconds: 50));
     expect(find.text('164431111'), findsNothing);
     expect(find.text('164442222'), findsOneWidget);
+  });
+
+  testWidgets('Не оплачені: Glovo і Нова пошта (не зібрані) — угорі',
+      (t) async {
+    await _pump(t, [
+      _order('1', '164431111', status: OrderStatus.newOrder),
+      _order('2', '164442222', status: OrderStatus.collected),
+      _order('3', '164453333',
+          status: OrderStatus.newOrder, type: OrderType.glovo),
+      _order('4', '164464444',
+          status: OrderStatus.inProgress, type: OrderType.novaPoshta),
+      _order('5', '164475555',
+          status: OrderStatus.collected, type: OrderType.glovo),
+    ]);
+    double y(String n) => t.getTopLeft(find.text(n)).dy;
+    expect(y('164453333'), lessThan(y('164464444')));
+    expect(y('164464444'), lessThan(y('164431111')));
+    expect(y('164464444'), lessThan(y('164475555')));
+  });
+
+  testWidgets('лічильник на кнопці = підняті вгору «Не оплачених»',
+      (t) async {
+    // id підібрані під мок-хеш: 'S' і 'I' — з непрочитаним повідомленням.
+    await _pump(t, [
+      _order('S', '164400001', status: OrderStatus.newOrder),
+      _order('h', '164400002',
+          status: OrderStatus.newOrder, type: OrderType.glovo),
+      _order('2', '164400003', status: OrderStatus.newOrder),
+      _order('k', '164400004',
+          status: OrderStatus.collected, type: OrderType.glovo),
+      _order('I', '164400005', status: OrderStatus.paidOnline),
+    ]);
+    final s = OrdersAlerts.state.value;
+    expect(s.count, 2);
+    expect(s.hasUnread, isTrue);
   });
 
   testWidgets('об\'єднання: різні клієнти — відмова; один клієнт — один чек',

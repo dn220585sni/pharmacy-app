@@ -14,14 +14,17 @@ class Blink extends StatefulWidget {
 }
 
 class _BlinkState extends State<Blink> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 550),
-  );
+  // Створюємо в initState, не ліниво: інакше dispose неактивного Blink
+  // уперше торкається контролера на вже деактивованому елементі й падає.
+  late final AnimationController _ctrl;
 
   @override
   void initState() {
     super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 550),
+    );
     if (widget.active) _ctrl.repeat(reverse: true);
   }
 

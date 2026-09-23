@@ -5,6 +5,7 @@ import '../models/money.dart';
 import '../models/order_extras.dart';
 import '../services/order_extras_service.dart';
 import '../services/fiscal_log.dart';
+import 'orders/merge_checkbox.dart';
 import 'orders/order_indicators.dart';
 import 'orders/order_messages_dialog.dart';
 import 'orders/order_duplicate_dialog.dart';
@@ -107,25 +108,26 @@ class OrdersPanelState extends State<OrdersPanel>
 
   /// Обраний фільтр списку. Рівно ОДИН (ТЗ Юлії §2: статуси, що виключають
   /// один одного, не можна обрати разом).
-  String _activeFilter = _filterAll;
+  /// Микола 23.09: вікно відкривається одразу на «Не оплачені».
+  String _activeFilter = _filterNotPaid;
 
   static const _filterAll = 'Всі';
-  static const _filterNotCollected = 'Не зібрані';
+  static const _filterNotPaid = 'Не оплачені';
   static const _filterPaid = 'Оплачені';
   static const _filterRefused = 'Відмови';
 
-  /// Плашки фільтра (Микола 22.09): лише ці чотири.
+  /// Плашки фільтра (Микола 22.09; 23.09 «Не зібрані» → «Не оплачені»).
   static const List<String> _filterLabels = [
     _filterAll,
-    _filterNotCollected,
+    _filterNotPaid,
     _filterPaid,
     _filterRefused,
   ];
 
   /// Службові фільтри — без плашки; вмикаються кліком по сигналу над
-  /// списком (переписка, час на збір, Glovo) і показуються тимчасовою
-  /// плашкою з хрестиком.
-  static const _filterWithMessages = 'З перепискою';
+  /// списком (час на збір, Glovo) і показуються тимчасовою плашкою з
+  /// хрестиком. «З перепискою» прибрано (Микола 23.09): замовлення з новим
+  /// повідомленням і так угорі «Не оплачених».
   static const _filterSla = 'Час на збір';
   static const _filterGlovo = 'Glovo';
 
@@ -321,23 +323,23 @@ class OrdersPanelState extends State<OrdersPanel>
       .length;
   bool get _slaOverdue => _orders.any(
       (o) => OrderExtrasService.slaFor(o, _extrasOf(o)) == OrderSla.overdue);
-  int get _unreadCount => _orders.where((o) => _extrasOf(o).hasUnread).length;
   int get _newGlovoCount => _orders
       .where((o) =>
           o.type == OrderType.glovo && o.status == OrderStatus.newOrder)
       .length;
 
-  /// Скільки замовлень потребують уваги — на кнопку «Інтернет-замовлення».
+  /// Лічильник на кнопці «Інтернет-замовлення» (Микола 23.09) — рівно ті
+  /// замовлення, що підняті вгору «Не оплачених»: терміновий збір (Glovo,
+  /// Лікомат, Нова пошта) і нові повідомлення. Прочитав фармацевт
+  /// повідомлення — замовлення випадає, лічильник зменшується.
   void _publishAlerts() {
-    final ids = <String>{
-      for (final o in _orders)
-        if (OrderExtrasService.slaFor(o, _extrasOf(o)) != OrderSla.none ||
-            _extrasOf(o).hasUnread ||
-            (o.type == OrderType.glovo && o.status == OrderStatus.newOrder))
-          o.id,
-    };
-    OrdersAlerts.state.value =
-        OrdersAlertState(count: ids.length, pulse: _slaOverdue);
+    final priority =
+        _orders.where((o) => _isNotPaid(o) && _notPaidRank(o) < 2);
+    OrdersAlerts.state.value = OrdersAlertState(
+      count: priority.length,
+      pulse: _slaOverdue,
+      hasUnread: priority.any((o) => _extrasOf(o).hasUnread),
+    );
   }
 
   /// Спеціальне замовлення (страхова, доставка, оплачене онлайн): у картці
@@ -467,10 +469,8 @@ class OrdersPanelState extends State<OrdersPanel>
     switch (_activeFilter) {
       case _filterAll:
         return true;
-      case _filterNotCollected:
-        return o.status == OrderStatus.newOrder ||
-            o.status == OrderStatus.inProgress ||
-            o.status == OrderStatus.atWork;
+      case _filterNotPaid:
+        return _isNotPaid(o);
       case _filterPaid:
         return o.status == OrderStatus.paidOnline ||
             o.status == OrderStatus.dispensed;
@@ -478,8 +478,6 @@ class OrdersPanelState extends State<OrdersPanel>
         return o.status == OrderStatus.customerRefusal ||
             o.status == OrderStatus.pharmacyRefusal ||
             o.status == OrderStatus.refused;
-      case _filterWithMessages:
-        return _extrasOf(o).hasMessages;
       case _filterSla:
         return OrderExtrasService.slaFor(o, _extrasOf(o)) != OrderSla.none;
       case _filterGlovo:
@@ -516,9 +514,46 @@ class OrdersPanelState extends State<OrdersPanel>
         (d.length == 12 && d.startsWith('380'));
   }
 
+  /// «Не оплачені»: чинні, ще не пробиті на касі — нові, в обробці,
+  /// зібрані, в роботі.
+  static bool _isNotPaid(InternetOrder o) =>
+      o.status == OrderStatus.newOrder ||
+      o.status == OrderStatus.inProgress ||
+      o.status == OrderStatus.collected ||
+      o.status == OrderStatus.atWork;
+
+  /// Терміновий збір (Микола 23.09): Glovo, Лікомат, Нова пошта — поки
+  /// замовлення ще не зібране.
+  bool _needsUrgentCollect(InternetOrder o) =>
+      (o.type == OrderType.glovo ||
+          o.type == OrderType.novaPoshta ||
+          o.isLockerEligible) &&
+      (o.status == OrderStatus.newOrder ||
+          o.status == OrderStatus.inProgress ||
+          o.status == OrderStatus.atWork);
+
+  /// Місце в «Не оплачених»: 0 — терміновий збір, 1 — нове повідомлення,
+  /// 2 — решта.
+  int _notPaidRank(InternetOrder o) {
+    if (_needsUrgentCollect(o)) return 0;
+    if (_extrasOf(o).hasUnread) return 1;
+    return 2;
+  }
+
   /// Sort: urgent non-collected first, then the rest chronologically.
+  /// «Не оплачені»: терміновий збір → нові повідомлення → решта.
+  /// Усередині групи — вихідний порядок (List.sort не стабільний, тому
+  /// порівнюємо ще й за індексом).
   List<InternetOrder> _sorted(List<InternetOrder> orders) {
     final list = orders.where(_matchesFilters).toList();
+    if (_activeFilter == _filterNotPaid) {
+      final idx = {for (var i = 0; i < list.length; i++) list[i].id: i};
+      list.sort((a, b) {
+        final r = _notPaidRank(a).compareTo(_notPaidRank(b));
+        return r != 0 ? r : idx[a.id]!.compareTo(idx[b.id]!);
+      });
+      return list;
+    }
     list.sort((a, b) {
       final aUrgent = a.isUrgent && a.status != OrderStatus.collected && a.status != OrderStatus.paidOnline && a.status != OrderStatus.dispensed;
       final bUrgent = b.isUrgent && b.status != OrderStatus.collected && b.status != OrderStatus.paidOnline && b.status != OrderStatus.dispensed;
@@ -545,6 +580,8 @@ class OrdersPanelState extends State<OrdersPanel>
     });
     if (_looksLikePhone(query)) _lastPhone = _digits(query);
     _checkDuplicateDigits(query);
+    // Статуси могли змінитись (зібрали, відпустили) — лічильник на кнопці теж.
+    _publishAlerts();
   }
 
   // ── Захист від дублювання останніх 4 цифр номера ─────────────────────────
@@ -601,8 +638,23 @@ class OrdersPanelState extends State<OrdersPanel>
     _filterOrders();
   }
 
+  /// Пошук серед «Не оплачених» нічого не дав → пропонуємо шукати по всіх.
+  bool get _offerSearchAll =>
+      _hasQuery && _activeFilter == _filterNotPaid && _filteredOrders.isEmpty;
+
+  /// «Шукати» (або Enter у пошуку): фільтр → «Всі», той самий запит.
+  void _searchAllOrders() {
+    setState(() => _activeFilter = _filterAll);
+    _filterOrders();
+    _searchFocusNode.requestFocus();
+  }
+
   /// Open highlighted order (Enter from search field).
   void _openHighlighted() {
+    if (_offerSearchAll) {
+      _searchAllOrders();
+      return;
+    }
     final blocked = _dupBlockedQuery;
     if (blocked != null && blocked == _searchController.text.trim()) {
       _dupTimer?.cancel();
@@ -1463,13 +1515,14 @@ class OrdersPanelState extends State<OrdersPanel>
     );
   }
 
-  /// Сигнали списку (ТЗ §6–8): час на збір, непрочитані від кол-центру, нові
-  /// Glovo. Рядка немає, доки немає жодного сигналу. Клік — фільтр списку.
+  /// Сигнали списку (ТЗ §6–8): час на збір, нові Glovo. Рядка немає, доки
+  /// немає жодного сигналу. Клік — фільтр списку. Лічильник «Від кол-центру»
+  /// прибрано (Микола 23.09): нові повідомлення видно конвертом у рядку, а
+  /// такі замовлення стоять угорі «Не оплачених».
   Widget _buildAlertRow() {
     final sla = _slaCount;
-    final unread = _unreadCount;
     final glovo = _newGlovoCount;
-    if (sla == 0 && unread == 0 && glovo == 0) return const SizedBox.shrink();
+    if (sla == 0 && glovo == 0) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
       child: Wrap(
@@ -1493,17 +1546,6 @@ class OrdersPanelState extends State<OrdersPanel>
                     '${OrderExtrasService.isMock ? ' (демо)' : ''}',
                 onTap: () => _toggleFilter(_filterSla),
               ),
-            ),
-          if (unread > 0)
-            OrderPill(
-              icon: Icons.mark_email_unread_rounded,
-              text: 'Від кол-центру · $unread',
-              color: const Color(0xFF1E7DC8),
-              background: const Color(0xFFE8F3FB),
-              border: const Color(0xFFBFDBFE),
-              tooltip: 'Показати замовлення з перепискою'
-                  '${OrderExtrasService.isMock ? ' (демо)' : ''}',
-              onTap: () => _toggleFilter(_filterWithMessages),
             ),
           if (glovo > 0)
             OrderPill(
@@ -1688,6 +1730,37 @@ class OrdersPanelState extends State<OrdersPanel>
               Text(
                 'Завантаження замовлень...',
                 style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (_filteredOrders.isEmpty && _offerSearchAll) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.search_off_rounded,
+                  size: 40, color: Color(0xFFD1D5DB)),
+              const SizedBox(height: 8),
+              const Text(
+                'Замовлення за таким номером серед Не оплачених не знайдено, '
+                'зробити пошук по всіх замовленнях',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Color(0xFF374151), fontSize: 14),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: _searchAllOrders,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E7DC8),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                ),
+                child: const Text('Шукати'),
               ),
             ],
           ),
@@ -2292,270 +2365,8 @@ class OrdersPanelState extends State<OrdersPanel>
             ),
           ),
         ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          height: 38,
-          child: OutlinedButton.icon(
-            onPressed: () => _showMergeOrdersDialog(),
-            icon: const _MergeIcon(size: 15),
-            label: const Text('Об\'єднати',
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF1C1C2E),
-              side: const BorderSide(color: Color(0xFFE5E7EB)),
-              backgroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-            ),
-          ),
-        ),
       ],
     );
-  }
-
-  // ── Merge orders dialog ──────────────────────────────────────────────────
-
-  void _showMergeOrdersDialog() {
-    final currentOrder = _selectedOrder;
-    if (currentOrder == null) return;
-
-    // Collect other collected (not dispensed/paid) orders
-    final candidates = _orders.where((o) =>
-        o.id != currentOrder.id &&
-        o.status != OrderStatus.paidOnline &&
-        o.status != OrderStatus.dispensed &&
-        o.status != OrderStatus.pharmacyRefusal &&
-        o.status != OrderStatus.customerRefusal).toList();
-
-    if (candidates.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Немає замовлень для об\'єднання')),
-      );
-      return;
-    }
-
-    final selected = <String>{};
-    var searchQuery = '';
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
-          final filtered = searchQuery.isEmpty
-              ? candidates
-              : candidates
-                  .where((o) => _matchesQuery(o, searchQuery))
-                  .toList();
-
-          return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 420, maxHeight: 560),
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const _MergeIcon(size: 20, color: Color(0xFF1E7DC8)),
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: Text(
-                        'Об\'єднати замовлення',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF1C1C2E),
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close, size: 18),
-                      onPressed: () => Navigator.pop(ctx),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Додати товари з обраних замовлень до №${currentOrder.reserveNumber}',
-                  style: const TextStyle(
-                      fontSize: 12, color: Color(0xFF6B7280)),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: 36,
-                  child: TextField(
-                    onChanged: (v) => setDialogState(() {
-                      searchQuery = v.trim().toLowerCase();
-                    }),
-                    decoration: InputDecoration(
-                      hintText: 'Телефон, № замовлення, П.І.Б.',
-                      hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
-                      prefixIcon: const Icon(Icons.search, size: 16, color: Color(0xFF9CA3AF)),
-                      prefixIconConstraints: const BoxConstraints(minWidth: 36),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-                      filled: true,
-                      fillColor: const Color(0xFFF9FAFB),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                      ),
-                    ),
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: filtered.length,
-                    itemBuilder: (ctx, i) {
-                      final order = filtered[i];
-                      final isChecked = selected.contains(order.id);
-                      final itemNames = order.items
-                          .take(3)
-                          .map((item) => item.name)
-                          .join(', ');
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(8),
-                        onTap: () => setDialogState(() {
-                          if (isChecked) {
-                            selected.remove(order.id);
-                          } else {
-                            selected.add(order.id);
-                          }
-                        }),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 10),
-                          margin: const EdgeInsets.only(bottom: 4),
-                          decoration: BoxDecoration(
-                            color: isChecked
-                                ? const Color(0xFFEFF6FF)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isChecked
-                                  ? const Color(0xFFBFDBFE)
-                                  : const Color(0xFFE5E7EB),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                isChecked
-                                    ? Icons.check_box_rounded
-                                    : Icons.check_box_outline_blank_rounded,
-                                size: 20,
-                                color: isChecked
-                                    ? const Color(0xFF1E7DC8)
-                                    : const Color(0xFF9CA3AF),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Text(
-                                          '№${order.reserveNumber}',
-                                          style: const TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600,
-                                            color: Color(0xFF1C1C2E),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          order.statusLabel,
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            color: Color(0xFF6B7280),
-                                          ),
-                                        ),
-                                        const Spacer(),
-                                        Text(
-                                          '${order.total.asMoney} ₴',
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w700,
-                                            color: Color(0xFF1C1C2E),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      '${order.items.length} поз. · $itemNames',
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        color: Color(0xFF6B7280),
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  height: 42,
-                  child: ElevatedButton(
-                    onPressed: selected.isEmpty
-                        ? null
-                        : () {
-                            Navigator.pop(ctx);
-                            _mergeOrders(currentOrder, selected);
-                          },
-                    style: ElevatedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      backgroundColor: const Color(0xFF1E7DC8),
-                      disabledForegroundColor: const Color(0xFF9CA3AF),
-                      disabledBackgroundColor: const Color(0xFFF3F4F6),
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                    child: Text(
-                      selected.isEmpty
-                          ? 'Оберіть замовлення'
-                          : 'Об\'єднати ${selected.length} замовл.',
-                      style: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-        },
-      ),
-    );
-  }
-
-  void _mergeOrders(InternetOrder target, Set<String> sourceIds) {
-    _mergeOrderList([
-      target,
-      ..._orders.where((o) => sourceIds.contains(o.id)),
-    ]);
   }
 
   /// Звести кілька замовлень в одне (перше — цільове). Об'єднання поки
@@ -3551,15 +3362,9 @@ class _OrderListTileState extends State<_OrderListTile> {
               if (widget.onCheck != null) ...[
                 Tooltip(
                   message: 'Позначити для об\'єднання в один чек',
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: Checkbox(
-                      value: widget.checked,
-                      onChanged: (_) => widget.onCheck!(),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      activeColor: const Color(0xFF1E7DC8),
-                    ),
+                  child: MergeCheckbox(
+                    value: widget.checked,
+                    onChanged: widget.onCheck,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -4417,16 +4222,16 @@ class _OrderItemRow extends StatelessWidget {
 
 class _MergeIcon extends StatelessWidget {
   final double size;
-  final Color color;
 
-  const _MergeIcon({required this.size, this.color = const Color(0xFF1C1C2E)});
+  const _MergeIcon({required this.size});
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: size,
       height: size,
-      child: CustomPaint(painter: _MergeIconPainter(color: color)),
+      child: const CustomPaint(
+          painter: _MergeIconPainter(color: Color(0xFF1C1C2E))),
     );
   }
 }

@@ -261,6 +261,37 @@ class OrdersPanelState extends State<OrdersPanel>
   }
 
   /// Load orders from GetOrders API (or mock fallback).
+  /// Запити до GetOrders під активний фільтр (контракт 22.09: за
+  /// замовчуванням сервер віддає лише незавершені, оплачені й відмови — за
+  /// прапорцями; прапорця «все» немає). Старий сервер прапорці ігнорує і
+  /// віддає все за `status=all` — тоді клієнтський фільтр [_matchesFilter]
+  /// відсіює зайве, а «Всі» просто злиє три однакові відповіді.
+  Future<List<InternetOrder>> _fetchForFilter(String from, String to) async {
+    switch (_activeFilter) {
+      case _filterPaid:
+        return OrderService.fetchOrders(
+            dateFrom: from, dateTo: to, onlyPay: true);
+      case _filterRefused:
+        return OrderService.fetchOrders(
+            dateFrom: from, dateTo: to, onlyRefusal: true);
+      case _filterAll:
+        final parts = await Future.wait([
+          OrderService.fetchOrders(dateFrom: from, dateTo: to),
+          OrderService.fetchOrders(dateFrom: from, dateTo: to, onlyPay: true),
+          OrderService.fetchOrders(
+              dateFrom: from, dateTo: to, onlyRefusal: true),
+        ]);
+        final seen = <String>{};
+        return [
+          for (final list in parts)
+            for (final o in list)
+              if (seen.add(o.id)) o,
+        ];
+      default:
+        return OrderService.fetchOrders(dateFrom: from, dateTo: to);
+    }
+  }
+
   Future<void> _loadOrders() async {
     final debugOrders = widget.debugOrders;
     if (debugOrders != null) {
@@ -282,10 +313,7 @@ class OrdersPanelState extends State<OrdersPanel>
     setState(() => _isLoading = true);
     final (from, to) = _period;
     try {
-      final orders = await OrderService.fetchOrders(
-        dateFrom: _fmtDate(from),
-        dateTo: _fmtDate(to),
-      );
+      final orders = await _fetchForFilter(_fmtDate(from), _fmtDate(to));
       if (!mounted) return;
       setState(() {
         _orders = orders;
@@ -493,6 +521,10 @@ class OrdersPanelState extends State<OrdersPanel>
   /// це провокує видачу чужого замовлення.
   bool _matchesQuery(InternetOrder o, String query) {
     if (o.reserveNumber.toLowerCase().contains(query)) return true;
+    // Контракт 22.09: сервер дає власний рядок для пошуку замовлення.
+    if (o.searchData.isNotEmpty && o.searchData.toLowerCase().contains(query)) {
+      return true;
+    }
     final name = o.customerName?.toLowerCase();
     if (name != null && name.contains(query)) return true;
     final glovo = _extrasOf(o).glovoNumber?.toLowerCase();
@@ -631,11 +663,13 @@ class OrdersPanelState extends State<OrdersPanel>
   }
 
   /// Один вибір; повторний клік по обраному повертає «Всі».
+  /// Набір замовлень залежить від фільтра вже на сервері (контракт 22.09:
+  /// оплачені/відмови — окремими прапорцями), тому фільтр = новий запит.
   void _toggleFilter(String label) {
     setState(() {
       _activeFilter = _activeFilter == label ? _filterAll : label;
     });
-    _filterOrders();
+    _loadOrders();
   }
 
   /// Пошук серед «Не оплачених» нічого не дав → пропонуємо шукати по всіх.
@@ -645,7 +679,7 @@ class OrdersPanelState extends State<OrdersPanel>
   /// «Шукати» (або Enter у пошуку): фільтр → «Всі», той самий запит.
   void _searchAllOrders() {
     setState(() => _activeFilter = _filterAll);
-    _filterOrders();
+    _loadOrders();
     _searchFocusNode.requestFocus();
   }
 

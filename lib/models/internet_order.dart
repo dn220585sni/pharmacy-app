@@ -52,6 +52,9 @@ class OrderItem {
   final String? expiryDate;
   final String? refusalReason;
 
+  /// Позицію викреслено з замовлення (`StrikeOut` = "1", контракт 22.09).
+  final bool strikeOut;
+
   // ── Enriched fields (populated from GetSKUdetail / GetSKUprice) ──────────
   String? enrichedImageUrl;
   String? enrichedSeries;
@@ -71,21 +74,40 @@ class OrderItem {
     required this.total,
     this.expiryDate,
     this.refusalReason,
+    this.strikeOut = false,
   });
 
+  /// Приймає обидва контракти GetOrders:
+  /// - 16.09: `skod`/`ids`/`ukod`/`name`;
+  /// - 22.09 (Катя переписала під поля старого роздрібу): `SKod`/`Name`/
+  ///   `Maker`/`ExpireDate`/`Refusal`/`Drob`/`StrikeOut` — кодів СЦ і ukod
+  ///   у ньому НЕМАЄ, тож [kodSc]/[ukod] лишаються null, а [detailIds]
+  ///   падає на s-код.
   factory OrderItem.fromJson(Map<String, dynamic> json) {
-    final qty = double.tryParse(json['qty']?.toString() ?? '') ?? 0;
-    final ids = (json['ids']?.toString() ?? '').trim();
-    final skod = (json['skod']?.toString() ?? '').trim();
-    final ukodRaw = (json['ukod']?.toString() ?? '').trim();
+    String s(String a, [String? b]) =>
+        (json[a] ?? (b == null ? null : json[b]))?.toString().trim() ?? '';
+    final qty = double.tryParse(s('qty')) ?? 0;
+    final ids = s('ids');
+    final skod = s('skod', 'SKod');
+    final ukodRaw = s('ukod');
+    final maker = s('Maker');
+    final expire = s('ExpireDate');
+    final refusal = s('Refusal');
+    final drob = s('Drob');
     return OrderItem(
       sku: skod.isNotEmpty ? skod : ids,
       kodSc: ids.isNotEmpty && !ids.contains('*') ? ids : null,
       ukod: ukodRaw.isNotEmpty ? ukodRaw : null,
-      name: json['name']?.toString() ?? '',
+      name: s('name', 'Name'),
+      manufacturer: maker.isEmpty ? null : maker,
       quantity: qty,
-      price: double.tryParse(json['price']?.toString() ?? '') ?? 0,
-      total: double.tryParse(json['total']?.toString() ?? '') ?? 0,
+      // `Drob` = "1" — ціла упаковка; інше ("1/2") — частка.
+      fraction: drob.isEmpty || drob == '1' ? null : drob,
+      price: double.tryParse(s('price')) ?? 0,
+      total: double.tryParse(s('total')) ?? 0,
+      expiryDate: expire.isEmpty ? null : expire,
+      refusalReason: refusal.isEmpty ? null : refusal,
+      strikeOut: s('StrikeOut') == '1',
     );
   }
 
@@ -138,6 +160,42 @@ class InternetOrder {
 
   bool get isMerged => mergedFrom.length > 1;
 
+  // ── Поля контракту GetOrders від 22.09.2026 (Катя переписала сервіс під
+  // те, що показує старий роздріб). У старому контракті їх немає → дефолти.
+
+  /// Накладні за замовленням (`NumNaklList`, через ";").
+  final List<String> nakladnaNumbers;
+
+  /// Короткий перелік товарів (`GoodList`, через ", ").
+  final String goodList;
+
+  /// Сервер забороняє відкривати замовлення в інтерфейсі (`IsOpenDisabled`).
+  final bool isOpenDisabled;
+
+  /// Рядок для пошуку замовлення (`SearchData`) — що саме в ньому, Катя ще
+  /// не описала; шукаємо по ньому як по підрядку.
+  final String searchData;
+
+  /// Автозбірка/автозамовлення (`Auto`).
+  final bool isAuto;
+
+  /// Чат із клієнтом (`Chat`: посилання або ознака), доставка (`Delivery`),
+  /// строк готовності (`Timesrok`) — сирі рядки, поки контракт не уточнено.
+  final String chat;
+  final String delivery;
+  final String timesrok;
+
+  /// Сервер уже об'єднав це замовлення з іншими (`isMerge`).
+  final bool isMergedOnServer;
+
+  /// Потрібна ідентифікація клієнта Лайк перед відкриттям (`needSPLIdent`,
+  /// перший токен "0"/"1"; далі сервер дописує підказку клавіші).
+  final bool needSplIdent;
+
+  /// Сирий тип/джерело з нового контракту (`TypeZ`, напр. "Глово") — для
+  /// журналу й для випадків, коли [type] його не розпізнав.
+  final String rawType;
+
   const InternetOrder({
     required this.id,
     required this.reserveNumber,
@@ -153,24 +211,43 @@ class InternetOrder {
     this.isLockerEligible = false,
     this.refusalReason,
     this.mergedFrom = const [],
+    this.nakladnaNumbers = const [],
+    this.goodList = '',
+    this.isOpenDisabled = false,
+    this.searchData = '',
+    this.isAuto = false,
+    this.chat = '',
+    this.delivery = '',
+    this.timesrok = '',
+    this.isMergedOnServer = false,
+    this.needSplIdent = false,
+    this.rawType = '',
   });
 
   // ── JSON parsing from GetOrders API ──────────────────────────────────────
 
+  /// Приймає обидва контракти: 16.09 (`orderId`/`orderType`/`status`/
+  /// `createdAt`/`totalAmount`/`customer*`) і 22.09 (`orderNumber`/`TypeZ`/
+  /// `Status`/`DateTime`/`Sum`/`EditPhone`/…). У новому немає `orderId` —
+  /// ідентифікатором стає номер замовлення (ним же живуть UpdateOrderStatus і
+  /// GetOrderData, поки Катя не скаже інакше).
   factory InternetOrder.fromJson(Map<String, dynamic> json) {
+    String s(String a, [String? b]) =>
+        (json[a] ?? (b == null ? null : json[b]))?.toString() ?? '';
     final items = (json['items'] as List<dynamic>?)
             ?.map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
             .toList() ??
         [];
 
-    final status = _parseStatus(json['status']?.toString() ?? '');
-    final type = _parseType(json['orderType']?.toString() ?? '');
-    final isLocker = json['isLockerEligible']?.toString() == '1';
+    final status = _parseStatus(s('status', 'Status'));
+    final rawType = s('orderType', 'TypeZ').trim();
+    final type = _parseType(rawType);
+    final isLocker = s('isLockerEligible').trim() == '1';
 
     // Parse date "09.03.2026 20:25:06"
     DateTime dateTime;
     try {
-      final parts = (json['createdAt']?.toString() ?? '').split(' ');
+      final parts = s('createdAt', 'DateTime').trim().split(' ');
       final dateParts = parts[0].split('.');
       final timePart = parts.length > 1 ? parts[1] : '00:00:00';
       dateTime = DateTime.parse(
@@ -180,20 +257,51 @@ class InternetOrder {
       dateTime = DateTime.now();
     }
 
+    final orderNumber = s('orderNumber').trim();
+    final orderId = s('orderId').trim();
+    final editPhone = s('EditPhone').trim();
+    final phone = s('customerPhone').trim();
+    final likomat = s('Likomat').trim();
+    final needSpl = s('needSPLIdent').trim();
+
     return InternetOrder(
-      id: json['orderId']?.toString() ?? '',
-      reserveNumber: json['orderNumber']?.toString() ?? '',
+      id: orderId.isNotEmpty ? orderId : orderNumber,
+      reserveNumber: orderNumber,
       dateTime: dateTime,
-      total: double.tryParse(json['totalAmount']?.toString() ?? '') ?? 0,
+      total: double.tryParse(s('totalAmount', 'Sum').trim()) ?? 0,
       status: status,
       type: type,
       items: items,
-      customerPhone: json['customerPhone']?.toString(),
+      lockerCell: int.tryParse(likomat),
+      customerPhone: phone.isNotEmpty
+          ? phone
+          : editPhone.isNotEmpty
+              ? editPhone
+              : null,
       customerName: _cleanName(json['customerName']?.toString()),
       isUrgent: isLocker, // locker-eligible orders are automatically urgent
       isLockerEligible: isLocker,
+      nakladnaNumbers: s('NumNaklList')
+          .split(';')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList(growable: false),
+      goodList: s('GoodList').trim(),
+      isOpenDisabled: s('IsOpenDisabled').trim() == '1',
+      searchData: s('SearchData').trim(),
+      isAuto: s('Auto').trim() == '1',
+      chat: s('Chat').trim(),
+      delivery: s('Delivery').trim(),
+      timesrok: s('Timesrok').trim(),
+      isMergedOnServer: s('isMerge').trim() == '1',
+      needSplIdent: needSpl.isNotEmpty && needSpl.split(' ').first == '1',
+      rawType: rawType,
     );
   }
+
+  /// Контракт 22.09 — за наявністю ключів нового формату.
+  static bool isNewContract(Map<String, dynamic> json) =>
+      json.containsKey('Status') || json.containsKey('TypeZ');
 
   static final _loggedUnknownStatuses = <String>{};
 
@@ -289,9 +397,32 @@ class InternetOrder {
       case 'nova-poshta':
         return OrderType.novaPoshta;
       default:
-        debugPrint('Unknown order type: $raw');
-        return OrderType.unknown;
+        return _parseTypeText(raw);
     }
+  }
+
+  static final _loggedUnknownTypes = <String>{};
+
+  /// Тип із нового контракту (`TypeZ`) — текст як у старому роздрібі
+  /// ("Глово" тощо). Повний перелік значень Катя не дала → збіг за
+  /// підрядком, невідоме — в журнал один раз.
+  static OrderType _parseTypeText(String raw) {
+    final t = raw.toLowerCase().trim();
+    if (t.isEmpty) return OrderType.unknown;
+    if (t.contains('глово') || t.contains('glovo')) return OrderType.glovo;
+    if (t.contains('нова') && t.contains('пошт')) return OrderType.novaPoshta;
+    if (t.contains('оптим')) return OrderType.optimTabl;
+    if (t.contains('таблет')) return OrderType.tabletkiUA;
+    if (t.contains('страх')) return OrderType.likTas;
+    if (t.contains('додат') || t.contains('android') || t.contains('ios')) {
+      return OrderType.androidApp;
+    }
+    if (t.contains('сайт')) return OrderType.ancSite;
+    if (t.contains('інш')) return OrderType.otherShop;
+    if (_loggedUnknownTypes.add(t)) {
+      FiscalLog.log('GetOrders: невідомий тип/джерело "$raw" → «Інше»');
+    }
+    return OrderType.unknown;
   }
 
   /// Clean customer name — remove "Default User" and trim.

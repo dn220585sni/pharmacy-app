@@ -443,6 +443,13 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
               title: const Text('Сценарій: операцію відхилено'),
               onTap: () => Navigator.pop(ctx, 'declined'),
             ),
+            ListTile(
+              leading: const Icon(Icons.help_outline_rounded,
+                  color: Color(0xFFB45309)),
+              title: const Text('Сценарій: термінал не відповів (результат '
+                  'невідомий)'),
+              onTap: () => Navigator.pop(ctx, 'unknown'),
+            ),
           ],
         ),
       ),

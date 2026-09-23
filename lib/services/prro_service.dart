@@ -1485,7 +1485,10 @@ class PrroService {
         _guardFiscalNumber(isInput ? 'SERVICE_INPUT' : 'SERVICE_OUTPUT');
     if (blocked != null) return blocked;
 
+    final op = isInput ? 'SERVICE_INPUT' : 'SERVICE_OUTPUT';
+    final sw = Stopwatch()..start();
     if (!await _ensureAuth()) {
+      FiscalLog.log('$op $sum: авторизація ПРРО не пройшла');
       return const PrroResult.failure(
         error: 'Помилка авторизації ПРРО',
         errorKind: PrroErrorKind.auth,
@@ -1493,7 +1496,7 @@ class PrroService {
     }
     try {
       final body = {
-        'action_type': isInput ? 'SERVICE_INPUT' : 'SERVICE_OUTPUT',
+        'action_type': op,
         'num_fiscal': activeFiscalNumber,
         'type': 0,
         'name': 'ГОТІВКА',
@@ -1511,29 +1514,38 @@ class PrroService {
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
       final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
 
+      // Результат — у журнал в обох випадках. До 23.09 збій ішов лише в
+      // debugPrint, і по release-журналу було не відрізнити «внесення
+      // зареєстровано» від «впало»: Z показував cash_in_box=0 після
+      // успішного старту зміни, а причини ніде не було.
       if (response.statusCode == 200 || response.statusCode == 201) {
-        debugPrint('PRRO serviceCash ${isInput ? 'INPUT' : 'OUTPUT'} $sum OK '
-            '(uuid=${json['uuid']})');
+        FiscalLog.log('$op $sum OK (uuid=${json['uuid']}, '
+            '${sw.elapsedMilliseconds} мс)');
         return PrroResult(success: true, checkId: json['uuid']?.toString());
       }
+      final msg = json['message']?.toString() ?? 'Помилка службової операції';
+      FiscalLog.log('$op $sum FAIL HTTP ${response.statusCode} '
+          '(${sw.elapsedMilliseconds} мс): $msg');
       return PrroResult.failure(
-        error: json['message']?.toString() ?? 'Помилка службової операції',
+        error: msg,
         errorKind: response.statusCode == 401
             ? PrroErrorKind.auth
             : PrroErrorKind.logical,
       );
     } on TimeoutException {
+      FiscalLog.log('$op $sum: таймаут ПРРО (${sw.elapsedMilliseconds} мс)');
       return const PrroResult.failure(
         error: 'Таймаут службової операції ПРРО',
         errorKind: PrroErrorKind.connection,
       );
-    } on SocketException {
+    } on SocketException catch (e) {
+      FiscalLog.log('$op $sum: немає зʼєднання з ПРРО ($e)');
       return const PrroResult.failure(
         error: 'Немає з\'єднання з ПРРО',
         errorKind: PrroErrorKind.connection,
       );
     } catch (e) {
-      debugPrint('PRRO serviceCash ERROR: $e');
+      FiscalLog.log('$op $sum: помилка ($e)');
       return PrroResult.failure(
         error: 'Помилка службової операції: $e',
         errorKind: PrroErrorKind.logical,

@@ -317,6 +317,12 @@ class ShiftService {
     return open;
   }
 
+  /// Помилка службового внесення в ПРРО на останньому [startShift]: зміна
+  /// відкрита, але розмінна в ПРРО не зареєстрована. `null` — усе пройшло.
+  static String? lastDepositError;
+  static const _depositAttempts = 4;
+  static const _depositRetryDelay = Duration(seconds: 2);
+
   /// Почати зміну: OPEN_SHIFT (з авто-Z за вчора) + службове внесення [deposit]
   /// (SaveSumDay — запис у Caché). Повертає `true` при успіху.
   static Future<bool> startShift(Money deposit) async {
@@ -372,13 +378,32 @@ class ShiftService {
     }
     FiscalLog.log('startShift: зміну відкрито, внесення=${deposit.toHryvnia()}');
     // 2. Службове внесення в ПРРО (CashDesk `/check/service`) — інакше
-    // `cash_in_box` у X/Z-звітах не знає про розмінну монету і діалог
-    // закриття зміни показує «Готівка в касі: 0». Збій не блокує старт.
+    // `cash_in_box` у X/Z-звітах не знає про розмінну монету, діалог
+    // закриття показує «Готівка в касі: 0», а НАСТУПНОГО ранку каса не має
+    // чого підставити (залишок береться з Z-звіту ПРРО за період).
+    //
+    // 21–22.09: чотири старти з п'яти дали Z з cash_in_box=0, хоча внесення
+    // «пройшло» — SERVICE_INPUT одразу після OPEN_SHIFT повертався за ту ж
+    // секунду, тобто падав, і збій ішов лише в debugPrint. Тепер: до 4
+    // спроб з паузою (зміна на боці ПРРО могла ще не дореєструватись),
+    // результат у журнал, остаточний збій — касиру (див. [lastDepositError]).
+    lastDepositError = null;
     if (deposit.isPositive) {
-      final svc = await PrroService.serviceCash(
-          isInput: true, sum: deposit.kopiykas / 100);
-      if (!svc.success) {
-        debugPrint('ShiftService: службове внесення в ПРРО FAIL: ${svc.error}');
+      final sum = deposit.kopiykas / 100;
+      PrroResult? svc;
+      for (var attempt = 1; attempt <= _depositAttempts; attempt++) {
+        if (attempt > 1) await Future.delayed(_depositRetryDelay);
+        svc = await PrroService.serviceCash(isInput: true, sum: sum);
+        if (svc.success) break;
+        FiscalLog.log('startShift: внесення ${deposit.format()} у ПРРО не '
+            'пройшло (спроба $attempt/$_depositAttempts): ${svc.error}');
+      }
+      if (svc != null && !svc.success) {
+        lastDepositError = svc.error ?? 'невідома помилка';
+        FiscalLog.log('startShift ⚠️ внесення ${deposit.format()} НЕ '
+            'зареєстровано в ПРРО після $_depositAttempts спроб — зміна '
+            'відкрита, cash_in_box без розмінної; проведіть службове '
+            'внесення через «Витрати по касі»');
       }
     }
     // 3. Службове внесення — запис операції в Caché (SaveSumDay), morning-причина.

@@ -149,7 +149,20 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
     final ok = await ShiftService.startShift(deposit);
     if (!mounted) return;
     if (ok) {
+      final depositError = ShiftService.lastDepositError;
       Navigator.of(context).pop();
+      if (depositError != null) {
+        // Зміна відкрита, але ПРРО не прийняв розмінну: без цього Z покаже
+        // 0 і завтра каса не підставить залишок. Касир має знати зараз.
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Зміну відкрито, але внесення ${deposit.format()} '
+              'НЕ зареєстровано в ПРРО: $depositError. Проведіть службове '
+              'внесення через «Витрати по касі» (Ctrl+E).'),
+          duration: const Duration(seconds: 10),
+          backgroundColor: const Color(0xFFB45309),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
       return;
     }
     setState(() => _starting = false);

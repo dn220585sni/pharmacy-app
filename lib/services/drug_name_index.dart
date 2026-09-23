@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../utils/fuzzy_search.dart';
 import 'drug_service.dart';
+import 'fiscal_log.dart';
 
 /// Локальний словник назв препаратів цієї аптеки — для виправлення запиту
 /// перед повторним зверненням до сервера.
@@ -145,7 +146,12 @@ class DrugNameIndex {
     victims.forEach(_entries.remove);
   }
 
+  /// Тривалість останньої перебудови словника (відгук 23.09, п.5: «кандидат
+  /// на підвисання — потрібен замір»). Пишеться в журнал із «ПОШУК-ЧАС».
+  int lastRebuildMs = 0;
+
   void _rebuildDict() {
+    final sw = Stopwatch()..start();
     final freq = <String, int>{};
     final surface = <String, List<String>>{};
     for (final e in _entries.values) {
@@ -163,6 +169,11 @@ class DrugNameIndex {
     _freq = freq;
     _surface = surface;
     _dictDirty = false;
+    lastRebuildMs = sw.elapsedMilliseconds;
+    if (lastRebuildMs >= 20) {
+      FiscalLog.log('СЛОВНИК: перебудова ${_entries.length} назв за '
+          '$lastRebuildMs мс (у потоці інтерфейсу)');
+    }
   }
 
   // ─── Виправлення запиту ────────────────────────────────────────────────────

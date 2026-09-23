@@ -7,6 +7,7 @@ import 'screens/pos_screen.dart';
 import 'services/auth_service.dart';
 import 'services/drug_name_index.dart';
 import 'services/fiscal_log.dart';
+import 'services/frame_jank_monitor.dart';
 import 'services/prro_service.dart';
 import 'services/registry_config.dart';
 import 'services/session_service.dart';
@@ -68,6 +69,9 @@ Future<void> main() async {
 
   // Словник назв для виправлення одруківок у пошуку — з диска, у фоні.
   unawaited(DrugNameIndex.instance.load());
+
+  // Довгі кадри → рядок «КАДРИ: …» у журналі раз на хвилину (лише release).
+  FrameJankMonitor.instance.install();
 
   // Збережений на цьому ПК масштаб UI — до першого кадру (див. `UiZoom`).
   await UiZoom.load();

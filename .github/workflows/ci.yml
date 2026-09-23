@@ -29,3 +29,31 @@ jobs:
       # Юніт-тести. Ручний скрипт звʼязку з Caché живе в tool/ (не тут).
       - name: Test
         run: flutter test
+
+  # Каса живе лише на Windows: Ubuntu не бачить помилок у windows/runner,
+  # win32_registry чи в умовній компіляції під Windows. Збірка Release тут
+  # та сама, що робить «пуш-пуск» на робочій машині (відгук 23.09).
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: pharmacy_app-windows-release
+          path: build/windows/x64/runner/Release/
+          retention-days: 7

@@ -1759,7 +1759,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// - SearchByNameSKU: s-коди з цінами, терміном, comingPrice (лише в наявності)
   /// - SearchByName: u-коди, включно з нульовим залишком
   Future<({List<DrugSearchItem> sku, List<DrugSearchItem> u})>
-      _fetchNameSearch(String query, {List<String>? timing}) async {
+      _fetchNameSearch(String query,
+          {List<String>? timing, bool Function()? isStale}) async {
     // ДІАГНОСТИКА 21.09 (Микола: «пошук став довшим?»): час КОЖНОГО виклику
     // окремо — вони паралельні, тож спроба триває як повільніший із двох.
     Future<List<DrugSearchItem>> timed(
@@ -1772,8 +1773,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
     final before = timing?.length ?? 0;
     final r = await Future.wait([
-      timed('SKU', () => DrugService.searchByName(query)),
-      timed('U', () => DrugService.searchByNameUcodes(query)),
+      timed('SKU', () => DrugService.searchByName(query, isStale: isStale)),
+      timed('U',
+          () => DrugService.searchByNameUcodes(query, isStale: isStale)),
     ]);
     if (timing != null && timing.length - before == 2) {
       // Два записи спроби → один: «німесил» SKU 412 мс/4, U 388 мс/1.
@@ -1825,7 +1827,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     var outcome = 'перервано (екран закрито)';
 
     try {
-      var found = await _fetchNameSearch(query, timing: attempts);
+      var found =
+          await _fetchNameSearch(query, timing: attempts, isStale: stale);
       if (!mounted) return;
       if (stale()) {
         outcome = 'застарів (касир набрав інше)';
@@ -1839,9 +1842,18 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       // самі. Без словникового збігу повторного виклику немає (DrugNameIndex).
       String? hint;
       if (found.sku.isEmpty && found.u.isEmpty && !ApiConfig.useMock) {
+        // Локальні обчислення окремо від мережі (відгук 23.09, п.5): словник
+        // перебудовується ліниво саме тут — якщо це довго, буде видно.
+        final fixSw = Stopwatch()..start();
         final fix = DrugNameIndex.instance.fix(query);
+        if (fixSw.elapsedMilliseconds >= 5) {
+          attempts.add('словник ${fixSw.elapsedMilliseconds} мс'
+              '${DrugNameIndex.instance.lastRebuildMs > 0 ? " (перебудова ${DrugNameIndex.instance.lastRebuildMs} мс)" : ""}');
+          DrugNameIndex.instance.lastRebuildMs = 0;
+        }
         if (fix != null) {
-          found = await _fetchNameSearch(fix.serverQuery, timing: attempts);
+          found = await _fetchNameSearch(fix.serverQuery,
+              timing: attempts, isStale: stale);
           if (!mounted) return;
           if (stale()) {
             outcome = 'застарів (касир набрав інше)';
@@ -1868,7 +1880,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         if (found.sku.isEmpty && found.u.isEmpty) {
           final stem = stemForServer(query);
           if (stem != null) {
-            final broad = await _fetchNameSearch(stem, timing: attempts);
+            final broad = await _fetchNameSearch(stem,
+                timing: attempts, isStale: stale);
             if (!mounted) return;
             if (stale()) {
               outcome = 'застарів (касир набрав інше)';

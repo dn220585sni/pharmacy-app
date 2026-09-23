@@ -721,13 +721,17 @@ class DrugService {
   ///
   /// Caché: `GET ?ServiceName=SearchByName&name={name}`
   /// Повертає: items[] з {ids, name, manufacturer, shelf, qty, price}
-  static Future<List<DrugSearchItem>> searchByName(String name) async {
+  ///
+  /// [isStale] — касир уже змінив запит: якщо цей ще не стартував у черзі,
+  /// не виконуємо (відгук 23.09, п.4).
+  static Future<List<DrugSearchItem>> searchByName(String name,
+      {bool Function()? isStale}) async {
     if (ApiConfig.useMock) return [];
 
     try {
       final response = await _api.call('SearchByNameSKU', params: {
         'name': name,
-      });
+      }, isStale: isStale);
 
       if (!response.isOk) return [];
 
@@ -745,13 +749,14 @@ class DrugService {
 
   /// Search by u-codes (includes out-of-stock items).
   /// Used in parallel with [searchByName] to show zero-stock drugs.
-  static Future<List<DrugSearchItem>> searchByNameUcodes(String name) async {
+  static Future<List<DrugSearchItem>> searchByNameUcodes(String name,
+      {bool Function()? isStale}) async {
     if (ApiConfig.useMock) return [];
 
     try {
       final response = await _api.call('SearchByName', params: {
         'name': name,
-      });
+      }, isStale: isStale);
 
       if (!response.isOk) return [];
 

@@ -26,6 +26,7 @@ import '../services/auth_service.dart';
 import '../services/order_service.dart';
 import '../services/drug_service.dart';
 import '../services/product_browser_service.dart';
+import '../utils/limited_parallel.dart';
 import 'checkout/bonus_discount_block.dart';
 import 'checkout/cash_change_section.dart';
 import 'checkout/payment_method_toggle.dart';
@@ -647,9 +648,17 @@ class OrdersPanelState extends State<OrdersPanel>
       return;
     }
 
-    // Кеш зображень по ukod — всі с-коди одного товару отримають одне зображення
-    final imageCache = <String, String?>{};
+    // Відгук 23.09, п.3: раніше позиції збагачувались ПОСЛІДОВНО, і кожна
+    // чекала ще й картинку з anc.ua (до 8 с × 2 пошуки) — велике замовлення
+    // відкривалось хвилину. Тепер два проходи:
+    //  1) деталі + стелажі для всіх позицій, не більше 3 одночасно (стільки
+    //     слотів у Caché); показуємо кожну, щойно готова;
+    //  2) картинки — окремо, у фоні, після першого проходу, по 2 одночасно;
+    //     вони ніколи не затримують стелаж/серію/термін.
+    // Відкрили інше замовлення — решту не тягнемо.
+    bool abandoned() => !mounted || !identical(_selectedOrder, order);
 
+    final todo = <OrderItem>[];
     for (final item in order.items) {
       if (item.isEnriched) continue;
       // «Знижка на чек» та інші службові рядки — без кодів, збагачувати нічого.
@@ -657,6 +666,15 @@ class OrdersPanelState extends State<OrdersPanel>
         item.isEnriched = true;
         continue;
       }
+      todo.add(item);
+    }
+    if (todo.isEmpty) return;
+
+    final sw = Stopwatch()..start();
+    // Позиції, яким після Caché ще потрібна картинка (+ їхній detail).
+    final needImage = <(OrderItem, SKUDetailResult?)>[];
+
+    await forEachLimited(todo, 3, (item) async {
       try {
         // GetSKUdetail — за кодом СЦ (ids) або ukod; GetSKUprice (стелажі) —
         // за s-кодом партії (skod). Раніше в обидва йшов ids (код СЦ), і
@@ -667,30 +685,82 @@ class OrdersPanelState extends State<OrdersPanel>
         ]);
         final detail = results[0] as SKUDetailResult?;
         final priceResult = results[1] as DrugPriceResult;
+        if (abandoned()) return;
 
-        if (!mounted) return;
-
-        // Перевіряємо кеш по ukod
-        final cacheKey = item.ukod ?? item.name;
-        String? imageUrl;
-
-        if (imageCache.containsKey(cacheKey)) {
-          imageUrl = imageCache[cacheKey];
-        } else {
-          imageUrl = detail?.imageUrl;
-
-          // anc.ua за кодом СЦ — детермінований шлях без звірки назв
-          // (той самий, що в картці товару з 1f36d0c).
-          final kodSc = item.kodSc ?? detail?.kodSc;
-          if ((imageUrl == null || imageUrl.isEmpty) && kodSc != null) {
-            final byKod = await ProductBrowserService.fetchByKodSc(kodSc);
-            imageUrl = byKod?.imageUrl;
-            if (!mounted) return;
+        setState(() {
+          if (detail != null) {
+            item.enrichedSeries = detail.series;
+            item.enrichedExpiryDate = detail.expiryDate;
           }
+          final cacheImg = detail?.imageUrl;
+          if (cacheImg != null && cacheImg.isNotEmpty) {
+            item.enrichedImageUrl = cacheImg;
+          }
+          // Build storage location string from GetSKUprice
+          final parts = <String>[];
+          if (priceResult.stelazh?.isNotEmpty == true) parts.add('Ст.${priceResult.stelazh}');
+          if (priceResult.vitrina?.isNotEmpty == true) parts.add('Вт.${priceResult.vitrina}');
+          if (priceResult.polka?.isNotEmpty == true) parts.add('П.${priceResult.polka}');
+          if (priceResult.robot?.isNotEmpty == true) parts.add('Робот ${priceResult.robot}');
+          if (parts.isNotEmpty) {
+            item.enrichedStorageLocation = parts.join(' / ');
+          }
+          item.isEnriched = true;
+        });
+        if (item.enrichedImageUrl == null || item.enrichedImageUrl!.isEmpty) {
+          needImage.add((item, detail));
+        }
 
-          // Fallback: якщо ні Caché, ні код СЦ не дали зображення — пошук за назвою
-          if (imageUrl == null || imageUrl.isEmpty) {
-            try {
+        // Fetch EDK offers using short ids from GetSKUdetail
+        if (detail?.skuCode != null && detail!.skuCode!.isNotEmpty) {
+          _fetchOrderEdkOffers(item, detail.skuCode!);
+        }
+      } catch (e) {
+        debugPrint('Enrichment failed for SKU ${item.sku}: $e');
+        item.isEnriched = true; // Don't retry
+      }
+    }, shouldStop: abandoned);
+
+    final detailsMs = sw.elapsedMilliseconds;
+    if (abandoned()) return;
+
+    // Прохід 2: картинки. Кеш по ukod — усі s-коди одного товару отримують
+    // одне зображення, і anc.ua питаємо про нього один раз.
+    final imageCache = <String, Future<String?>>{};
+    await forEachLimited(needImage, 2, (pair) async {
+      final (item, detail) = pair;
+      final cacheKey = item.ukod ?? item.name;
+      final url = await imageCache.putIfAbsent(
+          cacheKey, () => _lookupOrderItemImage(item, detail));
+      if (abandoned()) return;
+      if (url != null && url.isNotEmpty) {
+        setState(() => item.enrichedImageUrl = url);
+      }
+    }, shouldStop: abandoned);
+
+    FiscalLog.log('ІЗ ${order.id}: збагачено ${todo.length} поз. — деталі й '
+        'стелажі $detailsMs мс, з картинками ${sw.elapsedMilliseconds} мс '
+        '(картинок з anc.ua: ${needImage.length})');
+  }
+
+  /// Картинка позиції замовлення з anc.ua: за кодом СЦ (детерміновано),
+  /// інакше пошук за торговою назвою зі звіркою форми випуску. `null` —
+  /// не знайшли; помилки мережі ковтаємо (це лише картинка).
+  Future<String?> _lookupOrderItemImage(
+      OrderItem item, SKUDetailResult? detail) async {
+    String? imageUrl;
+    try {
+      // anc.ua за кодом СЦ — детермінований шлях без звірки назв
+      // (той самий, що в картці товару з 1f36d0c).
+      final kodSc = item.kodSc ?? detail?.kodSc;
+      if (kodSc != null) {
+        final byKod = await ProductBrowserService.fetchByKodSc(kodSc);
+        imageUrl = byKod?.imageUrl;
+      }
+
+      // Fallback: якщо ні Caché, ні код СЦ не дали зображення — пошук за назвою
+      if (imageUrl == null || imageUrl.isEmpty) {
+            {
               List<ProductSearchResult> searchResults = [];
 
               // Шукаємо по торговій назві (без форми випуску — ламає пошук anc.ua)
@@ -759,44 +829,12 @@ class OrdersPanelState extends State<OrdersPanel>
                 );
                 imageUrl = match?.imageUrl;
               }
-            } catch (e) {
-              debugPrint('Image search failed for "${item.name}": $e');
             }
-          }
-
-          // Зберігаємо в кеш
-          imageCache[cacheKey] = imageUrl;
-        }
-
-        if (!mounted) return;
-
-        setState(() {
-          if (detail != null) {
-            item.enrichedSeries = detail.series;
-            item.enrichedExpiryDate = detail.expiryDate;
-          }
-          item.enrichedImageUrl = imageUrl;
-          // Build storage location string from GetSKUprice
-          final parts = <String>[];
-          if (priceResult.stelazh?.isNotEmpty == true) parts.add('Ст.${priceResult.stelazh}');
-          if (priceResult.vitrina?.isNotEmpty == true) parts.add('Вт.${priceResult.vitrina}');
-          if (priceResult.polka?.isNotEmpty == true) parts.add('П.${priceResult.polka}');
-          if (priceResult.robot?.isNotEmpty == true) parts.add('Робот ${priceResult.robot}');
-          if (parts.isNotEmpty) {
-            item.enrichedStorageLocation = parts.join(' / ');
-          }
-          item.isEnriched = true;
-        });
-
-        // Fetch EDK offers using short ids from GetSKUdetail
-        if (detail?.skuCode != null && detail!.skuCode!.isNotEmpty) {
-          _fetchOrderEdkOffers(item, detail.skuCode!);
-        }
-      } catch (e) {
-        debugPrint('Enrichment failed for SKU ${item.sku}: $e');
-        item.isEnriched = true; // Don't retry
       }
+    } catch (e) {
+      debugPrint('Image search failed for "${item.name}": $e');
     }
+    return (imageUrl == null || imageUrl.isEmpty) ? null : imageUrl;
   }
 
   /// Fetch EDK offers for an order item from Caché GetEdkOffers.

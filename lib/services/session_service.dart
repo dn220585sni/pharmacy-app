@@ -73,9 +73,10 @@ class SessionService {
     if (ApiConfig.useMock) return null;
     try {
       String grn(Money m) => (m.kopiykas / 100).toStringAsFixed(2);
+      // `orderId` і `NumIzmNakl` тут більше не передаємо (Катя, 22.09, коментар
+      // у доку сервісів): бек уже знає їх із сеансу — ІЗ прив'язується
+      // на стороні Caché, а ми й так слали порожні рядки.
       final params = <String, String>{
-        'orderId': '',
-        'NumIzmNakl': '',
         'KodKli': kodKli,
         'TypeNakl': typeNakl,
       };

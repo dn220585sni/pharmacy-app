@@ -2187,12 +2187,8 @@ class OrdersPanelState extends State<OrdersPanel>
                 const AutoConfirmMark(size: 16),
                 const SizedBox(width: 6),
               ],
-              if (OrderExtrasService.slaFor(order, _extrasOf(order)) !=
-                  OrderSla.none) ...[
-                SlaBadge(
-                    sla: OrderExtrasService.slaFor(order, _extrasOf(order))),
-                const SizedBox(width: 6),
-              ],
+              // Бейдж часу «Час спливає/вийшов» у шапці прибрано (24.09),
+              // як і в списку.
               _OrderStatusBadge(status: order.status),
             ],
           ),

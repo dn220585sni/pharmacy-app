@@ -2464,6 +2464,12 @@ class OrdersPanelState extends State<OrdersPanel>
       _orderCheckoutMode = allCollected;
     });
     _filterOrders();
+    // Об'єднане замовлення — новий об'єкт, і якщо джерела не відкривали
+    // окремо, його позиції ще без стелажів/серій/фото (Микола 24.09:
+    // «фото взагалі не відображаються»). Збагачуємо як звичайне відкриття;
+    // уже збагачені позиції пропускаються.
+    _enrichOrderItems(merged);
+    _fetchOrderData(merged.id);
   }
 
   // ── Not-collected order actions: Розрахувати + Лікомат + Відмовити + Відсутність

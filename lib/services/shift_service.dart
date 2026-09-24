@@ -325,6 +325,10 @@ class ShiftService {
   /// Помилка службового внесення в ПРРО на останньому [startShift]: зміна
   /// відкрита, але розмінна в ПРРО не зареєстрована. `null` — усе пройшло.
   static String? lastDepositError;
+
+  /// Чому ПРРО не відкрив зміну на останньому [startShift] (текст відповіді
+  /// ПРРО, напр. «Закінчився строк дії КЕП»). `null` — відкрито.
+  static String? lastStartError;
   static const _depositAttempts = 4;
   static const _depositRetryDelay = Duration(seconds: 2);
 
@@ -379,8 +383,13 @@ class ShiftService {
       debugPrint('ShiftService startShift: OPEN_SHIFT FAIL: ${open.error}');
       FiscalLog.log('startShift ПРОВАЛ: ${open.error} '
           '(kind=${open.errorKind}) — каса лишається без зміни');
+      // Причину — касиру: 24.09 «Закінчився строк дії КЕП» на касі Юлії
+      // читалось як «Не вдалося відкрити зміну. Спробуйте ще раз», і вона
+      // пробувала ще раз замість кликати адміністратора.
+      lastStartError = open.error;
       return false;
     }
+    lastStartError = null;
     FiscalLog.log('startShift: зміну відкрито, внесення=${deposit.toHryvnia()}');
     // 2. Службове внесення в ПРРО (CashDesk `/check/service`) — інакше
     // `cash_in_box` у X/Z-звітах не знає про розмінну монету, діалог

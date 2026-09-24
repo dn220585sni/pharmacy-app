@@ -166,9 +166,20 @@ class _ShiftStartDialogState extends State<_ShiftStartDialog> {
       return;
     }
     setState(() => _starting = false);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Не вдалося відкрити зміну. Спробуйте ще раз.'),
-      backgroundColor: Color(0xFFDC2626),
+    // Причина від ПРРО — у плашці: «Закінчився строк дії КЕП», «немає
+    // звʼязку» тощо. Без неї касир повторює спробу замість кликати
+    // адміністратора (Юля, 24.09).
+    final reason = ShiftService.lastStartError;
+    final kepExpired =
+        reason != null && reason.toLowerCase().contains('кеп');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(reason == null || reason.isEmpty
+          ? 'Не вдалося відкрити зміну. Спробуйте ще раз.'
+          : 'ПРРО не відкрив зміну: $reason.'
+              '${kepExpired ? ' Потрібен адміністратор — оновити ключ '
+                  'підпису на цій касі; повторні спроби не допоможуть.' : ''}'),
+      duration: Duration(seconds: kepExpired ? 12 : 6),
+      backgroundColor: const Color(0xFFDC2626),
       behavior: SnackBarBehavior.floating,
     ));
   }

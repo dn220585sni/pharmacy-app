@@ -194,5 +194,37 @@ void main() {
       expect(o2.nakladnaNumbers, ['1', '2', '3']);
       expect(o2.type, OrderType.novaPoshta);
     });
+
+    // Живий сервер 24.09: статуси відмов в орудному відмінку, тип
+    // «Оптіма TabletkiUA», код СЦ повернуто в позиції (Катя, 24.09).
+    test('статуси відмов і тип Оптіма з живого сервера 24.09', () {
+      OrderStatus st(String v) =>
+          InternetOrder.fromJson({'Status': v, 'items': []}).status;
+      expect(st(' Відмова клієнтом'), OrderStatus.customerRefusal);
+      expect(st(' Відмова аптекою'), OrderStatus.pharmacyRefusal);
+      expect(st(' Оплачене'), OrderStatus.paidOnline);
+      OrderType ty(String v) =>
+          InternetOrder.fromJson({'TypeZ': v, 'items': []}).type;
+      expect(ty('Оптіма TabletkiUA'), OrderType.optimTabl);
+      expect(ty('TabletkiUA'), OrderType.tabletkiUA);
+      expect(ty('Глово'), OrderType.glovo);
+    });
+
+    test('ids у позиції нового контракту → код СЦ (будь-який регістр ключа)',
+        () {
+      for (final key in ['ids', 'Ids', 'IDS', 'KodSc']) {
+        final item = OrderItem.fromJson({
+          'SKod': '26140464',
+          key: '35871',
+          'Name': 'АЛЕРЗИН',
+          'qty': 1,
+          'price': 190,
+          'total': 190,
+        });
+        expect(item.sku, '26140464', reason: key);
+        expect(item.kodSc, '35871', reason: key);
+        expect(item.detailIds, '35871', reason: key);
+      }
+    });
   });
 }

@@ -8,6 +8,7 @@ import 'fiscal_log.dart';
 /// Сервіс інтернет-замовлень — працює з GetOrders / UpdateOrderStatus API Caché.
 class OrderService {
   static final _api = CacheApiClient();
+  static bool _itemKeysLogged = false;
 
   /// Завантажити замовлення за період та статусом.
   ///
@@ -88,6 +89,17 @@ class OrderService {
       '${firstItem == null ? '' : ', товар s-код ${firstItem.sku} '
           'код СЦ ${firstItem.kodSc ?? '—'} ukod ${firstItem.ukod ?? '—'}'}',
     );
+    // Новий контракт без коду СЦ у позиції → один раз показати сирі ключі
+    // позиції: щоб бачити, як саме Катя назвала поле (24.09: «додала ids»).
+    if (isNew && firstItem != null && firstItem.kodSc == null && !_itemKeysLogged) {
+      _itemKeysLogged = true;
+      final rawItems = (firstJson!['items'] as List?) ?? const [];
+      final firstRaw = rawItems.whereType<Map>().firstWhere(
+          (m) => '${m['SKod'] ?? m['skod'] ?? ''}'.isNotEmpty,
+          orElse: () => const {});
+      FiscalLog.log('GetOrders: позиція без коду СЦ, ключі позиції: '
+          '${firstRaw.keys.join(", ")}');
+    }
     // Розподіл статусів (23.09): чи віддає сервер оплачені/відмовлені взагалі.
     // Сирий текст статусу → скільки + як ми його розпізнали.
     if (orders.isNotEmpty) {

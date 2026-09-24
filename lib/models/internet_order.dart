@@ -87,7 +87,11 @@ class OrderItem {
     String s(String a, [String? b]) =>
         (json[a] ?? (b == null ? null : json[b]))?.toString().trim() ?? '';
     final qty = double.tryParse(s('qty')) ?? 0;
-    final ids = s('ids');
+    // Код СЦ: `ids` (обидва контракти; Катя повернула його в новий 24.09 —
+    // регістр ключа не гарантований, тому приймаємо варіанти).
+    var ids = s('ids');
+    if (ids.isEmpty) ids = s('Ids', 'IDS');
+    if (ids.isEmpty) ids = s('KodSc', 'kodSc');
     final skod = s('skod', 'SKod');
     final ukodRaw = s('ukod');
     final maker = s('Maker');
@@ -340,9 +344,13 @@ class InternetOrder {
       case 'оплачено':
       case 'оплачене':
         return OrderStatus.paidOnline;
+      // 24.09, onlyRefusal=1 на живому сервері: «Відмова клієнтом» /
+      // «Відмова аптекою» (орудний відмінок).
       case 'відмова аптеки':
+      case 'відмова аптекою':
         return OrderStatus.pharmacyRefusal;
       case 'відмова клієнта':
+      case 'відмова клієнтом':
       case 'відмова':
         return OrderStatus.customerRefusal;
 
@@ -427,8 +435,13 @@ class InternetOrder {
     if (t.isEmpty) return OrderType.unknown;
     if (t.contains('глово') || t.contains('glovo')) return OrderType.glovo;
     if (t.contains('нова') && t.contains('пошт')) return OrderType.novaPoshta;
-    if (t.contains('оптим')) return OrderType.optimTabl;
-    if (t.contains('таблет')) return OrderType.tabletkiUA;
+    // 24.09 наживо: "Оптіма TabletkiUA" — спершу Оптіма, потім Таблетки.
+    if (t.contains('оптім') || t.contains('оптим') || t.contains('optim')) {
+      return OrderType.optimTabl;
+    }
+    if (t.contains('таблет') || t.contains('tabletki')) {
+      return OrderType.tabletkiUA;
+    }
     if (t.contains('страх')) return OrderType.likTas;
     if (t.contains('додат') || t.contains('android') || t.contains('ios')) {
       return OrderType.androidApp;

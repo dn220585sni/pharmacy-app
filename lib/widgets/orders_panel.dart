@@ -10,6 +10,7 @@ import 'orders/order_indicators.dart';
 import 'orders/order_messages_dialog.dart';
 import 'orders/order_duplicate_dialog.dart';
 import 'orders/order_issue_block.dart';
+import 'orders/order_merge_dialog.dart';
 import 'orders/orders_grid.dart';
 import '../mixins/checkout_mixin.dart';
 import '../mixins/edk_state_mixin.dart';
@@ -1961,37 +1962,10 @@ class OrdersPanelState extends State<OrdersPanel>
       return;
     }
 
-    final yes = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: const Text('Об\'єднання замовлень',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-        content: Text(
-          'Ви дійсно бажаєте об\'єднати обрані інтернет замовлення в один '
-          'чек ? Клієнт має надати згоду.\n\n'
-          '${list.map((o) => '№${o.reserveNumber} — ${o.total.asMoney} ₴').join('\n')}',
-          style: const TextStyle(fontSize: 13, height: 1.45),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Скасувати'),
-          ),
-          ElevatedButton(
-            autofocus: true,
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1E7DC8),
-              foregroundColor: Colors.white,
-              elevation: 0,
-            ),
-            child: const Text('Так'),
-          ),
-        ],
-      ),
-    );
+    // Повний склад кожного замовлення у вікні підтвердження (Микола, 24.09):
+    // об'єднують часто прямо зі списку, не відкриваючи, і до цього моменту
+    // ніде не видно, що саме піде в один чек.
+    final yes = await showOrderMergeDialog(context, list);
     if (yes != true || !mounted) return;
     _mergeOrderList(list);
   }

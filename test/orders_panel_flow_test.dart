@@ -203,11 +203,12 @@ void main() {
     await t.pump();
     await t.tap(find.text('Об\'єднати (2)'));
     await t.pumpAndSettle();
-    expect(
-        find.textContaining('Ви дійсно бажаєте об\'єднати обрані інтернет '
-            'замовлення в один чек ? Клієнт має надати згоду.'),
-        findsOneWidget);
-    await t.tap(find.text('Так'));
+    // Вікно підтвердження — з повним складом обох замовлень (24.09).
+    expect(find.text('Об\'єднання 2 замовлень в один чек'), findsOneWidget);
+    expect(find.text('ТОВАР 1 ДОВГА НАЗВА ПРЕПАРАТУ'), findsOneWidget);
+    expect(find.text('ТОВАР 2 ДОВГА НАЗВА ПРЕПАРАТУ'), findsOneWidget);
+    expect(find.text('Разом · 2 поз.'), findsOneWidget);
+    await t.tap(find.widgetWithText(ElevatedButton, 'Об\'єднати'));
     await t.pump(const Duration(milliseconds: 600));
     await t.pump(const Duration(milliseconds: 600));
     expect(find.text('Об\'єднане замовлення · 2 шт.'), findsOneWidget);

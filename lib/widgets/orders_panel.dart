@@ -111,18 +111,24 @@ class OrdersPanelState extends State<OrdersPanel>
   /// Микола 23.09: вікно відкривається одразу на «Не оплачені».
   String _activeFilter = _filterNotPaid;
 
-  static const _filterAll = 'Всі';
   static const _filterNotPaid = 'Не оплачені';
   static const _filterPaid = 'Оплачені';
   static const _filterRefused = 'Відмови';
 
   /// Плашки фільтра (Микола 22.09; 23.09 «Не зібрані» → «Не оплачені»).
+  /// «Всі» немає (Катя 23.09: у роздрібі такого фільтра нема — або ті, по
+  /// яких ведеться робота, або обрана плашка). Повторний клік по обраній
+  /// повертає «Не оплачені».
   static const List<String> _filterLabels = [
-    _filterAll,
     _filterNotPaid,
     _filterPaid,
     _filterRefused,
   ];
+
+  /// Не фільтр, а ПОШУК по всіх статусах (ТЗ Юлії §2: номера не знайшли
+  /// серед «Не оплачених» → «Шукати» по всіх). Тимчасова плашка з хрестиком;
+  /// на сервері — три запити (дефолт + оплачені + відмови).
+  static const _filterSearchAll = 'Пошук по всіх';
 
   /// Службові фільтри — без плашки; вмикаються кліком по сигналу над
   /// списком (час на збір, Glovo) і показуються тимчасовою плашкою з
@@ -263,9 +269,10 @@ class OrdersPanelState extends State<OrdersPanel>
   /// Load orders from GetOrders API (or mock fallback).
   /// Запити до GetOrders під активний фільтр (контракт 22.09: за
   /// замовчуванням сервер віддає лише незавершені, оплачені й відмови — за
-  /// прапорцями; прапорця «все» немає). Старий сервер прапорці ігнорує і
-  /// віддає все за `status=all` — тоді клієнтський фільтр [_matchesFilter]
-  /// відсіює зайве, а «Всі» просто злиє три однакові відповіді.
+  /// прапорцями; прапорця «все» немає і не буде — Катя 23.09). Старий сервер
+  /// прапорці ігнорує і віддає все за `status=all` — тоді клієнтський фільтр
+  /// [_matchesFilters] відсіює зайве, а пошук по всіх злиє три однакові
+  /// відповіді.
   Future<List<InternetOrder>> _fetchForFilter(String from, String to) async {
     switch (_activeFilter) {
       case _filterPaid:
@@ -274,7 +281,7 @@ class OrdersPanelState extends State<OrdersPanel>
       case _filterRefused:
         return OrderService.fetchOrders(
             dateFrom: from, dateTo: to, onlyRefusal: true);
-      case _filterAll:
+      case _filterSearchAll:
         final parts = await Future.wait([
           OrderService.fetchOrders(dateFrom: from, dateTo: to),
           OrderService.fetchOrders(dateFrom: from, dateTo: to, onlyPay: true),
@@ -495,7 +502,7 @@ class OrdersPanelState extends State<OrdersPanel>
   /// Whether an order matches any of the active filter chips.
   bool _matchesFilters(InternetOrder o) {
     switch (_activeFilter) {
-      case _filterAll:
+      case _filterSearchAll:
         return true;
       case _filterNotPaid:
         return _isNotPaid(o);
@@ -521,10 +528,9 @@ class OrdersPanelState extends State<OrdersPanel>
   /// це провокує видачу чужого замовлення.
   bool _matchesQuery(InternetOrder o, String query) {
     if (o.reserveNumber.toLowerCase().contains(query)) return true;
-    // Контракт 22.09: сервер дає власний рядок для пошуку замовлення.
-    if (o.searchData.isNotEmpty && o.searchData.toLowerCase().contains(query)) {
-      return true;
-    }
+    // `SearchData` з контракту 22.09 свідомо не використовуємо: це внутрішній
+    // рядок пошуку старого роздрібу (Alt+0), Катя 23.09 — «нам може і не
+    // потрібно аналізувати».
     final name = o.customerName?.toLowerCase();
     if (name != null && name.contains(query)) return true;
     final glovo = _extrasOf(o).glovoNumber?.toLowerCase();
@@ -559,7 +565,7 @@ class OrdersPanelState extends State<OrdersPanel>
   bool _needsUrgentCollect(InternetOrder o) =>
       (o.type == OrderType.glovo ||
           o.type == OrderType.novaPoshta ||
-          o.isLockerEligible) &&
+          o.isLockerOrder) &&
       (o.status == OrderStatus.newOrder ||
           o.status == OrderStatus.inProgress ||
           o.status == OrderStatus.atWork);
@@ -662,12 +668,12 @@ class OrdersPanelState extends State<OrdersPanel>
     _searchFocusNode.requestFocus();
   }
 
-  /// Один вибір; повторний клік по обраному повертає «Всі».
+  /// Один вибір; повторний клік по обраному повертає «Не оплачені».
   /// Набір замовлень залежить від фільтра вже на сервері (контракт 22.09:
   /// оплачені/відмови — окремими прапорцями), тому фільтр = новий запит.
   void _toggleFilter(String label) {
     setState(() {
-      _activeFilter = _activeFilter == label ? _filterAll : label;
+      _activeFilter = _activeFilter == label ? _filterNotPaid : label;
     });
     _loadOrders();
   }
@@ -676,9 +682,9 @@ class OrdersPanelState extends State<OrdersPanel>
   bool get _offerSearchAll =>
       _hasQuery && _activeFilter == _filterNotPaid && _filteredOrders.isEmpty;
 
-  /// «Шукати» (або Enter у пошуку): фільтр → «Всі», той самий запит.
+  /// «Шукати» (або Enter у пошуку): пошук по всіх статусах, той самий запит.
   void _searchAllOrders() {
-    setState(() => _activeFilter = _filterAll);
+    setState(() => _activeFilter = _filterSearchAll);
     _loadOrders();
     _searchFocusNode.requestFocus();
   }
@@ -1020,7 +1026,7 @@ class OrdersPanelState extends State<OrdersPanel>
 
   /// Find the first EDK offer for an order's items and activate it.
   void _triggerEdkForOrder(InternetOrder order) {
-    if (order.isLockerEligible) return;
+    if (order.isLockerOrder) return;
     if (order.type == OrderType.glovo) return;
     if (order.type == OrderType.novaPoshta) return;
     if (order.status == OrderStatus.dispensed) return;
@@ -1036,7 +1042,7 @@ class OrdersPanelState extends State<OrdersPanel>
   bool get _edkAllowed {
     final order = _selectedOrder;
     if (order == null) return false;
-    if (order.isLockerEligible) return false;
+    if (order.isLockerOrder) return false;
     if (order.type == OrderType.glovo) return false;
     if (order.type == OrderType.novaPoshta) return false;
     return true;
@@ -2268,7 +2274,7 @@ class OrdersPanelState extends State<OrdersPanel>
                     ),
                   ),
                 ),
-                if (order.isLockerEligible) ...[
+                if (order.isLockerOrder) ...[
                   const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -3428,7 +3434,7 @@ class _OrderListTileState extends State<_OrderListTile> {
                             order.status != OrderStatus.paidOnline &&
                             order.status != OrderStatus.dispensed) ...[
                           // Reason badge: Лікомат or Glovo
-                          if (order.isLockerEligible) ...[
+                          if (order.isLockerOrder) ...[
                             const SizedBox(width: 6),
                             Container(
                               padding: const EdgeInsets.symmetric(

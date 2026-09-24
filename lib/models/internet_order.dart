@@ -148,8 +148,18 @@ class InternetOrder {
   /// Marked by external service — urgent orders (Glovo, locker deadline, etc.)
   final bool isUrgent;
 
-  /// Whether this order can be placed into a locker (parameter from service).
+  /// Замовлення МОЖНА покласти в лікомат. Катя (23.09): поле сервісу
+  /// `isLockerEligible` = "1" означає ПРОТИЛЕЖНЕ — «в лікомат класти не
+  /// треба» (старий опис був помилковий), тож тут `!lockerForbidden`.
+  /// Це дозвіл на дію, а не ознака «це замовлення з лікомата» — для неї є
+  /// [isLockerOrder] (комірка вже призначена).
   final bool isLockerEligible;
+
+  /// Сирий прапорець сервісу: "1" — у лікомат не класти.
+  final bool lockerForbidden;
+
+  /// Замовлення з лікомата: сервер дав комірку (`Likomat`).
+  bool get isLockerOrder => lockerCell != null;
 
   /// Reason for pharmacy refusal (set when status == pharmacyRefusal).
   final String? refusalReason;
@@ -209,6 +219,7 @@ class InternetOrder {
     this.customerName,
     this.isUrgent = false,
     this.isLockerEligible = false,
+    this.lockerForbidden = false,
     this.refusalReason,
     this.mergedFrom = const [],
     this.nakladnaNumbers = const [],
@@ -242,7 +253,8 @@ class InternetOrder {
     final status = _parseStatus(s('status', 'Status'));
     final rawType = s('orderType', 'TypeZ').trim();
     final type = _parseType(rawType);
-    final isLocker = s('isLockerEligible').trim() == '1';
+    // "1" = у лікомат НЕ класти (Катя, 23.09) — в обох контрактах.
+    final lockerForbidden = s('isLockerEligible').trim() == '1';
 
     // Parse date "09.03.2026 20:25:06"
     DateTime dateTime;
@@ -263,6 +275,7 @@ class InternetOrder {
     final phone = s('customerPhone').trim();
     final likomat = s('Likomat').trim();
     final needSpl = s('needSPLIdent').trim();
+    final lockerCell = int.tryParse(likomat);
 
     return InternetOrder(
       id: orderId.isNotEmpty ? orderId : orderNumber,
@@ -272,15 +285,18 @@ class InternetOrder {
       status: status,
       type: type,
       items: items,
-      lockerCell: int.tryParse(likomat),
+      lockerCell: lockerCell,
       customerPhone: phone.isNotEmpty
           ? phone
           : editPhone.isNotEmpty
               ? editPhone
               : null,
       customerName: _cleanName(json['customerName']?.toString()),
-      isUrgent: isLocker, // locker-eligible orders are automatically urgent
-      isLockerEligible: isLocker,
+      // Терміновість — лише для замовлень із комірки лікомата; дозвіл
+      // класти в лікомат є майже в усіх і терміновості не означає.
+      isUrgent: lockerCell != null,
+      isLockerEligible: !lockerForbidden,
+      lockerForbidden: lockerForbidden,
       nakladnaNumbers: s('NumNaklList')
           .split(';')
           .map((e) => e.trim())

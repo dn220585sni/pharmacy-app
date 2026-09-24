@@ -78,7 +78,9 @@ void main() {
     expect(t.takeException(), isNull);
   });
 
-  testWidgets('не знайдено серед Не оплачених → «Шукати» переходить на Всі',
+  // «Всі» як фільтра немає (Катя 23.09) — «Шукати» вмикає тимчасовий
+  // пошук по всіх статусах.
+  testWidgets('не знайдено серед Не оплачених → «Шукати» шукає по всіх',
       (t) async {
     await _pump(t, [
       _order('1', '164431111', status: OrderStatus.newOrder),
@@ -93,6 +95,9 @@ void main() {
     // Поле пошуку + рядок списку.
     expect(find.text('164442222'), findsNWidgets(2));
     expect(find.textContaining('серед Не оплачених'), findsNothing);
+    // Тимчасова плашка пошуку є, плашки «Всі» немає.
+    expect(find.text('Пошук по всіх'), findsOneWidget);
+    expect(find.text('Всі'), findsNothing);
   });
 
   testWidgets('«Останній №» підставляє номер, введений раніше в сесії',

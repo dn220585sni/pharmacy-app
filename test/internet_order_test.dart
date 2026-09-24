@@ -51,8 +51,14 @@ void main() {
       expect(o.total, 369.08);
       expect(o.customerName, isNull);
       expect(o.customerPhone, '(097)3117000');
-      expect(o.isLockerEligible, isTrue);
-      expect(orders[0].isLockerEligible, isFalse);
+      // Катя 23.09: "1" = у лікомат НЕ класти (старий опис був навпаки).
+      expect(o.lockerForbidden, isTrue);
+      expect(o.isLockerEligible, isFalse);
+      expect(orders[0].lockerForbidden, isFalse);
+      expect(orders[0].isLockerEligible, isTrue);
+      // Без комірки це не замовлення з лікомата і не термінове.
+      expect(o.isLockerOrder, isFalse);
+      expect(o.isUrgent, isFalse);
     });
   });
 
@@ -142,8 +148,10 @@ void main() {
       expect(o.isAuto, isFalse);
       expect(o.isMergedOnServer, isFalse);
       expect(o.needSplIdent, isFalse); // "0 Alt+0" → перший токен 0
-      expect(o.isLockerEligible, isTrue);
+      expect(o.lockerForbidden, isTrue); // "1" = не класти в лікомат
+      expect(o.isLockerEligible, isFalse);
       expect(o.lockerCell, isNull); // Likomat порожній
+      expect(o.isLockerOrder, isFalse);
       expect(o.customerPhone, isNull); // EditPhone порожній
     });
 
@@ -180,6 +188,8 @@ void main() {
       });
       expect(o2.needSplIdent, isTrue);
       expect(o2.lockerCell, 12);
+      expect(o2.isLockerOrder, isTrue);
+      expect(o2.isUrgent, isTrue);
       expect(o2.customerPhone, '(067)1112233');
       expect(o2.nakladnaNumbers, ['1', '2', '3']);
       expect(o2.type, OrderType.novaPoshta);

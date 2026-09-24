@@ -148,8 +148,8 @@ class OrdersGrid extends StatelessWidget {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Text(o.statusLabel, style: _cell),
-                  if (e.autoConfirm) const AutoConfirmMark(),
-                  // Плашка «Час спливає/вийшов» у рядку прибрана (24.09).
+                  // Плашки «Час спливає/вийшов» і галочка автопідтвердження
+                  // (мок) у рядку прибрані (Микола 24.09).
                   if (e.hasMessages)
                     MessageEnvelope(
                         unread: e.hasUnread, onTap: () => onOpenMessages(o)),

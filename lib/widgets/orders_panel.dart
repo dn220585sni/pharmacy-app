@@ -2194,10 +2194,7 @@ class OrdersPanelState extends State<OrdersPanel>
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (_extrasOf(order).autoConfirm) ...[
-                const AutoConfirmMark(size: 16),
-                const SizedBox(width: 6),
-              ],
+              // Галочка автопідтвердження (мок) прибрана з шапки (24.09).
               // Бейдж часу «Час спливає/вийшов» у шапці прибрано (24.09),
               // як і в списку.
               _OrderStatusBadge(status: order.status),
@@ -3532,11 +3529,8 @@ class _OrderListTileState extends State<_OrderListTile> {
                             border: const Color(0xFFBFDBFE),
                           ),
                         ],
-                        if (extras.autoConfirm) ...[
-                          const SizedBox(width: 6),
-                          const AutoConfirmMark(),
-                        ],
-                        // Плашка «Час спливає/вийшов» прибрана (24.09).
+                        // Плашка «Час спливає/вийшов» і галочка
+                        // автопідтвердження (мок) прибрані (24.09).
                         if (extras.hasMessages) ...[
                           const SizedBox(width: 6),
                           MessageEnvelope(

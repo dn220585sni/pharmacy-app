@@ -80,7 +80,8 @@ void main() {
     }
     // Таймерної плашки в рядку більше немає (Микола 24.09).
     expect(find.text('Час вийшов'), findsNothing);
-    expect(find.byType(AutoConfirmMark), findsOneWidget);
+    // Галочка автопідтвердження (мок) прибрана з рядка (24.09).
+    expect(find.byType(AutoConfirmMark), findsNothing);
     expect(find.byType(MessageEnvelope), findsOneWidget);
     expect(find.text('ПАРАЦЕТАМОЛ ТАБ'), findsNWidgets(2));
     await t.tap(find.byType(Checkbox).first);

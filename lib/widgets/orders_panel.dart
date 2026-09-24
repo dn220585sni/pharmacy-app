@@ -761,7 +761,18 @@ class OrdersPanelState extends State<OrdersPanel>
       }
       todo.add(item);
     }
-    if (todo.isEmpty) return;
+    if (todo.isEmpty) {
+      // Слід у журналі: інакше «відкрив, а фото/стелажів немає» не відрізнити
+      // від «збагачення не запускалось» (24.09).
+      final service = order.items.where((i) => i.isServiceLine).length;
+      final first = order.items.firstOrNull;
+      FiscalLog.log('ІЗ ${order.id} (${order.statusLabel}): збагачувати '
+          'нічого — позицій ${order.items.length}, без кодів $service, уже '
+          'збагачених ${order.items.length - service}'
+          '${first == null ? '' : '; перша: "${first.name}" s-код '
+              '"${first.sku}" код СЦ ${first.kodSc ?? "—"}'}');
+      return;
+    }
 
     final sw = Stopwatch()..start();
     // Позиції, яким після Caché ще потрібна картинка (+ їхній detail).

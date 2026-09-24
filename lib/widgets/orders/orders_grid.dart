@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../models/internet_order.dart';
 import '../../models/money.dart';
 import '../../models/order_extras.dart';
-import '../../services/order_extras_service.dart';
 import 'order_indicators.dart';
 import 'merge_checkbox.dart';
 
@@ -108,7 +107,6 @@ class OrdersGrid extends StatelessWidget {
 
   Widget _row(InternetOrder o, bool highlighted) {
     final e = extras[o.id] ?? OrderExtras.empty;
-    final sla = OrderExtrasService.slaFor(o, e);
     final checkable = canCheck(o);
     return InkWell(
       onTap: () => onOpen(o),
@@ -151,7 +149,7 @@ class OrdersGrid extends StatelessWidget {
                 children: [
                   Text(o.statusLabel, style: _cell),
                   if (e.autoConfirm) const AutoConfirmMark(),
-                  if (sla != OrderSla.none) SlaBadge(sla: sla),
+                  // Плашка «Час спливає/вийшов» у рядку прибрана (24.09).
                   if (e.hasMessages)
                     MessageEnvelope(
                         unread: e.hasUnread, onTap: () => onOpenMessages(o)),

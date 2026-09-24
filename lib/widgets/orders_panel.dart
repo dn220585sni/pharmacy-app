@@ -124,18 +124,22 @@ class OrdersPanelState extends State<OrdersPanel>
     _filterNotPaid,
     _filterPaid,
     _filterRefused,
+    _filterWithMessages,
   ];
+
+  /// «З перепискою» — повернуто як звичайну плашку (Микола 24.09): серед
+  /// незавершених лише ті, де є повідомлення від кол-центру або аптеки.
+  static const _filterWithMessages = 'З перепискою';
 
   /// Не фільтр, а ПОШУК по всіх статусах (ТЗ Юлії §2: номера не знайшли
   /// серед «Не оплачених» → «Шукати» по всіх). Тимчасова плашка з хрестиком;
   /// на сервері — три запити (дефолт + оплачені + відмови).
   static const _filterSearchAll = 'Пошук по всіх';
 
-  /// Службові фільтри — без плашки; вмикаються кліком по сигналу над
-  /// списком (час на збір, Glovo) і показуються тимчасовою плашкою з
-  /// хрестиком. «З перепискою» прибрано (Микола 23.09): замовлення з новим
-  /// повідомленням і так угорі «Не оплачених».
-  static const _filterSla = 'Час на збір';
+  /// Службовий фільтр — без плашки; вмикається кліком по сигналу «Glovo · N»
+  /// над списком і показується тимчасовою плашкою з хрестиком. Сигнал і
+  /// плашки «Час на збір» прибрано (Микола 24.09): таймер від отримання
+  /// замовлення в списку не потрібен.
   static const _filterGlovo = 'Glovo';
 
   /// Ознаки замовлень, яких GetOrders ще не віддає (переписка з КЦ,
@@ -354,11 +358,6 @@ class OrdersPanelState extends State<OrdersPanel>
     _publishAlerts();
   }
 
-  int get _slaCount => _orders
-      .where((o) => OrderExtrasService.slaFor(o, _extrasOf(o)) != OrderSla.none)
-      .length;
-  bool get _slaOverdue => _orders.any(
-      (o) => OrderExtrasService.slaFor(o, _extrasOf(o)) == OrderSla.overdue);
   int get _newGlovoCount => _orders
       .where((o) =>
           o.type == OrderType.glovo && o.status == OrderStatus.newOrder)
@@ -373,7 +372,8 @@ class OrdersPanelState extends State<OrdersPanel>
         _orders.where((o) => _isNotPaid(o) && _notPaidRank(o) < 2);
     OrdersAlerts.state.value = OrdersAlertState(
       count: priority.length,
-      pulse: _slaOverdue,
+      // Пульсація йшла від таймера «час вийшов» — таймер прибрано (24.09).
+      pulse: false,
       hasUnread: priority.any((o) => _extrasOf(o).hasUnread),
     );
   }
@@ -514,8 +514,8 @@ class OrdersPanelState extends State<OrdersPanel>
         return o.status == OrderStatus.customerRefusal ||
             o.status == OrderStatus.pharmacyRefusal ||
             o.status == OrderStatus.refused;
-      case _filterSla:
-        return OrderExtrasService.slaFor(o, _extrasOf(o)) != OrderSla.none;
+      case _filterWithMessages:
+        return _isNotPaid(o) && _extrasOf(o).hasMessages;
       case _filterGlovo:
         return o.type == OrderType.glovo;
     }
@@ -1556,38 +1556,18 @@ class OrdersPanelState extends State<OrdersPanel>
     );
   }
 
-  /// Сигнали списку (ТЗ §6–8): час на збір, нові Glovo. Рядка немає, доки
-  /// немає жодного сигналу. Клік — фільтр списку. Лічильник «Від кол-центру»
-  /// прибрано (Микола 23.09): нові повідомлення видно конвертом у рядку, а
-  /// такі замовлення стоять угорі «Не оплачених».
+  /// Сигнал списку (ТЗ §8): нові Glovo. Рядка немає, доки сигналу немає.
+  /// Клік — фільтр списку. Лічильник «Від кол-центру» прибрано (Микола
+  /// 23.09), сигнал «Час на збір» — 24.09.
   Widget _buildAlertRow() {
-    final sla = _slaCount;
     final glovo = _newGlovoCount;
-    if (sla == 0 && glovo == 0) return const SizedBox.shrink();
+    if (glovo == 0) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
       child: Wrap(
         spacing: 6,
         runSpacing: 4,
         children: [
-          if (sla > 0)
-            Blink(
-              active: _slaOverdue,
-              child: OrderPill(
-                icon: Icons.timer_outlined,
-                text: 'Час на збір · $sla',
-                color: _slaOverdue ? Colors.white : const Color(0xFFDC2626),
-                background: _slaOverdue
-                    ? const Color(0xFFDC2626)
-                    : const Color(0xFFFEE2E2),
-                border: _slaOverdue
-                    ? const Color(0xFFDC2626)
-                    : const Color(0xFFFECACA),
-                tooltip: 'Замовлення, у яких спливає або вийшов час на збір'
-                    '${OrderExtrasService.isMock ? ' (демо)' : ''}',
-                onTap: () => _toggleFilter(_filterSla),
-              ),
-            ),
           if (glovo > 0)
             OrderPill(
               icon: Icons.delivery_dining_rounded,
@@ -1703,8 +1683,10 @@ class OrdersPanelState extends State<OrdersPanel>
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
         children: [
-          ..._filterLabels,
+          // Тимчасова плашка (пошук по всіх, Glovo) — першою, щоб її було
+          // видно й у вузькій панелі, де рядок плашок прокручується.
           if (!_filterLabels.contains(_activeFilter)) _activeFilter,
+          ..._filterLabels,
         ].map((label) {
           final isSelected = _activeFilter == label;
           final isTemporary = !_filterLabels.contains(label);
@@ -1855,7 +1837,6 @@ class OrdersPanelState extends State<OrdersPanel>
         return _OrderListTile(
           order: order,
           extras: extras,
-          sla: OrderExtrasService.slaFor(order, extras),
           checked: _checkedIds.contains(order.id),
           onCheck: _canCheck(order) ? () => _toggleCheck(order) : null,
           onOpenMessages: () => _openMessages(order),
@@ -3314,7 +3295,6 @@ class _OrderSmallButton extends StatelessWidget {
 class _OrderListTile extends StatefulWidget {
   final InternetOrder order;
   final OrderExtras extras;
-  final OrderSla sla;
   final bool checked;
 
   /// null — замовлення не можна об'єднувати (чекбокса немає).
@@ -3325,7 +3305,6 @@ class _OrderListTile extends StatefulWidget {
   const _OrderListTile({
     required this.order,
     this.extras = OrderExtras.empty,
-    this.sla = OrderSla.none,
     this.checked = false,
     this.onCheck,
     this.onOpenMessages,
@@ -3550,10 +3529,7 @@ class _OrderListTileState extends State<_OrderListTile> {
                           const SizedBox(width: 6),
                           const AutoConfirmMark(),
                         ],
-                        if (widget.sla != OrderSla.none) ...[
-                          const SizedBox(width: 6),
-                          SlaBadge(sla: widget.sla),
-                        ],
+                        // Плашка «Час спливає/вийшов» прибрана (24.09).
                         if (extras.hasMessages) ...[
                           const SizedBox(width: 6),
                           MessageEnvelope(

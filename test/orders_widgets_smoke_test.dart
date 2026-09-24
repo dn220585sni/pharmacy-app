@@ -78,7 +78,8 @@ void main() {
     ]) {
       expect(find.text(head), findsOneWidget, reason: head);
     }
-    expect(find.text('Час вийшов'), findsOneWidget);
+    // Таймерної плашки в рядку більше немає (Микола 24.09).
+    expect(find.text('Час вийшов'), findsNothing);
     expect(find.byType(AutoConfirmMark), findsOneWidget);
     expect(find.byType(MessageEnvelope), findsOneWidget);
     expect(find.text('ПАРАЦЕТАМОЛ ТАБ'), findsNWidgets(2));

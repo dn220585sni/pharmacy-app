@@ -1593,12 +1593,16 @@ class PrroService {
           cashInBox: flexDouble(json['cash_in_box']),
         );
       } else {
+        final msg = json['message']?.toString() ?? 'Помилка Z-звіту';
+        FiscalLog.log('Z_REPORT FAIL HTTP ${response.statusCode} '
+            '(ФН=$activeFiscalNumber): $msg');
         return PrroResult.failure(
-          error: json['message']?.toString() ?? 'Помилка Z-звіту',
+          error: msg,
           errorKind: PrroErrorKind.logical,
         );
       }
     } on TimeoutException {
+      FiscalLog.log('Z_REPORT: таймаут ПРРО');
       return const PrroResult.failure(
         error: 'Таймаут Z-звіту',
         errorKind: PrroErrorKind.connection,

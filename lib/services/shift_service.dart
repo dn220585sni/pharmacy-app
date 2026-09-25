@@ -367,6 +367,16 @@ class ShiftService {
           // зміну, і те, що його ніхто не замовляв, нічого не міняє.
           unawaited(ReceiptPrinter.printZReport(autoZ));
           await _fixZReportInDb();
+        } else {
+          // Z не пройшов → повторний OPEN_SHIFT дасть те саме «Зміна
+          // відкрита» і сховає справжню причину (25.09 у Юлі — прострочений
+          // ключ). Кажемо касиру, чому саме.
+          FiscalLog.log('startShift: авто-Z вчорашньої зміни НЕ пройшов: '
+              '${autoZ.error} (kind=${autoZ.errorKind}) — каса лишається '
+              'без зміни');
+          lastStartError = 'учорашня зміна відкрита, а Z-звіт по ній не '
+              'пройшов: ${autoZ.error}';
+          return false;
         }
         open = await PrroService.openShift();
       } else {
@@ -473,7 +483,10 @@ class ShiftService {
       }
       final r = await PrroService.zReport();
       if (!r.success) {
-        debugPrint('ShiftService: closeShift FAIL: ${r.error}');
+        // Причина — у журнал: 25.09 Юля тричі бачила «Не вдалося закрити
+        // зміну», а в журналі не було нічого (лише debugPrint).
+        FiscalLog.log('Z-звіт ПРОВАЛ: ${r.error} (kind=${r.errorKind}) — '
+            'зміна лишається відкритою');
         return ShiftCloseResult(r, fixedInDb: false);
       }
       _state = const ShiftState(isOpen: false);

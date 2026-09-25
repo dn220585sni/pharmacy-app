@@ -4,6 +4,7 @@ import '../models/money.dart';
 import '../utils/scan_keymap.dart';
 import '../utils/fuzzy_search.dart';
 import '../utils/keyed_task_chain.dart';
+import '../utils/single_flight.dart';
 import '../services/api_scheduler.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -3610,25 +3611,19 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// касир змінив суму, поки йшов запит (сервер 10, у нас «10=20», наступна
   /// синхронізація пропускалась). Тепер записуємо саме надіслану суму, а
   /// цикл крутиться, поки сеанс не дожене актуальну.
-  Future<bool> _syncBonusToServer() {
-    final inFlight = _bonusSync;
-    if (inFlight != null) return inFlight;
-    return _bonusSync = _runBonusSync();
-  }
+  Future<bool> _syncBonusToServer() => _bonusSync.run(_runBonusSync);
 
-  Future<bool>? _bonusSync;
+  /// Не «поле + finally»: так слот залипав на першому синку без запиту і
+  /// SetBonusOpl більше не йшов (25.09) — див. [SingleFlight].
+  final _bonusSync = SingleFlight<bool>();
 
   Future<bool> _runBonusSync() async {
     var ok = true;
-    try {
-      while (_bonusOnServer != _bonusToSpend) {
-        final sent = _bonusToSpend;
-        ok = await SessionService.setBonusOpl(sent);
-        if (!ok) break;
-        _bonusOnServer = sent;
-      }
-    } finally {
-      _bonusSync = null;
+    while (_bonusOnServer != _bonusToSpend) {
+      final sent = _bonusToSpend;
+      ok = await SessionService.setBonusOpl(sent);
+      if (!ok) break;
+      _bonusOnServer = sent;
     }
     // Стан сеансу після падіння SetBonusOpl невідомий (15.09: бонус у сеанс
     // потрапляв, знижка в чеку була, а Спарта бали НЕ спалила — клієнт

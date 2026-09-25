@@ -44,7 +44,7 @@ void main() {
       expect(t.finalTotal, Money.fromHryvnia(70));
     });
 
-    test('бонус обмежений сумою після знижки', () {
+    test('бонус обмежений сумою після знижки (мінус 1 грн грошима)', () {
       // base 100, знижка 10% = 90 до сплати; бонус введено 95, баланс 200
       final t = CheckoutTotals(
         base: Money.fromHryvnia(100),
@@ -53,8 +53,8 @@ void main() {
         enteredBonus: Money.fromHryvnia(95),
         bonusBalance: Money.fromHryvnia(200),
       );
-      expect(t.bonus, Money.fromHryvnia(90));
-      expect(t.finalTotal, Money.zero);
+      expect(t.bonus, Money.fromHryvnia(89));
+      expect(t.finalTotal, Money.fromHryvnia(1));
     });
 
     test('знижка + бонус разом', () {
@@ -114,15 +114,28 @@ void main() {
       expect(t.finalTotal, Money.fromHryvnia(8));
     });
 
-    test('мінімум 0 — поведінка як раніше (баланс і сума чека)', () {
+    test('мінімум з сервера 0 — однаково лишається 1 грн грошима', () {
+      // Микола 25.09: чек 27 грн, підставлялось 27 — всю суму списати не можна.
       final t = CheckoutTotals(
-        base: Money.fromHryvnia(100),
+        base: Money.fromHryvnia(27),
         useBonuses: true,
-        enteredBonus: Money.fromHryvnia(100),
+        enteredBonus: Money.fromHryvnia(27),
         bonusBalance: Money.fromHryvnia(200),
       );
-      expect(t.bonusCap, Money.fromHryvnia(100));
-      expect(t.finalTotal, Money.zero);
+      expect(t.bonusCap, Money.fromHryvnia(26));
+      expect(t.bonus, Money.fromHryvnia(26));
+      expect(t.finalTotal, Money.fromHryvnia(1));
+    });
+
+    test('чек до 1 грн — бонусів списати не можна', () {
+      final t = CheckoutTotals(
+        base: Money.fromHryvnia(0.80),
+        useBonuses: true,
+        enteredBonus: Money.fromHryvnia(1),
+        bonusBalance: Money.fromHryvnia(200),
+      );
+      expect(t.bonusCap, Money.zero);
+      expect(t.finalTotal, Money.fromHryvnia(0.80));
     });
   });
 

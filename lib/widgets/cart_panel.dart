@@ -2885,7 +2885,8 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                   useBonuses = v;
                   if (useBonuses && widget.loyalty != null) {
                     // Стеля вже враховує баланс, знижку і мінімум готівкою.
-                    bonusCtr.text = bonusCapAmount.toStringAsFixed(0);
+                    // Вниз, не округлення: стеля 26,60 не має показатись «27».
+                    bonusCtr.text = bonusCapAmount.floor().toString();
                   }
                 });
                 _notifyBonus();

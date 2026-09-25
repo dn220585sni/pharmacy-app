@@ -38,10 +38,16 @@ class CheckoutTotals {
   Money get discount =>
       discountPct == null ? Money.zero : base.percent(discountPct!);
 
+  /// Хоч 1 грн клієнт платить грошима завжди — навіть коли GetSPLParam ще
+  /// не підвантажено чи там 0 (Микола 25.09: чек 27 грн, підставляло 27).
+  static const Money minCashFloor = Money.fromKopiykas(100);
+
   /// Стеля списання: min(баланс, сума після знижки − мінімум готівкою), ≥ 0.
+  /// Мінімум готівкою — більший з [minCash] і [minCashFloor].
   /// Показується касиру як «можна списати до …».
   Money get bonusCap {
-    var upper = base - discount - minCash;
+    final mustPay = minCash > minCashFloor ? minCash : minCashFloor;
+    var upper = base - discount - mustPay;
     if (bonusBalance < upper) upper = bonusBalance;
     return upper.isNegative ? Money.zero : upper;
   }

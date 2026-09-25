@@ -3091,10 +3091,9 @@ class OrdersPanelState extends State<OrdersPanel>
               setState(() {
                 useBonuses = v;
                 if (useBonuses && widget.loyalty != null) {
-                  final max = baseTotal - discountAmount;
-                  final capped =
-                      widget.loyalty!.bonusBalance.clamp(0, max);
-                  bonusCtr.text = capped.toStringAsFixed(0);
+                  // Стеля враховує баланс, знижку і мінімум грошима (≥1 грн);
+                  // вниз, щоб не показати більше, ніж спишеться.
+                  bonusCtr.text = bonusCapAmount.floor().toString();
                 }
               });
             },

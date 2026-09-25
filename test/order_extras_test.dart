@@ -70,10 +70,24 @@ void main() {
 
   test('мок-ознаки детерміновані: те саме замовлення — ті самі ознаки',
       () async {
+    OrderExtrasService.demoData = true;
+    addTearDown(() => OrderExtrasService.demoData = false);
     final a = await OrderExtrasService.fetchExtras([_order(id: 'det-7')]);
     final b = await OrderExtrasService.fetchExtras([_order(id: 'det-7')]);
     expect(a['det-7']!.autoConfirm, b['det-7']!.autoConfirm);
     expect(a['det-7']!.sla, b['det-7']!.sla);
+  });
+
+  test('демо-ознаки вимкнено (25.09): без ознак, поки немає сервісу Каті',
+      () async {
+    expect(OrderExtrasService.demoData, isFalse);
+    final e = (await OrderExtrasService.fetchExtras([_order(id: 'real-1')]))['real-1']!;
+    expect(e.messages, isEmpty);
+    expect(e.hasUnread, isFalse);
+    expect(e.autoConfirm, isFalse);
+    expect(e.sla, OrderSla.none);
+    expect(e.prepaid, isFalse);
+    expect(e.glovoNumber, isNull);
   });
 
   test('код видачі (демо) = останні 4 цифри номера замовлення', () async {

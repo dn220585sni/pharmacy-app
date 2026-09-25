@@ -167,6 +167,9 @@ void main() {
   testWidgets('лічильник на кнопці = підняті вгору «Не оплачених»',
       (t) async {
     // id підібрані під мок-хеш: 'S' і 'I' — з непрочитаним повідомленням.
+    // Демо-ознаки з 25.09 вимкнені за замовчуванням — вмикаємо для тесту.
+    OrderExtrasService.demoData = true;
+    addTearDown(() => OrderExtrasService.demoData = false);
     await _pump(t, [
       _order('S', '164400001', status: OrderStatus.newOrder),
       _order('h', '164400002',

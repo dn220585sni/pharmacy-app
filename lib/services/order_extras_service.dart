@@ -18,6 +18,13 @@ import 'fiscal_log.dart';
 class OrderExtrasService {
   static const bool isMock = true;
 
+  /// Роздавати вигадані ознаки (повідомлення, передоплата, Glovo №, код
+  /// видачі…) за хешем номера. Вимкнено 25.09 (Микола): Катя робить сервіс
+  /// повідомлень, а «демо»-переписка й ознаки вводили в оману. Поки
+  /// `false` — усі замовлення без ознак; те, що надіслали в сесії, живе в
+  /// пам'яті, як і раніше. Тести вмикають назад через [demoData].
+  static bool demoData = false;
+
   /// Вихідне повідомлення від аптеки дозволене лише для замовлень на суму
   /// понад цю (обмеження передачі персональних даних Tabletki.ua, ТЗ §5).
   static const double outgoingMinTotal = 1000;
@@ -38,7 +45,8 @@ class OrderExtrasService {
   static Future<Map<String, OrderExtras>> fetchExtras(
       List<InternetOrder> orders) async {
     for (final o in orders) {
-      _store.putIfAbsent(o.id, () => _mockFor(o));
+      _store.putIfAbsent(
+          o.id, () => demoData ? _mockFor(o) : OrderExtras.empty);
     }
     return {for (final o in orders) o.id: _store[o.id]!};
   }

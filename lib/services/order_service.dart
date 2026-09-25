@@ -29,6 +29,7 @@ class OrderService {
     bool onlyNotColl = false,
     bool onlyRefusal = false,
     bool onlyPay = false,
+    bool onlyChat = false,
     String? editPhone,
     String? editNumber,
     String? editGoods,
@@ -43,6 +44,7 @@ class OrderService {
       if (onlyNotColl) 'onlyNotColl',
       if (onlyRefusal) 'onlyRefusal',
       if (onlyPay) 'onlyPay',
+      if (onlyChat) 'Chat',
     ].join(',');
     final response = await _api.call('GetOrders', params: {
       'status': status,
@@ -51,6 +53,8 @@ class OrderService {
       if (onlyNotColl) 'onlyNotColl': '1',
       if (onlyRefusal) 'onlyRefusal': '1',
       if (onlyPay) 'onlyPay': '1',
+      // Катя 25.09: Chat=1 — лише замовлення з активною перепискою.
+      if (onlyChat) 'Chat': '1',
       if (editPhone != null && editPhone.isNotEmpty) 'editPhone': editPhone,
       if (editNumber != null && editNumber.isNotEmpty) 'editNumber': editNumber,
       if (editGoods != null && editGoods.isNotEmpty) 'editGoods': editGoods,

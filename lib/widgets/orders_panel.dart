@@ -286,6 +286,12 @@ class OrdersPanelState extends State<OrdersPanel>
       case _filterRefused:
         return OrderService.fetchOrders(
             dateFrom: from, dateTo: to, onlyRefusal: true);
+      case _filterWithMessages:
+        // Катя 25.09: Chat=1 → сервер лишає лише замовлення з активною
+        // перепискою. Старий сервер параметр ігнорує — тоді відсіює
+        // клієнтський [_matchesFilters].
+        return OrderService.fetchOrders(
+            dateFrom: from, dateTo: to, onlyChat: true);
       case _filterSearchAll:
         final parts = await Future.wait([
           OrderService.fetchOrders(dateFrom: from, dateTo: to),
@@ -515,7 +521,9 @@ class OrdersPanelState extends State<OrdersPanel>
             o.status == OrderStatus.pharmacyRefusal ||
             o.status == OrderStatus.refused;
       case _filterWithMessages:
-        return _isNotPaid(o) && _extrasOf(o).hasMessages;
+        // Новий контракт: сервер уже відібрав (поле `Chat` непорожнє);
+        // старий — за моком повідомлень.
+        return o.chat.isNotEmpty || _extrasOf(o).hasMessages;
       case _filterGlovo:
         return o.type == OrderType.glovo;
     }

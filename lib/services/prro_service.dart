@@ -620,6 +620,10 @@ class PrroService {
         'expires_at': _tokenExpiresAt?.toIso8601String(),
         'fiscal': PrroConfig.numFiscal,
         'base_url': PrroConfig.baseUrl,
+        // Токен належить касиру (логіну): змінили логін у реєстрі — старий
+        // токен має піти в кошик, інакше ПРРО й далі підписує старим ключем
+        // (25.09, Юля: «Закінчився строк дії КЕП» після зміни логіна).
+        'login': PrroConfig.email,
       }));
     } catch (e) {
       debugPrint('PRRO token persist FAIL: $e');
@@ -642,6 +646,15 @@ class PrroService {
       if (cachedFiscal != PrroConfig.numFiscal) {
         debugPrint('PRRO token cache MISS: fiscal mismatch '
             '(cached=$cachedFiscal, config=${PrroConfig.numFiscal})');
+        return;
+      }
+      // Логін — теж частина ключа кешу. Старі файли без поля `login`
+      // вважаємо чужими: один перелогін дешевший за день на старому ключі.
+      final cachedLogin = json['login']?.toString();
+      if (cachedLogin != PrroConfig.email) {
+        FiscalLog.log('ПРРО: кешований токен від логіна '
+            '"${cachedLogin ?? "(без логіна)"}", у реєстрі "${PrroConfig.email}" '
+            '— не використовуємо, буде перелогін');
         return;
       }
       final expiresStr = json['expires_at']?.toString();

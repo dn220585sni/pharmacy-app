@@ -1999,25 +1999,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         ));
       }
 
-      // Sort: in-stock first → FEFO (shortest expiry first) → by name.
-      serverDrugs.sort((a, b) {
-        // 1. In-stock before out-of-stock
-        if (a.stock > 0 && b.stock <= 0) return -1;
-        if (a.stock <= 0 && b.stock > 0) return 1;
-
-        // 2. Same name group: sort by expiry date (FEFO — shortest expiry first)
-        final nameCmp = a.name.compareTo(b.name);
-        if (nameCmp == 0) {
-          final aExp = a.parsedExpiry;
-          final bExp = b.parsedExpiry;
-          if (aExp != null && bExp != null) return aExp.compareTo(bExp);
-          if (aExp != null) return -1; // has expiry before no-expiry
-          if (bExp != null) return 1;
-        }
-
-        // 3. Different names: alphabetical
-        return nameCmp;
-      });
+      // Сталий порядок, що не залежить від залишку і порядку відповіді
+      // сервера (див. Drug.compareSearchRows).
+      serverDrugs.sort(Drug.compareSearchRows);
 
       setState(() {
         // Remove old server drugs, prepend new ones before mock results.

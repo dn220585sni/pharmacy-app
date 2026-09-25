@@ -195,17 +195,50 @@ class Drug {
   /// true тільки якщо в упаковці більше 1 блістера/одиниці.
   bool get canSplitByBlister => unitsPerPackage != null && unitsPerPackage! > 1;
 
-  /// Parse expiryDate in "DD.MM.YYYY" format to DateTime.
+  /// Термін придатності як дата. Формати: "DD.MM.YYYY", а також лише місяць
+  /// ("MM/YY", "MM.YY", "MM.YYYY") — тоді останній день місяця.
   /// Returns null if format is invalid.
-  DateTime? get parsedExpiry {
-    if (expiryDate == null) return null;
-    final parts = expiryDate!.split('.');
-    if (parts.length != 3) return null;
-    final day = int.tryParse(parts[0]);
-    final month = int.tryParse(parts[1]);
-    final year = int.tryParse(parts[2]);
-    if (day == null || month == null || year == null) return null;
-    return DateTime(year, month, day);
+  DateTime? get parsedExpiry => parseExpiryDate(expiryDate);
+
+  /// Порядок рядків пошуку: в наявності → назва → FEFO (коротший термін
+  /// вище) → s-код (раніший прихід вище). Залишок у порядку НЕ бере участі
+  /// (крім «є/нема»): інакше продаж на іншій касі переставляв би рядки, а
+  /// партія, з якої відпускати першою, опинялась би внизу.
+  static int compareSearchRows(Drug a, Drug b) {
+    final aIn = a.stock > 0, bIn = b.stock > 0;
+    if (aIn != bIn) return aIn ? -1 : 1;
+
+    final nameCmp = a.name.compareTo(b.name);
+    if (nameCmp != 0) return nameCmp;
+
+    final aExp = a.parsedExpiry, bExp = b.parsedExpiry;
+    if (aExp != null && bExp != null) {
+      final c = aExp.compareTo(bExp);
+      if (c != 0) return c;
+    } else if (aExp != null || bExp != null) {
+      return aExp != null ? -1 : 1; // з терміном — вище за без терміну
+    }
+
+    final aKey = a.skuCode ?? a.id, bKey = b.skuCode ?? b.id;
+    final aNum = int.tryParse(aKey), bNum = int.tryParse(bKey);
+    if (aNum != null && bNum != null) return aNum.compareTo(bNum);
+    return aKey.compareTo(bKey);
+  }
+
+  static DateTime? parseExpiryDate(String? raw) {
+    if (raw == null) return null;
+    final parts = raw.trim().split(RegExp(r'[./]'));
+    final nums = parts.map(int.tryParse).toList();
+    if (nums.any((n) => n == null)) return null;
+    int fullYear(int y) => y < 100 ? 2000 + y : y;
+    if (nums.length == 3) {
+      return DateTime(fullYear(nums[2]!), nums[1]!, nums[0]!);
+    }
+    if (nums.length == 2 && nums[0]! >= 1 && nums[0]! <= 12) {
+      // День 0 наступного місяця = останній день цього.
+      return DateTime(fullYear(nums[1]!), nums[0]! + 1, 0);
+    }
+    return null;
   }
 
   bool get isExpired {

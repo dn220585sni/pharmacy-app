@@ -563,6 +563,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   final _loyaltyPhoneController = TextEditingController();
   final _loyaltyPhoneFocusNode = FocusNode();
   CustomerLoyalty? _customerLoyalty;
+  /// Останній текст поля телефону, який бачив [_onLoyaltyPhoneChanged] —
+  /// щоб відрізнити редагування від руху курсора.
+  String? _loyaltyPhoneLastText;
   bool _isLoadingLoyalty = false;
   String? _previousCustomerPhone;
 
@@ -3855,7 +3858,21 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   void _onLoyaltyPhoneChanged() {
     // Only rebuild UI so buttons react to digit count changes.
     // Actual fetch happens on Ок press or Enter.
-    final digits = _loyaltyPhoneController.text
+    final text = _loyaltyPhoneController.text;
+    // Контролер сповіщає і про зміну курсора/виділення (фокус, клік, перехід
+    // до розрахунку) — це не редагування. А після ідентифікації в полі
+    // маска «+38050***4567» (6 цифр), тож перевірка «< 9 цифр» скидала
+    // клієнта і гасила «Списати бонуси» (Юлія 25.09). Скидаємо лише коли
+    // касир справді змінив номер.
+    if (text == _loyaltyPhoneLastText) return;
+    _loyaltyPhoneLastText = text;
+    final loyalty = _customerLoyalty;
+    if (loyalty != null &&
+        loyalty.phone.length == 13 &&
+        text == _maskPhone(loyalty.phone.substring(4))) {
+      return;
+    }
+    final digits = text
         .substring(_loyaltyPhonePrefix.length)
         .replaceAll(RegExp(r'\D'), '');
 

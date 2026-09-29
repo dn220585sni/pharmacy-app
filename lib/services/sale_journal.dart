@@ -27,9 +27,15 @@ enum SaleStage {
 
 /// Один продаж у журналі.
 class SaleRecord {
-  /// NumNakl накладної; він же `local_number` чека ПРРО.
-  final String numNakl;
-  final int localNumber;
+  /// NumNakl накладної; він же `local_number` чека ПРРО. Поки накладної
+  /// немає (картка: оплата на терміналі ДО SaveSgVNakl, Катя 29.09) — тут
+  /// тимчасовий ключ з [SaleJournal.newPendingKey], а [localNumber] = 0;
+  /// після збереження накладної [SaleJournal.attachNakl] підставляє справжні.
+  String numNakl;
+  int localNumber;
+
+  /// Накладну вже збережено (є справжній NumNakl).
+  bool get hasNakl => localNumber > 0;
   final double total;
   final bool isCard;
   final DateTime startedAt;
@@ -158,6 +164,24 @@ class SaleJournal {
     await _persist();
   }
 
+  /// Ключ запису для оплати карткою, поки накладної ще немає.
+  static String newPendingKey() =>
+      'card-${DateTime.now().millisecondsSinceEpoch}';
+
+  /// Накладну збережено після оплати — запис [key] отримує справжній NumNakl.
+  static Future<void> attachNakl(
+    String key, {
+    required String numNakl,
+    required int localNumber,
+  }) async {
+    final r = _find(key);
+    if (r == null) return;
+    _items.removeWhere((e) => e.numNakl == numNakl && !identical(e, r));
+    r.numNakl = numNakl;
+    r.localNumber = localNumber;
+    await _persist();
+  }
+
   /// Картка списана на терміналі — гроші взято, чека ще немає. З цієї миті
   /// `abort` запис не прибирає, а повторна оплата за цим NumNakl заборонена.
   static Future<void> markPaid(
@@ -267,6 +291,22 @@ class SaleJournal {
 
   /// `true` — запис можна прибрати з журналу.
   static Future<bool> _recoverOne(SaleRecord r) async {
+    // Накладної немає — оплату карткою почали, а SaveSgVNakl не дійшов. Чека
+    // без накладної бути не може, тож звіряти з ПРРО нічого; питання лише в
+    // тому, чи списав термінал гроші. Це вирішує людина.
+    if (!r.hasNakl) {
+      final tail = '(спроб: ${r.recoverAttempts}'
+          '${r.note != null ? ", ${r.note}" : ""})';
+      FiscalLog.log(r.stage == SaleStage.paid
+          ? 'A3 ⚠️ ${r.numNakl}: КАРТКУ СПИСАНО (rrn=${r.rrn}, '
+              'auth=${r.authCode}, сума ${r.total}), а накладну НЕ збережено '
+              '— чека немає. Потрібне ручне врегулювання: продаж через '
+              'адміністратора АБО повернення коштів на терміналі $tail.'
+          : 'A3 ${r.numNakl}: оплату карткою (сума ${r.total}) почато, '
+              'результат невідомий, накладної немає. Перевірте на терміналі, '
+              'чи було списання $tail.');
+      return false;
+    }
     switch (r.stage) {
       case SaleStage.started:
       case SaleStage.paid:

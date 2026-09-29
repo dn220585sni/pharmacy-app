@@ -189,6 +189,67 @@ void main() {
     });
   });
 
+  // Катя 29.09: для картки накладна (SaveSgVNakl) — лише ПІСЛЯ оплати. Запис
+  // журналу заводиться ДО Purchase під тимчасовим ключем і отримує NumNakl,
+  // коли накладну збережено.
+  group('Картка: оплата до накладної', () {
+    setUp(() => SaleJournal.resetForTest([]));
+
+    Future<String> startPending() async {
+      final key = SaleJournal.newPendingKey();
+      await SaleJournal.start(
+          numNakl: key, localNumber: 0, total: 0.5, isCard: true);
+      return key;
+    }
+
+    test('відмова термінала → abort прибирає запис без накладної', () async {
+      final key = await startPending();
+      expect(SaleJournal.pending.single.hasNakl, isFalse);
+      await SaleJournal.abort(key, 'оплату карткою не проведено');
+      expect(SaleJournal.count, 0);
+    });
+
+    test('paid → attachNakl → далі все за NumNakl, RRN зберігся', () async {
+      final key = await startPending();
+      await SaleJournal.markPaid(key, rrn: 'R1', authCode: 'A1');
+      await SaleJournal.attachNakl(key,
+          numNakl: '2900664760', localNumber: 2900664760);
+
+      final r = SaleJournal.pending.single;
+      expect(r.numNakl, '2900664760');
+      expect(r.localNumber, 2900664760);
+      expect(r.hasNakl, isTrue);
+      expect(r.stage, SaleStage.paid);
+      expect(r.rrn, 'R1');
+      expect(SaleJournal.find(key), isNull);
+
+      await SaleJournal.markFiscalized('2900664760', orderNum: 'X');
+      await SaleJournal.markFixed('2900664760');
+      await SaleJournal.finish('2900664760');
+      expect(SaleJournal.count, 0);
+    });
+
+    test('картку списано, накладна не збереглась — recover НЕ закриває',
+        () async {
+      final key = await startPending();
+      await SaleJournal.markPaid(key, rrn: 'R1', authCode: 'A1');
+      // Звіряти з ПРРО нічого (чека без накладної не буває) — лише людина.
+      expect(await SaleJournal.recover(), 0);
+      expect(SaleJournal.count, 1);
+      expect(SaleJournal.pending.single.stage, SaleStage.paid);
+      // і abort за помилковим викликом теж не прибирає
+      await SaleJournal.abort(key, 'помилковий виклик');
+      expect(SaleJournal.count, 1);
+    });
+
+    test('запис без накладної переживає round-trip', () async {
+      final key = await startPending();
+      final back = SaleRecord.fromJson(SaleJournal.pending.single.toJson());
+      expect(back.numNakl, key);
+      expect(back.hasNakl, isFalse);
+    });
+  });
+
   group('label — що побачить людина в журналі', () {
     test('містить номер накладної, суму і стадію', () {
       final l = rec(stage: SaleStage.fiscalized, orderNum: 'lubcs0eFvXU').label;

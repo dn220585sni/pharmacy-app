@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/spl_params.dart';
+import 'fiscal_log.dart';
 import 'sparta_signature.dart';
 
 /// Результат виклику Спарти.
@@ -117,6 +118,14 @@ class SpartaService {
       amountGross: amountGross, discountGross: discountGross,
       paidByPoints: paidByPoints, documentNo: documentNo,
     );
+    // Решта на бонусний рахунок (рядок CH_UAH) не доходить до балансу
+    // (25.09, 29.09) — пишемо повний запит, щоб звірити з Катею поле в поле.
+    if (basket.any((b) => b['productCode']?.toString() == 'CH_UAH')) {
+      final safe = Map<String, dynamic>.from(body)
+        ..remove('apiToken')
+        ..remove('signature');
+      FiscalLog.log('SPL order JSON (є CH_UAH): ${jsonEncode(safe)}');
+    }
     return _post('tx/order', body);
   }
 

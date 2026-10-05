@@ -64,6 +64,7 @@ class CashExpense {
     this.loyaltyCard,
     this.bonusSpent = 0,
     this.note,
+    this.returnBlocked = false,
   });
 
   final String id;
@@ -130,6 +131,11 @@ class CashExpense {
 
   /// `Prim` — примітка до накладної (нестача, термін, бронювання).
   final String? note;
+
+  /// `blokreturn` = 1 — повернення за цією накладною проводити НЕ можна
+  /// (Катерина 02.10.2026, для накладних із резервів). На відміну від
+  /// [blockReason], це саме заборона повернення.
+  final bool returnBlocked;
 
   bool get isReserve => status == ExpenseStatus.reserved;
 

@@ -103,6 +103,29 @@ class SessionService {
     return null;
   }
 
+  /// Відкрити непробиту накладну (резерв) для розрахунку — `OpenRezerv`
+  /// (Катя, 02–05.10.2026). Позиції повертаються в серверний сеанс «як
+  /// вибиті» (sgVRoznSetLock не потрібен), сама накладна обнуляється, а
+  /// наступний SaveSgVNakl збереже в ТОЙ САМИЙ номер (NumIzmNakl).
+  /// Відповідь — поля, які не можна загубити (SpartaCard/SpartaPhone, тип…).
+  /// `null` — помилка.
+  static Future<Map<String, dynamic>?> openRezerv(String numNakl) async {
+    if (ApiConfig.useMock || numNakl.isEmpty) return null;
+    try {
+      final r = await CacheApiClient().call('OpenRezerv', params: {
+        'NumNakl': numNakl,
+      });
+      if (r.isOk) {
+        FiscalLog.log('OpenRezerv $numNakl OK: ${r.data.entries.where((e) => '${e.value}'.isNotEmpty && e.key != 'Status').map((e) => '${e.key}=${e.value}').join(' ')}');
+        return r.data;
+      }
+      FiscalLog.log('OpenRezerv $numNakl FAIL: ${r.result}');
+    } catch (e) {
+      FiscalLog.log('OpenRezerv $numNakl ERROR: $e');
+    }
+    return null;
+  }
+
   /// Отримати готові products/payments для ПРРО-чека за номером накладної
   /// (`GetDataRRO`, Задача 30). Caché проставляє tax_prc/letters/cost/sum_discount
   /// і вже округлену payments.sum. Повертає `null` при помилці/порожньому —

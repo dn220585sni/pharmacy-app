@@ -93,6 +93,22 @@ void main() {
     expect(e.type, ExpenseType.reserve);
   });
 
+  test('blokreturn=1 → повернення заборонене; немає поля → дозволене', () {
+    Map<String, dynamic> nakl([Map<String, dynamic> extra = const {}]) => {
+          'dtNakl': '02.10.2026 10:00:00',
+          'NumNakl': '2900664764',
+          'sum': '50.00',
+          'flagRRO': '1',
+          'items': [],
+          ...extra,
+        };
+    expect(CashExpensesService.expenseFromJson(nakl({'blokreturn': '1'}))!
+        .returnBlocked, isTrue);
+    expect(CashExpensesService.expenseFromJson(nakl({'blokreturn': '0'}))!
+        .returnBlocked, isFalse);
+    expect(CashExpensesService.expenseFromJson(nakl())!.returnBlocked, isFalse);
+  });
+
   group('типи документів за описом Катерини (03.09)', () {
     CashExpense parse(Map<String, dynamic> extra) =>
         CashExpensesService.expenseFromJson({

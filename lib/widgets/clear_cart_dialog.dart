@@ -7,6 +7,9 @@ Future<bool?> showClearCartDialog({
   required BuildContext context,
   required int itemCount,
   required double cartTotal,
+  /// Кошик — відкритий резерв (OpenRezerv): після очищення накладну буде
+  /// втрачено, наступне збереження запише в її номер інші позиції (Катя 05.10).
+  String? openedReserve,
 }) {
   return showDialog<bool>(
     context: context,
@@ -52,6 +55,20 @@ Future<bool?> showClearCartDialog({
                   height: 1.5,
                 ),
               ),
+              if (openedReserve != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Це відкритий резерв №$openedReserve. Після очищення його '
+                  'буде втрачено — відкрити знову не вийде.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFFB45309),
+                    fontWeight: FontWeight.w600,
+                    height: 1.4,
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
               Row(
                 children: [

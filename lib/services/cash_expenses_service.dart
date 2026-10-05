@@ -197,6 +197,7 @@ class CashExpensesService {
       loyaltyCard: _orNull(j['SpartaCard']),
       bonusSpent: flexDouble(j['SpisBonus']) ?? 0,
       note: _orNull(j['Prim']),
+      returnBlocked: _flag(j['blokreturn']),
     );
   }
 
@@ -255,7 +256,7 @@ class CashExpensesService {
       'NumNakl', 'dtNakl', 'sum', 'tNakl', 'tNaklR', 'rezerv', 'flagRRO',
       'Receipt', 'wdservice', 'exReturn', 'exOtkaz', 'exInsur', 'blok',
       'PrimInsur', 'FIOInsur', 'idorder', 'UnionIZ', 'FNRRO', 'ekkKliName',
-      'user', 'NumNaklForReturn', 'items',
+      'user', 'NumNaklForReturn', 'items', 'blokreturn',
     };
     final unknown = <String>{};
     for (final j in raw) {

@@ -53,6 +53,7 @@ import '../widgets/customer_auth_card.dart';
 import '../widgets/orders_panel.dart';
 import '../widgets/pharmacist_picker_dialog.dart';
 import '../widgets/expenses_panel.dart';
+import '../models/cash_expense.dart';
 import '../widgets/panel_layout.dart';
 import '../widgets/order_success_dialog.dart';
 import '../widgets/out_of_stock_panel.dart';
@@ -373,6 +374,113 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _ordersPanelKey.currentState?.focusSearch();
       });
+    }
+  }
+
+  /// Номер резерву, відкритого в кошику через OpenRezerv (null — звичайний
+  /// чек). Поки він не пробитий, очищення кошика його знищує — попереджаємо.
+  String? _openedReserve;
+
+  /// «Витрати по касі» → «Відкрити в касі»: резерв стає кошиком для
+  /// розрахунку (Катя 02–05.10). Позиції беремо з [e] ДО OpenRezerv — після
+  /// нього накладна на сервері нульова; sgVRoznSetLock не кличемо (сервер уже
+  /// поклав позиції в сеанс). Далі звичайна оплата → SaveSgVNakl збереже в
+  /// той самий номер → ПРРО.
+  Future<void> _openReserveInCart(CashExpense e) async {
+    if (_cart.isNotEmpty) {
+      _showQtySnack('Спершу завершіть або очистіть поточний чек — резерв '
+          'відкривається лише в порожній кошик');
+      return;
+    }
+    final goods = e.items.where((i) => i.sku.isNotEmpty).toList();
+    if (goods.isEmpty) return;
+    // Дробова кількість = блістери; дільника упаковки GetNaklKas не дає, а
+    // без нього позицію в кошику не зібрати правильно.
+    if (goods.any((i) => i.quantity != i.quantity.roundToDouble())) {
+      _showQtySnack('Резерв із блістерами поки не відкривається в новій касі '
+          '— проведіть його в роздрібному модулі');
+      FiscalLog.log('OpenRezerv ${e.receiptNumber}: дробова кількість — не '
+          'відкриваємо (${goods.map((i) => '${i.sku}×${i.quantity}').join(', ')})');
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Відкрити резерв №${e.receiptNumber}?',
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+        content: Text(
+          '${goods.length} поз. перейдуть у кошик для розрахунку.\n\n'
+          'Якщо після цього очистити кошик, резерв буде втрачено — відкрити '
+          'його знову не вийде.',
+          style: const TextStyle(
+              fontSize: 13, color: Color(0xFF6B7280), height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Скасувати',
+                style: TextStyle(color: Color(0xFF6B7280))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E7DC8),
+                foregroundColor: Colors.white,
+                elevation: 0),
+            child: const Text('Відкрити в касі'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    // Кошик міг наповнитись, поки був відкритий діалог.
+    if (_cart.isNotEmpty) return;
+
+    final data = await SessionService.openRezerv(e.receiptNumber);
+    if (!mounted) return;
+    if (data == null) {
+      _showQtySnack('Не вдалося відкрити резерв №${e.receiptNumber} — '
+          'спробуйте ще раз або проведіть його в роздрібному модулі');
+      return;
+    }
+
+    setState(() {
+      for (final i in goods) {
+        final qty = i.quantity.round();
+        _cart.add(CartItem(
+          drug: Drug(
+            id: 'srv_${i.sku}',
+            name: i.name,
+            manufacturer: i.manufacturer ?? '',
+            category: '',
+            price: i.price,
+            stock: qty,
+            unit: 'шт',
+            skuCode: i.sku,
+          ),
+          quantity: qty,
+        ));
+      }
+      _openedReserve = e.receiptNumber;
+      _expensesOpen = false;
+      _cartOpen = true;
+    });
+    FiscalLog.log('OpenRezerv ${e.receiptNumber}: у кошик ${goods.length} поз. '
+        '(${goods.map((i) => '${i.sku}×${i.quantity.round()}').join(', ')}) '
+        'на ${e.amount.toStringAsFixed(2)}');
+
+    // Клієнт Лайк резерву: OpenRezerv уже поклав його в серверний сеанс
+    // (Катя 05.10 — IdentSPL не потрібен). Лише читаємо картку й бонуси,
+    // щоб на екрані клієнт був ідентифікований. Картка — основне джерело.
+    final card = data['SpartaCard']?.toString().trim() ?? '';
+    final phone = (data['SpartaPhone']?.toString() ?? '')
+        .replaceAll(RegExp(r'\D'), '');
+    if (card.isNotEmpty) {
+      unawaited(_identifyByLoyaltyCard(card, identSpl: false));
+    } else if (phone.length >= 9) {
+      unawaited(
+          _fetchLoyalty(phone.substring(phone.length - 9), identSpl: false));
     }
   }
 
@@ -2698,7 +2806,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Ідентифікація клієнта ЛАЙК за номером картки (скан) — аналог телефонної:
   /// заповнює телефон, показує бонуси; нарахування — при розрахунку.
-  Future<void> _identifyByLoyaltyCard(String cardNo) async {
+  /// [identSpl] = false — клієнт уже в серверному сеансі (резерв після
+  /// OpenRezerv, Катя 05.10): лише читаємо картку й бонуси для екрана.
+  Future<void> _identifyByLoyaltyCard(String cardNo,
+      {bool identSpl = true}) async {
     setState(() => _isLoadingLoyalty = true);
     try {
       final result = await LoyaltyService.checkCard(cardNo);
@@ -2730,8 +2841,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         );
         _isLoadingLoyalty = false;
       });
-      unawaited(SessionService.identSPL(
-          phone: phone, card: result.cardNo ?? cardNo));
+      if (identSpl) {
+        unawaited(SessionService.identSPL(
+            phone: phone, card: result.cardNo ?? cardNo));
+      }
       _showScanMessage('Картка ЛАЙК: бонусів ${result.balanceAfter.asMoney} ₴');
     } catch (_) {
       if (!mounted) return;
@@ -3829,6 +3942,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _helpingHandTimer?.cancel();
     setState(() {
       _cart.clear();
+      _openedReserve = null;
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -3880,7 +3994,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
   }
 
-  Future<void> _fetchLoyalty(String digits) async {
+  /// [identSpl] = false — клієнт уже в серверному сеансі (резерв після
+  /// OpenRezerv): лише читаємо картку, без IdentSPL і без реєстрації/офлайну.
+  Future<void> _fetchLoyalty(String digits, {bool identSpl = true}) async {
     setState(() => _isLoadingLoyalty = true);
 
     try {
@@ -3890,6 +4006,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
       if (!result.success) {
         setState(() => _isLoadingLoyalty = false);
+        if (!identSpl) {
+          FiscalLog.log('Резерв: картку Лайк за +380$digits не прочитано '
+              '(${result.errorMsg ?? "невідомо"}) — клієнт лишається в сеансі');
+          _showQtySnack('Клієнта Лайк резерву не вдалося показати: '
+              '${result.errorMsg ?? "Лайк не відповів"}');
+          return;
+        }
         if (result.isUnknownCard) {
           // Анкети в Спарті немає → реєстрація з каси (дзвінок/SMS →
           // customer/create → віртуальна картка). Андрій, 14–15.09.2026.
@@ -3932,6 +4055,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         firstName: result.firstName,
         lastName: result.lastName,
         cashReceipt: result.cashReceipt,
+        identSpl: identSpl,
       );
     } catch (_) {
       if (!mounted) return;
@@ -3949,6 +4073,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     String? firstName,
     String? lastName,
     String? cashReceipt,
+    bool identSpl = true,
   }) {
     // Mask the phone number: +38050***9993
     final masked = _maskPhone(digits);
@@ -3969,7 +4094,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       );
       _isLoadingLoyalty = false;
     });
-    unawaited(SessionService.identSPL(phone: '+380$digits', card: cardNo));
+    if (identSpl) {
+      unawaited(SessionService.identSPL(phone: '+380$digits', card: cardNo));
+    }
   }
 
   /// Лайк недоступний — спитати, чи прикріпити телефон до чека офлайн.
@@ -4262,6 +4389,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _totalEarned += earned;
       _lastEarnedAt = DateTime.now();
       _cart.clear();
+      _openedReserve = null;
       _scannedDrugIds.clear();
       _selectedDrug = null;   // show ShiftDashboard after payment
       _searchResults = [];
@@ -4283,6 +4411,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _lastEarnedAt = DateTime.now();
       _ordersOpen = false;
       _cart.clear();
+      _openedReserve = null;
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -4388,6 +4517,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       context: context,
       itemCount: _cartItemCount,
       cartTotal: _cartTotal,
+      openedReserve: _openedReserve,
     ).then((confirmed) {
       if (confirmed == true) _clearCart();
     });
@@ -4576,6 +4706,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         layout: _expensesPanelLayout,
         onLayoutChanged: (layout) =>
             setState(() => _expensesPanelLayout = layout),
+        onOpenInCart: _openReserveInCart,
       );
     }
     if (_prescriptionOpen) {

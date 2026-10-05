@@ -69,6 +69,7 @@ class SessionService {
     Money? sumClient,
     Money? sumChange,
     Money? sumChangeSpl,
+    String? reserveLabel,
   }) async {
     if (ApiConfig.useMock) return null;
     try {
@@ -85,6 +86,10 @@ class SessionService {
       if (sumClient != null) params['SumClient'] = grn(sumClient);
       if (sumChange != null) params['SumSdachi'] = grn(sumChange);
       if (sumChangeSpl != null) params['SumSdachiSPL'] = grn(sumChangeSpl);
+      // Резерв: «ПРІЗВИЩЕ 0XXXXXXXXX» — за ним клієнта шукають, коли прийде
+      // (як у Єврофармі). Назва параметра — здогад з відповіді OpenRezerv
+      // (`lblRezerv`); у GetNaklKas це поле `rezerv`. Звірити після тесту.
+      if (reserveLabel != null) params['lblRezerv'] = reserveLabel;
       final r = await CacheApiClient().call('SavesgVNakl', params: params);
       if (r.isOk) {
         final numNakl = r.data['NumNakl']?.toString();

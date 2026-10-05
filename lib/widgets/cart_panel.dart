@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../mixins/checkout_mixin.dart';
 import '../services/auth_service.dart';
@@ -10,6 +11,7 @@ import '../models/cart_offer.dart';
 import '../models/customer_loyalty.dart';
 import '../models/drug.dart';
 import '../models/money.dart';
+import '../utils/reserve_label.dart';
 import '../models/payment_method.dart';
 import '../models/prescription.dart';
 import '../models/payment_terminal.dart';
@@ -730,15 +732,162 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     ));
   }
 
-  /// TODO: сам резерв ще не реалізований — сервісу під нього поки немає.
-  /// Зараз кнопка лише розмежовує права; коли зʼявиться серверна операція,
-  /// вона підставиться сюди й нічого більше міняти не доведеться.
-  void _makeReserve() {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Формування резерву ще не підключено'),
+  bool _isSavingReserve = false;
+
+  /// Хто клієнт резерву: прізвище (≥3 літери) + телефон — обидва обов'язкові
+  /// (як у Єврофармі: за ними резерв шукають, коли клієнт прийде). Телефон
+  /// підставляється з ідентифікованого клієнта Лайк. null — скасовано.
+  Future<String?> _askReserveClient(int count, double total) {
+    final surnameCtr = TextEditingController();
+    final loyaltyPhone = widget.loyalty?.phone;
+    final phoneCtr = TextEditingController(
+        text: loyaltyPhone == null
+            ? ''
+            : (normalizeReservePhone(loyaltyPhone) ?? ''));
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final surnameOk = isValidReserveSurname(surnameCtr.text);
+          final phone = normalizeReservePhone(phoneCtr.text);
+          final canSave = surnameOk && phone != null;
+          void save() {
+            if (!canSave) return;
+            Navigator.of(ctx)
+                .pop(buildReserveLabel(surnameCtr.text, phone));
+          }
+
+          InputDecoration deco(String label, String hint, String? error) =>
+              InputDecoration(
+                labelText: label,
+                hintText: hint,
+                errorText: error,
+                isDense: true,
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              );
+
+          return AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('Зберегти резерв',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+            content: SizedBox(
+              width: 360,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$count поз. на ${total.asMoney} ₴ — без оплати й без '
+                    'чека. Провести потім: «Витрати по касі» → «Відкрити в '
+                    'касі».',
+                    style: const TextStyle(
+                        fontSize: 13, color: Color(0xFF6B7280), height: 1.5),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: surnameCtr,
+                    autofocus: true,
+                    textCapitalization: TextCapitalization.characters,
+                    onChanged: (_) => setLocal(() {}),
+                    onSubmitted: (_) => save(),
+                    decoration: deco(
+                      'Прізвище покупця',
+                      'Не менше 3 літер',
+                      surnameCtr.text.isNotEmpty && !surnameOk
+                          ? 'Не менше 3 літер'
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: phoneCtr,
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[\d+ ()-]')),
+                    ],
+                    onChanged: (_) => setLocal(() {}),
+                    onSubmitted: (_) => save(),
+                    decoration: deco(
+                      'Телефон',
+                      '0XX XXX XX XX',
+                      phoneCtr.text.isNotEmpty && phone == null
+                          ? 'Номер у форматі 0XX XXX XX XX'
+                          : null,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Скасувати',
+                    style: TextStyle(color: Color(0xFF6B7280))),
+              ),
+              ElevatedButton(
+                onPressed: canSave ? save : null,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E7DC8),
+                    foregroundColor: Colors.white,
+                    elevation: 0),
+                child: const Text('Зберегти резерв'),
+              ),
+            ],
+          );
+        },
+      ),
+    ).whenComplete(() {
+      surnameCtr.dispose();
+      phoneCtr.dispose();
+    });
+  }
+
+  /// Резерв = накладна, збережена БЕЗ оплати й без чека ПРРО (Микола 05.10:
+  /// «треба використати SaveSgVNakl»). Позиції йдуть із серверного сеансу в
+  /// накладну (як у OpenRezerv: KodKli = каса, TypeNakl = 2); провести її
+  /// потім — «Витрати по касі» → «Відкрити в касі».
+  Future<void> _makeReserve() async {
+    if (widget.cart.isEmpty || _isSavingReserve || _isProcessingPayment) {
+      return;
+    }
+    final count = widget.cart.length;
+    final total = finalTotal;
+    final label = await _askReserveClient(count, total);
+    if (label == null || !mounted) return;
+
+    setState(() => _isSavingReserve = true);
+    final saved = await SessionService.saveNakladna(
+      kodKli: ApiConfig.ekkKodKli,
+      typeNakl: '2',
+      reserveLabel: label,
+    );
+    if (!mounted) return;
+    setState(() => _isSavingReserve = false);
+    if (saved == null || saved.isEmpty) {
+      FiscalLog.log('РЕЗЕРВ: SaveSgVNakl не повернув NumNakl — резерв НЕ '
+          'збережено, кошик лишається');
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Резерв не збережено на сервері — кошик лишається. '
+            'Спробуйте ще раз або викличте адміністратора.'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Color(0xFFDC2626),
+        duration: Duration(seconds: 5),
+      ));
+      return;
+    }
+    FiscalLog.log('РЕЗЕРВ збережено: nakl=$saved, $count поз. на '
+        '${total.toStringAsFixed(2)}, клієнт «$label»');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Резерв №$saved збережено'),
       behavior: SnackBarBehavior.floating,
-      duration: Duration(seconds: 2),
+      backgroundColor: const Color(0xFF15803D),
+      duration: const Duration(seconds: 4),
     ));
+    // Позиції вже в накладній — кошик і серверний сеанс (NewClient) чистимо,
+    // як після продажу.
+    widget.onClear();
   }
 
   /// Public method — F5 processes payment when already in checkout

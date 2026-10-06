@@ -62,6 +62,18 @@ class CashExpensesService {
   /// замовлення. Резерв натомість завжди має літери, бо аудит вимагає імʼя.
   ///
   /// `null` — телефону немає: номер ІЗ, зашита текстівка або порожньо.
+  /// Прізвище клієнта з `rezerv` («ЖУК 0978288888» → «ЖУК»): усе, що лишається
+  /// без телефону. Без літер (номер ІЗ тощо) — null.
+  static String? nameFromRezerv(String rezerv) {
+    if (!_hasLetter.hasMatch(rezerv)) return null;
+    final name = rezerv
+        .replaceAll(RegExp(r'(?:\+?38)?0?\d{9}(?!\d)'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'^[\s,;:·-]+|[\s,;:·-]+$'), '')
+        .trim();
+    return name.isEmpty ? null : name;
+  }
+
   static String? _phoneFrom(String rezerv) {
     if (!_hasLetter.hasMatch(rezerv)) return null;
     final m = RegExp(r'(?:\+?38)?0?(\d{9})(?!\d)').firstMatch(rezerv);
@@ -183,6 +195,7 @@ class CashExpensesService {
       // («ЖУК 0978288888» — три літери прізвища й номер). Витягуємо лише звідти;
       // `SpartaCard` у це поле не підставляємо: інша сутність.
       customerPhone: _phoneFrom(reserve),
+      customerName: nameFromRezerv(reserve),
       items: items,
       blockReason: _orNull(j['blok']),
       insurer: _orNull(j['PrimInsur']),
@@ -198,6 +211,7 @@ class CashExpensesService {
       bonusSpent: flexDouble(j['SpisBonus']) ?? 0,
       note: _orNull(j['Prim']),
       returnBlocked: _flag(j['blokreturn']),
+      returnBlockReason: _orNull(j['primblok']),
     );
   }
 
@@ -256,7 +270,7 @@ class CashExpensesService {
       'NumNakl', 'dtNakl', 'sum', 'tNakl', 'tNaklR', 'rezerv', 'flagRRO',
       'Receipt', 'wdservice', 'exReturn', 'exOtkaz', 'exInsur', 'blok',
       'PrimInsur', 'FIOInsur', 'idorder', 'UnionIZ', 'FNRRO', 'ekkKliName',
-      'user', 'NumNaklForReturn', 'items', 'blokreturn',
+      'user', 'NumNaklForReturn', 'items', 'blokreturn', 'primblok',
     };
     final unknown = <String>{};
     for (final j in raw) {

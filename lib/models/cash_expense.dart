@@ -52,6 +52,7 @@ class CashExpense {
     this.returnInvoice,
     required this.register,
     this.customerPhone,
+    this.customerName,
     required this.items,
     this.blockReason,
     this.insurer,
@@ -65,6 +66,7 @@ class CashExpense {
     this.bonusSpent = 0,
     this.note,
     this.returnBlocked = false,
+    this.returnBlockReason,
   });
 
   final String id;
@@ -79,6 +81,18 @@ class CashExpense {
   final String? returnInvoice; // "№ накл для повернення"
   final String register; // e.g. "КАСА 1 Новокузнецька"
   final String? customerPhone;
+
+  /// Прізвище клієнта резерву з `rezerv` («ЖУК 0978288888» → «ЖУК»).
+  final String? customerName;
+
+  /// [customerPhone] (9 цифр) у вигляді «097 828 88 88».
+  String? get customerPhoneDisplay {
+    final p = customerPhone;
+    if (p == null || p.length != 9) return null;
+    final d = '0$p';
+    return '${d.substring(0, 3)} ${d.substring(3, 6)} '
+        '${d.substring(6, 8)} ${d.substring(8)}';
+  }
   final List<ExpenseItem> items;
 
   /// `blok` — НАКЛАДНУ змінювати не можна, тут причина.
@@ -136,6 +150,9 @@ class CashExpense {
   /// (Катерина 02.10.2026, для накладних із резервів). На відміну від
   /// [blockReason], це саме заборона повернення.
   final bool returnBlocked;
+
+  /// `primblok` — причина заборони повернення (Катерина 06.10.2026).
+  final String? returnBlockReason;
 
   bool get isReserve => status == ExpenseStatus.reserved;
 

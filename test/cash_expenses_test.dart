@@ -93,6 +93,30 @@ void main() {
     expect(e.type, ExpenseType.reserve);
   });
 
+  test('клієнт резерву з rezerv: прізвище й телефон окремо', () {
+    CashExpense parse(String rezerv) => CashExpensesService.expenseFromJson({
+          'dtNakl': '05.10.2026 14:43:00',
+          'NumNakl': '2900669403',
+          'sum': '28.00',
+          'flagRRO': '0',
+          'rezerv': rezerv,
+          'items': [],
+        })!;
+    final e = parse('ЖУК 0978288888');
+    expect(e.customerName, 'ЖУК');
+    expect(e.customerPhone, '978288888');
+    expect(e.customerPhoneDisplay, '097 828 88 88');
+
+    final two = parse('НЕЧУЙ ЛЕВИЦЬКИЙ +380501112233');
+    expect(two.customerName, 'НЕЧУЙ ЛЕВИЦЬКИЙ');
+    expect(two.customerPhoneDisplay, '050 111 22 33');
+
+    // Номер ІЗ без літер — ні прізвища, ні телефону.
+    final iz = parse('187405319');
+    expect(iz.customerName, isNull);
+    expect(iz.customerPhoneDisplay, isNull);
+  });
+
   test('blokreturn=1 → повернення заборонене; немає поля → дозволене', () {
     Map<String, dynamic> nakl([Map<String, dynamic> extra = const {}]) => {
           'dtNakl': '02.10.2026 10:00:00',
@@ -107,6 +131,14 @@ void main() {
     expect(CashExpensesService.expenseFromJson(nakl({'blokreturn': '0'}))!
         .returnBlocked, isFalse);
     expect(CashExpensesService.expenseFromJson(nakl())!.returnBlocked, isFalse);
+    // primblok — причина заборони повернення.
+    expect(
+        CashExpensesService.expenseFromJson(
+                nakl({'blokreturn': '1', 'primblok': 'Чек з резерву'}))!
+            .returnBlockReason,
+        'Чек з резерву');
+    expect(CashExpensesService.expenseFromJson(nakl({'primblok': ''}))!
+        .returnBlockReason, isNull);
   });
 
   group('типи документів за описом Катерини (03.09)', () {

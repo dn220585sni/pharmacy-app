@@ -2665,19 +2665,22 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// Режим перевірки збору (SumSdach): знайти позицію кошика, що відповідає
   /// відсканованому товару, і позначити її відсканованою. Матчимо за ukod
   /// (рівень товару), потім штрихкодом, потім s-кодом.
-  void _markCartItemScanned(BarCodeAnalysis res, String barcode) {
-    CartItem? match;
+  /// Позиція кошика, що відповідає скану: за ukod (рівень товару — інша
+  /// партія того ж товару теж підходить), потім штрихкодом, потім s-кодом.
+  CartItem? _cartItemForScan(BarCodeAnalysis res, String barcode) {
     for (final item in _cart) {
       final d = item.drug;
       final byUkod = res.ukod.isNotEmpty && d.ukod == res.ukod;
       final byBarcode = barcode.isNotEmpty && d.barcode == barcode;
       final bySkod = res.skod.isNotEmpty &&
           (d.skuCode == res.skod || d.id == 'srv_${res.skod}');
-      if (byUkod || byBarcode || bySkod) {
-        match = item;
-        break;
-      }
+      if (byUkod || byBarcode || bySkod) return item;
     }
+    return null;
+  }
+
+  void _markCartItemScanned(BarCodeAnalysis res, String barcode) {
+    final match = _cartItemForScan(res, barcode);
     if (match == null) {
       _showScanMessage('Відсканованого товару немає в кошику');
       return;
@@ -2693,7 +2696,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   static String _stripScanPrefix(String code) =>
       (code.startsWith(']') && code.length >= 3) ? code.substring(3) : code;
 
-  /// Показати товар і додати 1 у кошик (вибиття). Ціну/залишок беремо через
+  /// Показати товар і поставити курсор у кількість (без +1). Ціну/залишок беремо через
   /// `GetSKUprice` по ШТРИХКОДУ (перевірений шлях; SKod у GetSKUprice не
   /// приймається), а коди SKod/UKod — з AnalizBarCode.
   Future<void> _addScannedProduct(BarCodeAnalysis res, String barcode) async {
@@ -2739,31 +2742,31 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       skuCode: skod,
       locationCode: r.stelazh,
     );
+    // Скан САМ кількість не змінює — її завжди обирає фармацевт (Юлія 06.10:
+    // повторний скан не має давати задвоєння). Скан знаходить товар у
+    // переліку й ставить курсор у поле кількості. Якщо товар уже в кошику —
+    // працюємо з ТИМ рядком (той самий товар іншої партії теж), а не
+    // створюємо дубль.
+    final inCart = _cartItemForScan(res, barcode);
+    final target = inCart?.drug ?? drug;
     setState(() {
-      _searchResults = [drug, ..._searchResults.where((d) => d.id != drug.id)];
-      _selectedDrug = drug;
+      _searchResults = [
+        target,
+        ..._searchResults.where((d) => d.id != target.id),
+      ];
+      _selectedDrug = target;
+      _focusQtyOnSelect = true;
+      // Товар щойно просканували — він перед фармацевтом: позиція вважається
+      // звіреною (вимога процесу), щойно фармацевт задасть кількість.
+      _scannedDrugIds.add(target.id);
     });
     _scrollToIndex(0);
-    _fetchSKUDetail(drug);
-    _fetchProductBrowserInfo(drug);
-    // Позиція вже в кошику, але НЕ звірена (потрапила з пошуку/ЄДК/аналогів) →
-    // цей скан її ЗВІРЯЄ, а не додає ще одну упаковку. Інакше касир, звіряючи
-    // товар перед оплатою, щоразу подвоював би кількість.
-    final existing = _getCartItem(drug.id);
-    if (existing != null &&
-        existing.quantity > 0 &&
-        !_scannedDrugIds.contains(drug.id)) {
-      setState(() => _scannedDrugIds.add(drug.id));
-      _showScanMessage('${drug.displayName}: звірено');
-      return;
-    }
-    // Вибиття: +1 до наявної кількості (або 1, якщо ще не в кошику).
-    final current = existing?.quantity ?? 0;
-    _setQuantity(drug, current + 1);
-    // Товар щойно просканували — він перед фармацевтом, звіряти вдруге не
-    // потрібно (вимога процесу). Без цього позиція, додана самим сканом при
-    // порожньому кошику, лишалась би незвіреною і блокувала оплату.
-    setState(() => _scannedDrugIds.add(drug.id));
+    _fetchSKUDetail(target);
+    _fetchProductBrowserInfo(target);
+    _showScanMessage(inCart != null
+        ? '${target.displayName}: у кошику ${inCart.quantity} — '
+            'змініть кількість, якщо треба'
+        : '${target.displayName}: введіть кількість');
   }
 
   /// Незвірені позиції кошика (сканування обовʼязкове для кожного продажу).

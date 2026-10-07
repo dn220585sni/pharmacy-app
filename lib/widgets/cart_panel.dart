@@ -101,6 +101,13 @@ class CartPanel extends StatefulWidget {
   /// true — підтверджено, можна платити.
   final Future<bool> Function(double bonus)? onVerifyBonusSpend;
 
+  /// Кошик — відкритий резерв із підписом клієнта: «Резерв F6» зберігає з
+  /// ним одразу, форму прізвища/телефону вдруге не показуємо.
+  final String? reserveLabel;
+
+  /// Клік по ціні позиції — віртуальне сканування (VirtScanGoods на сервері).
+  final void Function(Drug drug)? onVirtualScan;
+
   /// Останній `SetBonusOpl` не вдався — сума бонусу в сеансі невідома, тому
   /// оплату блокуємо (пояснення на кнопці), поки касир не прибере списання
   /// або не почне чек заново.
@@ -132,6 +139,8 @@ class CartPanel extends StatefulWidget {
     this.onOpenShift,
     this.onBonusChanged,
     this.onVerifyBonusSpend,
+    this.reserveLabel,
+    this.onVirtualScan,
     this.bonusSyncFailed = false,
   });
 
@@ -316,8 +325,15 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       .where((i) => !widget.scannedDrugIds.contains(i.drug.id))
       .length;
 
+  /// Клік по ціні = віртуальне сканування стикера (VirtScanGoods). Галочку
+  /// ставить PosScreen лише після відповіді сервера.
   void _scanCartItem(CartItem item) {
-    widget.onItemScanned?.call(item.drug.id);
+    final virt = widget.onVirtualScan;
+    if (virt != null) {
+      virt(item.drug);
+    } else {
+      widget.onItemScanned?.call(item.drug.id);
+    }
   }
 
   /// Позначити позицію кошика (за `drug.id`) як відскановану — викликається зі
@@ -753,7 +769,9 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     }
     final count = widget.cart.length;
     final total = finalTotal;
-    final label = await _askReserveClient(count, total);
+    // Відкритий резерв уже має клієнта — зберігаємо з тим самим підписом.
+    final label =
+        widget.reserveLabel ?? await _askReserveClient(count, total);
     if (label == null || !mounted) return;
 
     setState(() => _isSavingReserve = true);

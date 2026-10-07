@@ -108,6 +108,25 @@ class SessionService {
     return null;
   }
 
+  /// Віртуальне сканування стикера — `VirtScanGoods&SKod` (Катя 06.10.2026):
+  /// касир підтверджує позицію вручну (клік по ціні в кошику), коли упаковку
+  /// фізично не відсканувати. `true` — сервер зарахував скан.
+  static Future<bool> virtScanGoods(String skod) async {
+    if (ApiConfig.useMock) return true;
+    if (skod.isEmpty) return false;
+    try {
+      final r = await CacheApiClient().call('VirtScanGoods', params: {
+        'SKod': skod,
+      });
+      FiscalLog.log('VirtScanGoods SKod=$skod: '
+          '${r.isOk ? "OK" : "FAIL"} ${r.result}');
+      return r.isOk;
+    } catch (e) {
+      FiscalLog.log('VirtScanGoods SKod=$skod ERROR: $e');
+      return false;
+    }
+  }
+
   /// Відкрити непробиту накладну (резерв) для розрахунку — `OpenRezerv`
   /// (Катя, 02–05.10.2026). Позиції повертаються в серверний сеанс «як
   /// вибиті» (sgVRoznSetLock не потрібен), сама накладна обнуляється, а

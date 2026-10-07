@@ -381,6 +381,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// чек). Поки він не пробитий, очищення кошика його знищує — попереджаємо.
   String? _openedReserve;
 
+  /// Підпис клієнта відкритого резерву («ЖУК 0978288888» з `rezerv`): якщо
+  /// резерв вирішили не пробивати й зберегти знову («Резерв F6»), прізвище
+  /// й телефон не питаємо вдруге (Микола 06.10).
+  String? _openedReserveLabel;
+
   /// «Витрати по касі» → «Відкрити в касі»: резерв стає кошиком для
   /// розрахунку (Катя 02–05.10). Позиції беремо з [e] ДО OpenRezerv — після
   /// нього накладна на сервері нульова; sgVRoznSetLock не кличемо (сервер уже
@@ -463,6 +468,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         ));
       }
       _openedReserve = e.receiptNumber;
+      // Сирий `rezerv` — саме те, що збережено; лише якщо там є прізвище.
+      _openedReserveLabel = e.customerName != null ? e.reserveNumber : null;
       _expensesOpen = false;
       _cartOpen = true;
     });
@@ -1485,8 +1492,23 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
 
     // ── F2: toggle cart panel (focus handled inside _toggleCart) ────────────
+    // Як у роздрібі (Юлія 07.10): F2 = кошик ОДРАЗУ з вікном розрахунку;
+    // F5 = провести оплату/пробити по ПРРО (готівка й картка). Вікно
+    // розрахунку не відкриється, поки позиції не звірені сканом — тоді
+    // лишається кошик для звірки. З відкритого розрахунку F2 закриває кошик.
     if (event.logicalKey == LogicalKeyboardKey.f2) {
-      _toggleCart();
+      if (_cart.isEmpty) {
+        _toggleCart();
+      } else if (!_cartOpen) {
+        _toggleCart();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _cartPanelKey.currentState?.enterCheckout();
+        });
+      } else if (_cartPanelKey.currentState?.isInCheckout != true) {
+        _cartPanelKey.currentState?.enterCheckout();
+      } else {
+        _toggleCart();
+      }
       return true;
     }
 
@@ -2628,6 +2650,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return;
     }
     if (res.needsRescan) {
+      // Юлія 07.10 (сц. 11): у режимі кошика другий товар «не знайдено», поки
+      // не відскановано перший — це відповідь сервера (noscan=1). Пишемо
+      // повністю, щоб показати Каті: що сканували і що лежить у кошику.
+      FiscalLog.log('СКАН noscan=1 (${form == BarCodeForm.sumSdach ? "кошик" : "пошук"}): '
+          'readBC="${res.readBC}" SKod="${res.skod}" UKod="${res.ukod}" '
+          'wasscanned="${res.wasScanned}"; у кошику: '
+          '${_cart.map((i) => '${i.drug.skuCode ?? i.drug.id}'
+              '${_scannedDrugIds.contains(i.drug.id) ? "✓" : ""}').join(", ")}');
       await _handleScanFailure(
           'Код прочитано, але товар за ним не знайдено${res.readBC.isNotEmpty ? " (${res.readBC})" : ""}.');
       return;
@@ -2679,6 +2709,36 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     return null;
   }
 
+  /// Віртуальне сканування стикера (клік по ціні в кошику): `VirtScanGoods`
+  /// із s-кодом позиції; галочку ставимо лише коли сервер підтвердив — щоб
+  /// звірка на касі не розходилась із серверною.
+  final Set<String> _virtScanInFlight = {};
+
+  Future<void> _virtualScan(Drug drug) async {
+    if (_scannedDrugIds.contains(drug.id)) return;
+    if (!_virtScanInFlight.add(drug.id)) return; // подвійний клік
+    try {
+      final skod = _stockSkod(drug);
+      if (skod.isEmpty) {
+        // ЄДК-заміна без s-коду: серверу нічого передати.
+        FiscalLog.log('VirtScanGoods: ${drug.id} без s-коду — не надсилаємо');
+        _showScanMessage('${drug.displayName}: немає s-коду — відскануйте '
+            'упаковку сканером');
+        return;
+      }
+      final ok = await SessionService.virtScanGoods(skod);
+      if (!mounted) return;
+      if (ok) {
+        setState(() => _scannedDrugIds.add(drug.id));
+      } else {
+        _showScanMessage('${drug.displayName}: сервер не прийняв віртуальне '
+            'сканування — спробуйте ще раз або відскануйте упаковку');
+      }
+    } finally {
+      _virtScanInFlight.remove(drug.id);
+    }
+  }
+
   void _markCartItemScanned(BarCodeAnalysis res, String barcode) {
     final match = _cartItemForScan(res, barcode);
     if (match == null) {
@@ -2706,6 +2766,18 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
     final r = await DrugService.getStockAndPrices('', barcode: barcode);
     if (!mounted) return;
+    if (!r.found && res.skod.isNotEmpty) {
+      // Внутрішній стикер аптеки (wasscanned="sticker", readBC «S»+s-код):
+      // його штрихкоду в довіднику немає, тому GetSKUprice «не знайдено»
+      // (Юлія 06–07.10, S25743960 / S25966646). Сервер же дав s- і u-код —
+      // шукаємо товар за ними.
+      final drug = await _drugBySkod(res.skod, res.ukod);
+      if (!mounted) return;
+      if (drug != null) {
+        _selectScannedDrug(drug, res, barcode);
+        return;
+      }
+    }
     if (!r.found) {
       // Юлія 07.09: скан у порожній кошик дав «Товар не знайдено (S26122031)».
       // «S» + 8 цифр — це форма нашого s-коду, тобто AnalizBarCode, схоже,
@@ -2742,6 +2814,68 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       skuCode: skod,
       locationCode: r.stelazh,
     );
+    _selectScannedDrug(drug, res, barcode);
+  }
+
+  /// Товар за s-кодом (скан стикера): назва — з GetSKUdetail за u-кодом,
+  /// партія — з SearchByNameSKU: рядок із цим s-кодом, інакше будь-яка
+  /// партія того ж u-коду. Вже показаний у таблиці рядок — без запитів.
+  Future<Drug?> _drugBySkod(String skod, String ukod) async {
+    for (final d in _searchResults) {
+      if (d.id == 'srv_$skod' || d.skuCode == skod) return d;
+    }
+    if (ukod.isEmpty) return null;
+    final detail = await DrugService.fetchSKUDetail(ukod);
+    final name = detail?.name?.trim() ?? '';
+    if (name.isEmpty) {
+      FiscalLog.log('СКАН стикера SKod=$skod: GetSKUdetail($ukod) без назви');
+      return null;
+    }
+    final queries = <String>[
+      name,
+      ?DrugNameIndex.instance.fix(name)?.serverQuery,
+    ];
+    for (final q in queries) {
+      final rows = await DrugService.searchByName(q);
+      DrugSearchItem? row;
+      for (final x in rows) {
+        if (x.ids == skod) {
+          row = x;
+          break;
+        }
+      }
+      row ??= rows.where((x) => x.ukod == ukod).firstOrNull;
+      if (row == null) continue;
+      if (row.ids != skod) {
+        FiscalLog.log('СКАН стикера SKod=$skod: такої партії в пошуку немає, '
+            'взято партію ${row.ids} того ж товару ($ukod)');
+      }
+      return Drug(
+        id: 'srv_${row.ids}',
+        name: row.nameUkr ?? row.name,
+        nameUkr: row.nameUkr,
+        manufacturer: row.manufacturer,
+        category: row.category ?? '',
+        price: row.price,
+        stock: row.qty,
+        stockRaw: row.qtyRaw != row.qty.toDouble() ? row.qtyRaw : null,
+        unit: 'шт',
+        locationCode: row.shelf.isNotEmpty ? row.shelf : null,
+        expiryDate: row.expiryDate,
+        ukod: row.ukod.isNotEmpty ? row.ukod : ukod,
+        skuCode: row.ids,
+        unitsPerPackage: row.unitsPerPackage,
+        pharmacistBonus: row.bonus,
+        isOwnBrand: row.isOwnBrand,
+        dosageForm: row.dosageForm,
+      );
+    }
+    FiscalLog.log('СКАН стикера SKod=$skod: «$name» у пошуку без цього товару');
+    return null;
+  }
+
+  /// Відсканований товар: у перелік, вибрати, курсор у кількість.
+  void _selectScannedDrug(Drug drug, BarCodeAnalysis res, String barcode) {
     // Скан САМ кількість не змінює — її завжди обирає фармацевт (Юлія 06.10:
     // повторний скан не має давати задвоєння). Скан знаходить товар у
     // переліку й ставить курсор у поле кількості. Якщо товар уже в кошику —
@@ -3946,6 +4080,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     setState(() {
       _cart.clear();
       _openedReserve = null;
+      _openedReserveLabel = null;
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -4393,6 +4528,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _lastEarnedAt = DateTime.now();
       _cart.clear();
       _openedReserve = null;
+      _openedReserveLabel = null;
       _scannedDrugIds.clear();
       _selectedDrug = null;   // show ShiftDashboard after payment
       _searchResults = [];
@@ -4415,6 +4551,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _ordersOpen = false;
       _cart.clear();
       _openedReserve = null;
+      _openedReserveLabel = null;
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -4676,6 +4813,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         onOpenShift: _openShiftFromMenu,
         onBonusChanged: _onBonusChanged,
         onVerifyBonusSpend: _verifyBonusSpend,
+        reserveLabel: _openedReserveLabel,
+        onVirtualScan: _virtualScan,
         bonusSyncFailed: _bonusSyncFailed,
         scannedDrugIds: _scannedDrugIds,
         onItemScanned: (id) => setState(() => _scannedDrugIds.add(id)),

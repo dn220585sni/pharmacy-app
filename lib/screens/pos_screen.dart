@@ -54,6 +54,8 @@ import '../widgets/orders_panel.dart';
 import '../widgets/pharmacist_picker_dialog.dart';
 import '../widgets/expenses_panel.dart';
 import '../models/cash_expense.dart';
+import '../models/internet_order.dart';
+import '../services/order_service.dart';
 import '../widgets/panel_layout.dart';
 import '../widgets/order_success_dialog.dart';
 import '../widgets/out_of_stock_panel.dart';
@@ -385,6 +387,117 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// резерв вирішили не пробивати й зберегти знову («Резерв F6»), прізвище
   /// й телефон не питаємо вдруге (Микола 06.10).
   String? _openedReserveLabel;
+
+  /// Номер ІЗ, відкритого в кошику (OpenIZ / OpenRezerv із «Інтернет-
+  /// замовлень»). Після резерву — статус «зібрано», після чека — «оплачено».
+  String? _openedOrderId;
+
+  Future<void> _setOpenedOrderStatus(String orderId, String status) async {
+    final r = await OrderService.updateOrderStatus(
+      orderId: orderId,
+      newStatus: status,
+      user: AuthService.currentUser ?? '',
+    );
+    if (!r.isOk) {
+      FiscalLog.log('ІЗ $orderId: UpdateOrderStatus($status) НЕ пройшов — '
+          '${r.result}');
+      _showQtySnack('Статус замовлення №$orderId не оновився — '
+          'перевірте його в «Інтернет-замовленнях»');
+    }
+  }
+
+  /// «Інтернет-замовлення» → «Розрахувати»: схема Каті 07.10 —
+  /// NumNaklList порожній → OpenIZ (взяти в роботу); є накладна і
+  /// isOpenDisabled ≠ 1 → OpenRezerv (зібране); isOpenDisabled = 1 (обʼєднане)
+  /// — поки ні. Позиції — з items GetOrders, без sgVRoznSetLock; далі
+  /// звичайний конвеєр: скан → GetSumSkid → оплата / «Резерв F6».
+  Future<void> _openOrderInCart(InternetOrder o) async {
+    if (_cart.isNotEmpty) {
+      _showQtySnack('Спершу завершіть або очистіть поточний чек — '
+          'замовлення відкривається лише в порожній кошик');
+      return;
+    }
+    final naklList =
+        o.nakladnaNumbers.where((n) => n.trim().isNotEmpty).toList();
+    if (o.isOpenDisabled || naklList.length > 1) {
+      _showQtySnack('Обʼєднане замовлення №${o.id} поки проводиться в '
+          'роздрібному модулі');
+      return;
+    }
+    final goods = o.items
+        .where((i) =>
+            !i.isServiceLine &&
+            !i.strikeOut &&
+            i.sku.isNotEmpty &&
+            i.quantity > 0)
+        .toList();
+    if (goods.isEmpty) {
+      _showQtySnack('У замовленні №${o.id} немає позицій для відпуску');
+      return;
+    }
+    if (goods.any((i) =>
+        i.fraction != null || i.quantity != i.quantity.roundToDouble())) {
+      _showQtySnack('Замовлення з блістерами поки не відкривається в новій '
+          'касі — проведіть його в роздрібному модулі');
+      FiscalLog.log('ІЗ ${o.id}: дробова кількість — не відкриваємо');
+      return;
+    }
+
+    final viaRezerv = naklList.isNotEmpty;
+    final data = viaRezerv
+        ? await SessionService.openRezerv(naklList.single.trim())
+        : await SessionService.openIZ(o.id);
+    if (!mounted) return;
+    if (data == null) {
+      _showQtySnack('Не вдалося відкрити замовлення №${o.id} — спробуйте '
+          'ще раз або проведіть його в роздрібному модулі');
+      return;
+    }
+
+    setState(() {
+      for (final i in goods) {
+        final qty = i.quantity.round();
+        _cart.add(CartItem(
+          drug: Drug(
+            id: 'srv_${i.sku}',
+            name: i.name,
+            manufacturer: i.manufacturer ?? '',
+            category: '',
+            price: i.price,
+            stock: qty,
+            unit: 'шт',
+            skuCode: i.sku,
+            ukod: i.ukod,
+            expiryDate: i.expiryDate,
+          ),
+          quantity: qty,
+        ));
+      }
+      _openedOrderId = o.id;
+      // Зібране (через OpenRezerv) — це існуючий резерв: очищення кошика
+      // його знищить, попереджаємо так само.
+      _openedReserve = viaRezerv ? naklList.single.trim() : null;
+      // «Резерв F6» = «зібрано»: підпис — номер ІЗ (lblRezerv з відповіді),
+      // прізвище не питаємо.
+      final lbl = data['lblRezerv']?.toString().trim() ?? '';
+      _openedReserveLabel = lbl.isNotEmpty ? lbl : o.id;
+      _ordersOpen = false;
+      _cartOpen = true;
+    });
+    FiscalLog.log('ІЗ ${o.id} → кошик через '
+        '${viaRezerv ? "OpenRezerv ${naklList.single}" : "OpenIZ"}: '
+        '${goods.length} поз. (${goods.map((i) => '${i.sku}×${i.quantity.round()}').join(', ')})');
+
+    final card = data['SpartaCard']?.toString().trim() ?? '';
+    final phone = (data['SpartaPhone']?.toString() ?? '')
+        .replaceAll(RegExp(r'\D'), '');
+    if (card.isNotEmpty) {
+      unawaited(_identifyByLoyaltyCard(card, identSpl: false));
+    } else if (phone.length >= 9) {
+      unawaited(
+          _fetchLoyalty(phone.substring(phone.length - 9), identSpl: false));
+    }
+  }
 
   /// «Витрати по касі» → «Відкрити в касі»: резерв стає кошиком для
   /// розрахунку (Катя 02–05.10). Позиції беремо з [e] ДО OpenRezerv — після
@@ -4081,6 +4194,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _cart.clear();
       _openedReserve = null;
       _openedReserveLabel = null;
+      _openedOrderId = null;
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -4516,6 +4630,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // NewClient — серверний reset сеансу для наступного клієнта: одним запитом
     // очищає server-side кошик і резерви (інакше GetSumSkid тягнув би старі
     // товари в наступні виклики). Замінює поштучний _unlockAllCart.
+    // ІЗ, відкрите в кошику: чек пробито → статус «оплачено» (Катя 07.10:
+    // після OpenIZ сервер ставить лише «переглянуте», решту — ми).
+    final paidOrder = _openedOrderId;
+    if (paidOrder != null) {
+      unawaited(_setOpenedOrderStatus(paidOrder, 'apteka pay'));
+    }
+
     unawaited(_newClientSession());
 
     // Bypass the listener so _filterDrugs doesn't auto-select a drug,
@@ -4529,6 +4650,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _cart.clear();
       _openedReserve = null;
       _openedReserveLabel = null;
+      _openedOrderId = null;
       _scannedDrugIds.clear();
       _selectedDrug = null;   // show ShiftDashboard after payment
       _searchResults = [];
@@ -4552,6 +4674,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _cart.clear();
       _openedReserve = null;
       _openedReserveLabel = null;
+      _openedOrderId = null;
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -4815,6 +4938,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         onVerifyBonusSpend: _verifyBonusSpend,
         reserveLabel: _openedReserveLabel,
         onVirtualScan: _virtualScan,
+        onReserveSaved: (numNakl) {
+          final orderId = _openedOrderId;
+          if (orderId == null) return;
+          FiscalLog.log('ІЗ $orderId зібрано в резерв $numNakl');
+          unawaited(_setOpenedOrderStatus(orderId, 'apteka make'));
+        },
         bonusSyncFailed: _bonusSyncFailed,
         scannedDrugIds: _scannedDrugIds,
         onItemScanned: (id) => setState(() => _scannedDrugIds.add(id)),
@@ -4831,6 +4960,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       return OrdersPanel(
         key: _ordersPanelKey,
         onClose: _toggleOrders,
+        onOpenInCart: _openOrderInCart,
         loyalty: _customerLoyalty,
         onAddEdkPackage: (drug) => _setQuantity(drug, 1),
         onAddEdkBlister: (drug) => _setFractionalQuantity(drug, 1),

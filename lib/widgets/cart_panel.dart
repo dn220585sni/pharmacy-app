@@ -108,6 +108,9 @@ class CartPanel extends StatefulWidget {
   /// Клік по ціні позиції — віртуальне сканування (VirtScanGoods на сервері).
   final void Function(Drug drug)? onVirtualScan;
 
+  /// Резерв збережено (NumNakl) — ДО очищення кошика: для ІЗ це «зібрано».
+  final void Function(String numNakl)? onReserveSaved;
+
   /// Останній `SetBonusOpl` не вдався — сума бонусу в сеансі невідома, тому
   /// оплату блокуємо (пояснення на кнопці), поки касир не прибере списання
   /// або не почне чек заново.
@@ -141,6 +144,7 @@ class CartPanel extends StatefulWidget {
     this.onVerifyBonusSpend,
     this.reserveLabel,
     this.onVirtualScan,
+    this.onReserveSaved,
     this.bonusSyncFailed = false,
   });
 
@@ -734,7 +738,11 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   /// Поки користувача не визначено — права немає. Це свідомо строгіше за
   /// «дозволити, поки не знаємо»: помилково дозволений резерв доведеться
   /// розбирати, помилково заборонений — лише перелогінитись.
-  bool get _canMakeReserve => widget.pharmacist?.isManager ?? false;
+  bool get _canMakeReserve =>
+      (widget.pharmacist?.isManager ?? false) ||
+      // Зібрати інтернет-замовлення / зберегти назад відкритий резерв —
+      // щоденна робота будь-якого фармацевта, а не формування нового резерву.
+      widget.reserveLabel != null;
 
   /// Пояснити відмову. Кнопка навмисно лишається натискною: сіра кнопка, що
   /// мовчить, читається як поламана каса.
@@ -802,6 +810,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
       backgroundColor: const Color(0xFF15803D),
       duration: const Duration(seconds: 4),
     ));
+    widget.onReserveSaved?.call(saved);
     // Позиції вже в накладній — кошик і серверний сеанс (NewClient) чистимо,
     // як після продажу.
     widget.onClear();

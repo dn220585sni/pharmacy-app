@@ -307,7 +307,9 @@ class InternetOrder {
           .where((e) => e.isNotEmpty)
           .toList(growable: false),
       goodList: s('GoodList').trim(),
-      isOpenDisabled: s('IsOpenDisabled').trim() == '1',
+      // У схемі Каті 07.10 — `isOpenDisabled` (з малої), у старих відповідях
+      // — `IsOpenDisabled`.
+      isOpenDisabled: s('isOpenDisabled', 'IsOpenDisabled').trim() == '1',
       searchData: s('SearchData').trim(),
       isAuto: s('Auto').trim() == '1',
       chat: s('Chat').trim(),

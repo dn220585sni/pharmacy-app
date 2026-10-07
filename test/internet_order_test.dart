@@ -195,6 +195,21 @@ void main() {
       expect(o2.type, OrderType.novaPoshta);
     });
 
+    // Схема Каті 07.10: `isOpenDisabled` з малої літери; без NumNaklList —
+    // нове замовлення (OpenIZ).
+    test('isOpenDisabled з малої; порожній NumNaklList → немає накладних', () {
+      final m = Map<String, dynamic>.from(raw)
+        ..remove('IsOpenDisabled')
+        ..['isOpenDisabled'] = '1'
+        ..['NumNaklList'] = '';
+      final o3 = InternetOrder.fromJson(m);
+      expect(o3.isOpenDisabled, isTrue);
+      expect(o3.nakladnaNumbers.where((n) => n.isNotEmpty), isEmpty);
+      final o4 = InternetOrder.fromJson(
+          Map<String, dynamic>.from(m)..['isOpenDisabled'] = '0');
+      expect(o4.isOpenDisabled, isFalse);
+    });
+
     // Живий сервер 24.09: статуси відмов в орудному відмінку, тип
     // «Оптіма TabletkiUA», код СЦ повернуто в позиції (Катя, 24.09).
     test('статуси відмов і тип Оптіма з живого сервера 24.09', () {

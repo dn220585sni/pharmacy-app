@@ -127,6 +127,28 @@ class SessionService {
     }
   }
 
+  /// Взяти в роботу нове інтернет-замовлення — `OpenIZ&idorder` (Катя
+  /// 07.10.2026). Позиції лягають у серверний сеанс фармацевта (без
+  /// sgVRoznSetLock), статус ІЗ стає «переглянуте». Викликати лише коли на
+  /// користувачі немає вибитих позицій. Відповідь: SpartaPhone, lblRezerv
+  /// (= номер ІЗ) та інші поля, які не можна загубити. `null` — помилка.
+  static Future<Map<String, dynamic>?> openIZ(String idorder) async {
+    if (ApiConfig.useMock || idorder.isEmpty) return null;
+    try {
+      final r = await CacheApiClient().call('OpenIZ', params: {
+        'idorder': idorder,
+      });
+      if (r.isOk) {
+        FiscalLog.log('OpenIZ $idorder OK: ${r.data.entries.where((e) => '${e.value}'.isNotEmpty && e.key != 'Status').map((e) => '${e.key}=${e.value}').join(' ')}');
+        return r.data;
+      }
+      FiscalLog.log('OpenIZ $idorder FAIL: ${r.result}');
+    } catch (e) {
+      FiscalLog.log('OpenIZ $idorder ERROR: $e');
+    }
+    return null;
+  }
+
   /// Відкрити непробиту накладну (резерв) для розрахунку — `OpenRezerv`
   /// (Катя, 02–05.10.2026). Позиції повертаються в серверний сеанс «як
   /// вибиті» (sgVRoznSetLock не потрібен), сама накладна обнуляється, а

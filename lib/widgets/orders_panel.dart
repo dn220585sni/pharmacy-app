@@ -58,6 +58,10 @@ class OrdersPanel extends StatefulWidget {
   /// PosScreen uses this to accumulate pharmacist bonuses + reset to zero state.
   final void Function(double amount)? onOrderPaid;
 
+  /// «Розрахувати»: замовлення → кошик каси (OpenIZ / OpenRezerv за схемою
+  /// Каті 07.10), далі звичайний конвеєр — скан, оплата, ПРРО або резерв.
+  final void Function(InternetOrder order)? onOpenInCart;
+
   /// Called to focus the phone input when loyalty is needed.
   final VoidCallback? onFocusPhone;
 
@@ -78,6 +82,7 @@ class OrdersPanel extends StatefulWidget {
     this.onAddEdkPackage,
     this.onAddEdkBlister,
     this.onOrderPaid,
+    this.onOpenInCart,
     this.onFocusPhone,
     this.layout = OrdersPanelLayout.right,
     this.onLayoutChanged,
@@ -1122,6 +1127,15 @@ class OrdersPanelState extends State<OrdersPanel>
         backgroundColor: Color(0xFFB45309),
         duration: Duration(seconds: 4),
       ));
+      return;
+    }
+    // Живий сервер: замовлення відкривається в кошику каси (OpenIZ /
+    // OpenRezerv), де є повний конвеєр — скан, GetSumSkid, оплата, ПРРО,
+    // резерв. Передоплачені — НЕ туди: звичайна оплата взяла б гроші вдруге.
+    if (!ApiConfig.useMock &&
+        widget.onOpenInCart != null &&
+        !_isPrepaid(order)) {
+      widget.onOpenInCart!(order);
       return;
     }
     // Collected/paidOnline orders skip scan check (already collected).

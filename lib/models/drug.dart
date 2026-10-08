@@ -205,7 +205,9 @@ class Drug {
   /// (крім «є/нема»): інакше продаж на іншій касі переставляв би рядки, а
   /// партія, з якої відпускати першою, опинялась би внизу.
   static int compareSearchRows(Drug a, Drug b) {
-    final aIn = a.stock > 0, bIn = b.stock > 0;
+    // Дробовий залишок (0,5 уп. = 4/8) — теж «є»: за цілим stock (0) партія
+    // падала під нульові, далеко від сусідньої серії (Катя 08.10, Фервекс).
+    final aIn = !a.isOutOfStock, bIn = !b.isOutOfStock;
     if (aIn != bIn) return aIn ? -1 : 1;
 
     final nameCmp = a.name.compareTo(b.name);

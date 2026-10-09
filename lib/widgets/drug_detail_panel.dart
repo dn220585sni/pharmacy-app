@@ -19,7 +19,7 @@ import 'stop_price_info_dialog.dart';
 class _LocationChip extends StatelessWidget {
   final StorageLocationType type;
   final String code;
-  final int? qty;
+  final String? qty; // уже відформатовано: «3», «4/8», «3 4/8»
   const _LocationChip({required this.type, required this.code, this.qty});
 
   @override
@@ -988,7 +988,7 @@ class _StorageSectionState extends State<_StorageSection> {
                       _LocationChip(
                         type: StorageLocationType.robot,
                         code: _robotLocation!.code,
-                        qty: _robotLocation!.qty,
+                        qty: '${_robotLocation!.qty}',
                       ),
                       const SizedBox(height: 8),
                     ],
@@ -1055,7 +1055,17 @@ class _StorageSectionState extends State<_StorageSection> {
 
     return Row(
       children: [
-        _LocationChip(type: type, code: code, qty: qty),
+        _LocationChip(
+          type: type,
+          code: code,
+          // Єдине місце = весь залишок партії → з дробом (0,5 уп. = «4/8»,
+          // а не «0 уп.»); qty місця — ціле.
+          qty: qty == null
+              ? null
+              : qty == widget.drug.stock
+                  ? widget.drug.stockDisplay
+                  : '$qty',
+        ),
         const SizedBox(width: 6),
         _EditButton(onTap: _startEditing),
       ],

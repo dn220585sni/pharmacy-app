@@ -2414,6 +2414,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           (d) => d.id == drug.id,
           orElse: () => drug,
         );
+        // GetSKUdetail — за u-кодом, тобто про товар загалом: його серія,
+        // s-код, термін і прихід належать ОДНІЙ (довільній) партії. Рядок-
+        // партія з SearchByNameSKU має свої — їх не перезаписуємо, інакше
+        // різні партії показували одну серію (Катя 09.10, Фервекс).
+        // «Серія» в картці = s-код партії (так її віддає й GetSKUdetail).
+        final rowSkod = currentDrug.skuCode ?? '';
+        final isBatchRow = rowSkod.isNotEmpty &&
+            currentDrug.id == 'srv_$rowSkod';
         final updatedDrug = currentDrug.copyWithSKUDetail(
           nameUkr: detail.nameUkr,
           inn: detail.inn,
@@ -2421,12 +2429,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           dosage: detail.dosage,
           manufacturer: detail.manufacturer,
           category: detail.category,
-          expiryDate: detail.expiryDate,
+          expiryDate: isBatchRow ? null : detail.expiryDate,
           unitsPerPackage: detail.unitsPerPackage,
           variableDivisor: detail.variableDivisor,
           pharmacistBonus: detail.pharmacistBonus,
           barcode: detail.barcode,
-          series: detail.series,
+          series: isBatchRow ? rowSkod : detail.series,
           storageConditions: detail.storageConditions,
           requiresPrescription: detail.requiresPrescription,
           isOwnBrand: detail.isOwnBrand,
@@ -2434,10 +2442,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           imageUrl: detail.imageUrl,
           intakeWarning: detail.intakeWarning,
           usageInfo: detail.toUsageInfo(),
-          skuCode: detail.skuCode,
+          skuCode: isBatchRow ? rowSkod : detail.skuCode,
           kodSc: detail.kodSc,
-          comingPrice: detail.comingPrice,
-          comingCode: detail.comingCode,
+          comingPrice: isBatchRow ? null : detail.comingPrice,
+          comingCode: isBatchRow ? null : detail.comingCode,
         );
         _skuDetailLoaded.add(drug.id); // деталі (з дільником) прийшли
 

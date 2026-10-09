@@ -135,6 +135,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   final StringBuffer _scanBuffer = StringBuffer();
   bool _scanning = false;
   static const _scanIdle = Duration(milliseconds: 120);
+  /// Додаткове очікування, якщо по паузі в буфері явно неповний код.
+  static const _scanIdleIncomplete = Duration(milliseconds: 600);
+  bool _scanWaitedIncomplete = false;
 
   // ── Top drugs cache (pre-loaded at shift start) ────────────────────────
   /// Cached top drugs for instant local search.
@@ -2674,13 +2677,31 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   void _beginScanCapture() {
     _scanning = true;
+    _scanWaitedIncomplete = false;
     _scanBuffer.clear();
     _resetScanIdle();
   }
 
   void _resetScanIdle() {
     _scanIdleTimer?.cancel();
-    _scanIdleTimer = Timer(_scanIdle, _flushScan);
+    _scanIdleTimer = Timer(_scanIdle, _onScanIdle);
+  }
+
+  /// Пауза в потоці символів. Зазвичай це кінець скана, але потік буває
+  /// перерваний посередині (Катя 09.10, 14:54: пішло «]E36», а решта
+  /// штрихкоду «64798057843» потрапила в поле телефону → перевірка номера в
+  /// Спарті → GetSPLParam і вікно реєстрації). Тож явно неповний код ще раз
+  /// чекаємо довше; клавіші тим часом і далі йдуть у буфер скана.
+  void _onScanIdle() {
+    if (!_scanWaitedIncomplete &&
+        looksLikeIncompleteScan(_scanBuffer.toString().trim())) {
+      _scanWaitedIncomplete = true;
+      FiscalLog.log('Сканер: пауза на «${_scanBuffer.toString().trim()}» — '
+          'код неповний, чекаємо продовження');
+      _scanIdleTimer = Timer(_scanIdleIncomplete, _flushScan);
+      return;
+    }
+    _flushScan();
   }
 
   /// Додати клавішу до буфера скана — з ФІЗИЧНОЇ позиції, а не з `character`.
@@ -2737,6 +2758,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     _scanning = false;
     final code = _scanBuffer.toString().trim();
     _scanBuffer.clear();
+    if (_scanWaitedIncomplete && code.isNotEmpty) {
+      FiscalLog.log('Сканер: після паузи зібрано «$code»');
+    }
     if (code.isEmpty || !mounted) return;
     // Захоплення Tab і символів лишається глобальним НАВІТЬ при відкритому
     // діалозі — інакше цифри штрихкода потрапили б у його поле (напр. у суму
@@ -2761,7 +2785,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// інші картки — поки повідомлення; нерозпізнане — просимо пересканувати.
   Future<void> _onScan(String code) async {
     // SumSdach — коли кошик непорожній і відкритий; інакше основна форма вибиття.
-    final form = (_cartOpen && _cart.isNotEmpty)
+    // Фокус у полі пошуку = касир у режимі пошуку, навіть якщо кошик праворуч
+    // ще відкритий (Юлія 09.10, сц. 9: F2 → клік у пошук → скан іншого
+    // товару давав «Скан: barcode» замість пошуку).
+    final form = (_cartOpen && _cart.isNotEmpty && !_searchFocusNode.hasFocus)
         ? BarCodeForm.sumSdach
         : BarCodeForm.main;
     final res = await DrugService.analizBarCode(code, form: form);
@@ -2802,15 +2829,21 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (res.isProduct) {
       // Кошик відкритий і непорожній (SumSdach) — режим ПЕРЕВІРКИ збору: не
       // додаємо товар, а помічаємо відповідну позицію як відскановану.
-      if (_cartOpen && _cart.isNotEmpty) {
+      if (form == BarCodeForm.sumSdach) {
         _markCartItemScanned(res, _stripScanPrefix(code));
       } else {
         await _addScannedProduct(res, _stripScanPrefix(code));
       }
       return;
     }
-    _showScanMessage(
-        'Скан: ${res.wasScanned.isNotEmpty ? res.wasScanned : "невідомо"}');
+    // Сервер розпізнав лише тип коду («barcode», «sticker»), без товару. Сире
+    // «Скан: barcode» касиру нічого не каже (Юлія 09.10, сц. 2 і 9).
+    FiscalLog.log('СКАН без товару (${form == BarCodeForm.sumSdach ? "кошик" : "пошук"}): '
+        'readBC="${res.readBC}" wasscanned="${res.wasScanned}"');
+    _showScanMessage(form == BarCodeForm.sumSdach
+        ? 'Відсканованого товару немає в кошику. Щоб знайти інший товар, '
+            'клацніть у поле пошуку і скануйте ще раз'
+        : 'Товар за цим кодом не знайдено${res.readBC.isNotEmpty ? " (${res.readBC})" : ""}');
   }
 
   /// Режим перевірки збору (SumSdach): знайти позицію кошика, що відповідає
@@ -2885,30 +2918,29 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _showScanMessage('Товар розпізнано, але без штрихкоду');
       return;
     }
-    final r = await DrugService.getStockAndPrices('', barcode: barcode);
-    if (!mounted) return;
-    if (!r.found && res.skod.isNotEmpty) {
-      // Внутрішній стикер аптеки (wasscanned="sticker", readBC «S»+s-код):
-      // його штрихкоду в довіднику немає, тому GetSKUprice «не знайдено»
-      // (Юлія 06–07.10, S25743960 / S25966646). Сервер же дав s- і u-код —
-      // шукаємо товар за ними.
-      final drug = await _drugBySkod(res.skod, res.ukod);
+    // Спершу — усі партії товару за u-кодом (рядки як у пошуку). Стикер
+    // (S + s-код) вибирає свою партію, заводський штрихкод — товар загалом.
+    if (res.ukod.isNotEmpty) {
+      final rows = await _batchRowsForScan(res.ukod, skod: res.skod);
       if (!mounted) return;
-      if (drug != null) {
-        _selectScannedDrug(drug, res, barcode);
+      if (rows.isNotEmpty) {
+        final drug = rows.firstWhere(
+          (d) => res.skod.isNotEmpty && d.skuCode == res.skod,
+          orElse: () => rows.firstWhere((d) => !d.isOutOfStock,
+              orElse: () => rows.first),
+        );
+        _selectScannedDrug(drug, res, barcode, batches: rows);
         return;
       }
     }
+    // Запасний шлях (u-коду немає або пошук не дав партій): GetSKUprice за
+    // штрихкодом — один рядок.
+    final r = await DrugService.getStockAndPrices('', barcode: barcode);
+    if (!mounted) return;
     if (!r.found) {
       // Юлія 07.09: скан у порожній кошик дав «Товар не знайдено (S26122031)».
-      // «S» + 8 цифр — це форма нашого s-коду, тобто AnalizBarCode, схоже,
-      // розпізнав скан як S-КОД, а ми далі шукаємо товар ПО ШТРИХКОДУ
-      // (`GetSKUprice` s-код не приймає — про це є примітка вище). Тоді
-      // «не знайдено» закономірне.
-      //
-      // Досі вся відповідь AnalizBarCode йшла лише в `debugPrint`, якого в
-      // релізі не видно, тож перевірити гіпотезу не було на чому. Пишемо в
-      // журнал саме на невдачі — на кожному скані це був би шум.
+      // «S» + 8 цифр — внутрішній стикер: його штрихкоду в довіднику немає,
+      // GetSKUprice за ним «не знайдено»; партії шукаємо вище за u-кодом.
       FiscalLog.log('СКАН не знайдено: шукали по штрихкоду "$barcode"; '
           'AnalizBarCode → readBC="${res.readBC}" SKod="${res.skod}" '
           'UKod="${res.ukod}" wasscanned="${res.wasScanned}"');
@@ -2937,66 +2969,77 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     );
     _selectScannedDrug(drug, res, barcode);
   }
-
-  /// Товар за s-кодом (скан стикера): назва — з GetSKUdetail за u-кодом,
-  /// партія — з SearchByNameSKU: рядок із цим s-кодом, інакше будь-яка
-  /// партія того ж u-коду. Вже показаний у таблиці рядок — без запитів.
-  Future<Drug?> _drugBySkod(String skod, String ukod) async {
-    for (final d in _searchResults) {
-      if (d.id == 'srv_$skod' || d.skuCode == skod) return d;
-    }
-    if (ukod.isEmpty) return null;
+  /// Усі партії товару в наявності (рядки як у пошуку за назвою) — для скана.
+  /// Назва — з GetSKUdetail за u-кодом, партії — з SearchByNameSKU за цим
+  /// u-кодом. Заводський штрихкод — це товар, а не партія: Юлія 09.10
+  /// (сц. 4, 6, 7) — скан Фервексу показував лише почату упаковку, хоча є ще
+  /// ціла іншої партії. [skod] (стикер) — партія, яку треба знайти серед них.
+  Future<List<Drug>> _batchRowsForScan(String ukod, {String skod = ''}) async {
+    if (ukod.isEmpty) return const [];
     final detail = await DrugService.fetchSKUDetail(ukod);
     final name = detail?.name?.trim() ?? '';
     if (name.isEmpty) {
-      FiscalLog.log('СКАН стикера SKod=$skod: GetSKUdetail($ukod) без назви');
-      return null;
+      FiscalLog.log('СКАН $ukod: GetSKUdetail без назви — партії не шукаємо');
+      return const [];
     }
     final queries = <String>[
       name,
       ?DrugNameIndex.instance.fix(name)?.serverQuery,
     ];
     for (final q in queries) {
-      final rows = await DrugService.searchByName(q);
-      DrugSearchItem? row;
-      for (final x in rows) {
-        if (x.ids == skod) {
-          row = x;
-          break;
-        }
-      }
-      row ??= rows.where((x) => x.ukod == ukod).firstOrNull;
-      if (row == null) continue;
-      if (row.ids != skod) {
+      final rows = (await DrugService.searchByName(q))
+          .where((x) => x.ukod == ukod && x.ids.isNotEmpty)
+          .toList();
+      if (rows.isEmpty) continue;
+      if (skod.isNotEmpty && !rows.any((x) => x.ids == skod)) {
         FiscalLog.log('СКАН стикера SKod=$skod: такої партії в пошуку немає, '
-            'взято партію ${row.ids} того ж товару ($ukod)');
+            'показано партії того ж товару ($ukod)');
       }
-      return Drug(
-        id: 'srv_${row.ids}',
-        name: row.nameUkr ?? row.name,
-        nameUkr: row.nameUkr,
-        manufacturer: row.manufacturer,
-        category: row.category ?? '',
-        price: row.price,
-        stock: row.qty,
-        stockRaw: row.qtyRaw != row.qty.toDouble() ? row.qtyRaw : null,
-        unit: 'шт',
-        locationCode: row.shelf.isNotEmpty ? row.shelf : null,
-        expiryDate: row.expiryDate,
-        ukod: row.ukod.isNotEmpty ? row.ukod : ukod,
-        skuCode: row.ids,
-        unitsPerPackage: row.unitsPerPackage,
-        pharmacistBonus: row.bonus,
-        isOwnBrand: row.isOwnBrand,
-        dosageForm: row.dosageForm,
-      );
+      return rows
+          .map((row) => Drug(
+                id: 'srv_${row.ids}',
+                name: row.nameUkr ?? row.name,
+                nameUkr: row.nameUkr,
+                manufacturer: row.manufacturer,
+                category: row.category ?? '',
+                price: row.price,
+                stock: row.qty,
+                stockRaw:
+                    row.qtyRaw != row.qty.toDouble() ? row.qtyRaw : null,
+                unit: 'шт',
+                locationCode: row.shelf.isNotEmpty ? row.shelf : null,
+                storageLocations: row.shelf.isNotEmpty
+                    ? [
+                        StorageLocation(
+                          type: StorageLocationType.shelf,
+                          code: row.shelf,
+                          qty: row.qty,
+                        )
+                      ]
+                    : null,
+                expiryDate: row.expiryDate,
+                comingPrice: row.comingPrice,
+                comingCode: row.comingCode,
+                hasHelpingHand:
+                    row.comingPrice != null && row.comingCode != null,
+                ukod: row.ukod,
+                skuCode: row.ids,
+                unitsPerPackage: row.unitsPerPackage,
+                pharmacistBonus: row.bonus,
+                isOwnBrand: row.isOwnBrand,
+                dosageForm: row.dosageForm,
+              ))
+          .toList()
+        ..sort(Drug.compareSearchRows);
     }
-    FiscalLog.log('СКАН стикера SKod=$skod: «$name» у пошуку без цього товару');
-    return null;
+    FiscalLog.log('СКАН $ukod: «$name» у пошуку без цього товару');
+    return const [];
   }
-
   /// Відсканований товар: у перелік, вибрати, курсор у кількість.
-  void _selectScannedDrug(Drug drug, BarCodeAnalysis res, String barcode) {
+  /// [batches] — усі партії цього товару: показуємо їх у переліку відразу під
+  /// вибраною, щоб фармацевт бачив і почату, і цілу упаковку.
+  void _selectScannedDrug(Drug drug, BarCodeAnalysis res, String barcode,
+      {List<Drug> batches = const []}) {
     // Скан САМ кількість не змінює — її завжди обирає фармацевт (Юлія 06.10:
     // повторний скан не має давати задвоєння). Скан знаходить товар у
     // переліку й ставить курсор у поле кількості. Якщо товар уже в кошику —
@@ -3004,10 +3047,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // створюємо дубль.
     final inCart = _cartItemForScan(res, barcode);
     final target = inCart?.drug ?? drug;
+    final others = batches.where((d) => d.id != target.id).toList();
+    final shown = {target.id, for (final d in others) d.id};
     setState(() {
       _searchResults = [
         target,
-        ..._searchResults.where((d) => d.id != target.id),
+        ...others,
+        ..._searchResults.where((d) => !shown.contains(d.id)),
       ];
       _selectedDrug = target;
       _focusQtyOnSelect = true;

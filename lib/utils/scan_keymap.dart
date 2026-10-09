@@ -166,3 +166,18 @@ bool isIgnoredForScan(PhysicalKeyboardKey key) => _ignored.contains(key);
 /// але деякі шлють його суфіксом — тоді не чекаємо таймаут даремно.
 bool isScanTerminator(PhysicalKeyboardKey key) =>
     key == PhysicalKeyboardKey.enter || key == PhysicalKeyboardKey.numpadEnter;
+
+/// Чи схожий зібраний по паузі код на ОБІРВАНИЙ скан (решта ще в дорозі).
+///
+/// Префікс символіки AIM (`]E0`, `]E3`, `]d2`…) відкидаємо. Короткий
+/// суто цифровий залишок (< 8 — коротше за найкоротший EAN-8) або код
+/// із 1–3 символів реальним сканом бути не може. Лише продовжує
+/// очікування — нічого не відкидає.
+bool looksLikeIncompleteScan(String code) {
+  if (code.isEmpty) return false;
+  if (code.length < 4) return true;
+  final aim = RegExp(r'^\][A-Za-z][0-9A-Za-z]');
+  final data = aim.hasMatch(code) ? code.substring(3) : code;
+  if (data.isEmpty) return true;
+  return RegExp(r'^\d+$').hasMatch(data) && data.length < 8;
+}

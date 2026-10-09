@@ -12,8 +12,9 @@ class PhonePrefixFormatter extends TextInputFormatter {
     String text = newValue.text;
     if (!text.startsWith(prefix)) {
       final allDigits = text.replaceAll(RegExp(r'\D'), '');
-      final afterCode =
-          allDigits.startsWith('380') ? allDigits.substring(3) : allDigits;
+      final afterCode = _localPart(
+          allDigits.startsWith('380') ? allDigits.substring(3) : allDigits);
+      if (afterCode == null) return oldValue;
       final result = prefix + afterCode;
       return TextEditingValue(
         text: result,
@@ -21,7 +22,9 @@ class PhonePrefixFormatter extends TextInputFormatter {
       );
     }
     final afterPrefix = text.substring(prefix.length);
-    final cleanAfter = afterPrefix.replaceAll(RegExp(r'\D'), '');
+    final cleanAfter =
+        _localPart(afterPrefix.replaceAll(RegExp(r'\D'), ''));
+    if (cleanAfter == null) return oldValue;
     final result = prefix + cleanAfter;
     final cursor =
         newValue.selection.end.clamp(prefix.length, result.length).toInt();
@@ -29,5 +32,15 @@ class PhonePrefixFormatter extends TextInputFormatter {
       text: result,
       selection: TextSelection.collapsed(offset: cursor),
     );
+  }
+
+  /// Після +380 — рівно 9 цифр. Вставлене «0671234567» → «671234567».
+  /// Більше 9 — не телефон (напр. залишок штрихкоду з обірваного скана,
+  /// Катя 09.10: «+38064798057843»): null = зміну не приймаємо.
+  static String? _localPart(String digits) {
+    if (digits.length == 10 && digits.startsWith('0')) {
+      return digits.substring(1);
+    }
+    return digits.length <= 9 ? digits : null;
   }
 }

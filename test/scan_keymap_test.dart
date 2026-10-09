@@ -148,4 +148,19 @@ void main() {
       expect(decode(seq), '12');
     });
   });
+
+  group('обірваний скан (Катя 09.10)', () {
+    test('початок EAN з префіксом AIM — неповний', () {
+      expect(looksLikeIncompleteScan(']E36'), isTrue);
+      expect(looksLikeIncompleteScan(']E0'), isTrue);
+      expect(looksLikeIncompleteScan('36'), isTrue);
+    });
+    test('повні коди — не чекаємо', () {
+      expect(looksLikeIncompleteScan(']E03664798057843'), isFalse);
+      expect(looksLikeIncompleteScan('3664798057843'), isFalse);
+      expect(looksLikeIncompleteScan('S25881943'), isFalse);
+      expect(looksLikeIncompleteScan('12345678'), isFalse);
+      expect(looksLikeIncompleteScan(''), isFalse);
+    });
+  });
 }

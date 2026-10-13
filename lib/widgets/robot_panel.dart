@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/cart_item.dart';
 import 'hover_icon_button.dart';
+import '../services/robot_service.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ROBOT PANEL — right-panel widget for pharmacy robot control.
@@ -53,6 +54,17 @@ class RobotPanelState extends State<RobotPanel> {
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       ),
     );
+  }
+
+  /// Команда робота через Caché (Катя 13.10): успіх — [okText], помилка —
+  /// текст сервера. Лоток і вимикач привезення поки без сервісів (заглушки).
+  Future<void> _runCommand(Future<RobotResult> call, String okText) async {
+    final r = await call;
+    if (!mounted) return;
+    _showStub(r.ok
+        ? okText
+        : 'Робот: команду не виконано'
+            '${r.message.isNotEmpty ? " — ${r.message}" : ""}');
   }
 
   @override
@@ -181,7 +193,8 @@ class RobotPanelState extends State<RobotPanel> {
           enabled: widget.cart.isNotEmpty && _deliveryEnabled,
           onTap: () {
             widget.onRequestAll?.call();
-            _showStub('Робот: привожу весь чек (${widget.cart.length} поз.)');
+            _runCommand(RobotService.moveBasket(),
+                'Робот: привожу весь чек (${widget.cart.length} поз.)');
           },
         ),
         _buildCommandTile(
@@ -202,14 +215,16 @@ class RobotPanelState extends State<RobotPanel> {
           title: 'Погасити чергу',
           subtitle: 'Очистити чергу привезення',
           color: const Color(0xFFF59E0B),
-          onTap: () => _showStub('Робот: чергу привезення очищено'),
+          onTap: () => _runCommand(
+              RobotService.clearQueue(), 'Робот: чергу привезення очищено'),
         ),
         _buildCommandTile(
           icon: Icons.restart_alt_rounded,
           title: 'Перезапуск передньої стінки',
           subtitle: 'Рестарт фронтальної панелі',
           color: const Color(0xFFEF4444),
-          onTap: () => _showStub('Робот: перезапуск передньої стінки'),
+          onTap: () => _runCommand(RobotService.restartFront(),
+              'Робот: передню стінку перезапущено'),
         ),
         const Divider(
             height: 1,

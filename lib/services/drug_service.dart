@@ -71,6 +71,9 @@ class DrugSearchItem {
   final String? category;    // категорія
   final String? dosageForm;  // лікарська форма
   final int? unitsPerPackage; // розмір упаковки (блістерів/саше) — для дробу
+  /// Заводська серія з упаковки (SearchByNameSKU `series`, напр. «D6112»;
+  /// Катя 12.10). НЕ s-код — той в `ids`.
+  final String? series;
 
   DrugSearchItem({
     required this.ids,
@@ -90,6 +93,7 @@ class DrugSearchItem {
     this.category,
     this.dosageForm,
     this.unitsPerPackage,
+    this.series,
   });
 
   static String? _nonEmpty(dynamic v) {
@@ -137,6 +141,7 @@ class DrugSearchItem {
         final u = int.tryParse(json['unitsPerPackage']?.toString().trim() ?? '');
         return (u != null && u > 0) ? u : null;
       }(),
+      series: _nonEmpty(json['series']?.toString().trim()),
     );
   }
 }

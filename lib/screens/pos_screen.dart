@@ -66,6 +66,8 @@ import '../widgets/messages_panel.dart';
 import '../widgets/barcode_input_dialog.dart';
 import '../widgets/client_registration_dialog.dart';
 import '../widgets/robot_panel.dart';
+import '../widgets/robot_correction_dialog.dart';
+import '../services/robot_service.dart';
 import '../services/api_config.dart';
 import '../data/mock_messages.dart';
 import '../models/prescription.dart';
@@ -722,6 +724,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                 unit: 'шт',
                 ukod: item.ukod.isNotEmpty ? item.ukod : null,
                 skuCode: item.ids,
+                series: item.series,
                 unitsPerPackage: item.unitsPerPackage,
               ))
           .toList();
@@ -1497,9 +1500,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // Esc is handled locally inside PrescriptionPanel (Focus.onKeyEvent).
     // ══════════════════════════════════════════════════════════════════════
     if (_prescriptionOpen) {
-      // Ctrl+R: toggle prescription panel (close it)
+      // Ctrl+P: toggle prescription panel (close it). Фізична клавіша —
+      // працює в будь-якій розкладці.
       if (HardwareKeyboard.instance.isControlPressed &&
-          event.logicalKey == LogicalKeyboardKey.keyR) {
+          event.physicalKey == PhysicalKeyboardKey.keyP) {
         _togglePrescription();
         return true;
       }
@@ -1583,8 +1587,19 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         _toggleRobot();
         return true;
       }
-      // ── Ctrl+R: toggle e-Prescription panel ────────────────────────────
-      if (event.logicalKey == LogicalKeyboardKey.keyR) {
+      // ── Ctrl+R: коригування кількості в комірці робота (як у старій
+      // програмі; фізична клавіша — працює і в українській розкладці) ──────
+      if (event.physicalKey == PhysicalKeyboardKey.keyR) {
+        final d = _selectedDrug;
+        if (d != null) {
+          showRobotCorrectionDialog(context: context, drug: d);
+        } else {
+          _showScanMessage('Виберіть товар для коригування в роботі');
+        }
+        return true;
+      }
+      // ── Ctrl+P: toggle e-Prescription panel (з 13.10; Ctrl+R — робот) ───
+      if (event.physicalKey == PhysicalKeyboardKey.keyP) {
         _togglePrescription();
         return true;
       }
@@ -1910,6 +1925,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                     comingCode: item.comingCode,
                     ukod: item.ukod.isNotEmpty ? item.ukod : null,
                     skuCode: item.ids,
+                    series: item.series,
                     unitsPerPackage: item.unitsPerPackage,
                     pharmacistBonus: item.bonus,
                     isOwnBrand: item.isOwnBrand,
@@ -2216,6 +2232,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           comingCode: item.comingCode,
           ukod: item.ukod.isNotEmpty ? item.ukod : null,
           skuCode: item.ids,
+          series: item.series,
           unitsPerPackage: item.unitsPerPackage,
           // Поля з SearchByNameSKU, які раніше backfill-ив SKUdetail на КОЖНОМУ
           // рядку. Після C1 (ленивий SKUdetail) несемо їх прямо з пошуку, інакше
@@ -2421,7 +2438,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         // s-код, термін і прихід належать ОДНІЙ (довільній) партії. Рядок-
         // партія з SearchByNameSKU має свої — їх не перезаписуємо, інакше
         // різні партії показували одну серію (Катя 09.10, Фервекс).
-        // «Серія» в картці = s-код партії (так її віддає й GetSKUdetail).
         final rowSkod = currentDrug.skuCode ?? '';
         final isBatchRow = rowSkod.isNotEmpty &&
             currentDrug.id == 'srv_$rowSkod';
@@ -2437,7 +2453,9 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           variableDivisor: detail.variableDivisor,
           pharmacistBonus: detail.pharmacistBonus,
           barcode: detail.barcode,
-          series: isBatchRow ? rowSkod : detail.series,
+          // `series` GetSKUdetail — s-код довільної партії, не заводська серія:
+          // серію рядок бере лише з SearchByNameSKU (Катя 12.10).
+          series: null,
           storageConditions: detail.storageConditions,
           requiresPrescription: detail.requiresPrescription,
           isOwnBrand: detail.isOwnBrand,
@@ -3024,6 +3042,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
                     row.comingPrice != null && row.comingCode != null,
                 ukod: row.ukod,
                 skuCode: row.ids,
+                series: row.series,
                 unitsPerPackage: row.unitsPerPackage,
                 pharmacistBonus: row.bonus,
                 isOwnBrand: row.isOwnBrand,
@@ -5551,8 +5570,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         final promoPrice = (ukod != null && ukod.isNotEmpty)
             ? StopPriceService.promoPrice(ukod, drug.price)
             : null;
-        return DrugListItem(
+        // Права кнопка миші — меню рядка (коригування в роботі), як у старій
+        // програмі.
+        return GestureDetector(
           key: ValueKey(drug.id),
+          onSecondaryTapDown: (details) =>
+              _showRowMenu(drug, details.globalPosition),
+          child: DrugListItem(
           drug: drug,
           promoPrice: promoPrice,
           isSelected: isSelected,
@@ -5583,9 +5607,56 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
               _setFractionalQuantity(drug, blisters),
           onFractionalUnavailable: _showFractionalUnavailable,
           onNavigate: _moveSelection,
+        ),
         );
       },
     );
+  }
+
+  Future<void> _showRowMenu(Drug drug, Offset at) async {
+    setState(() => _selectedDrug = drug);
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+          at & const Size(1, 1), Offset.zero & overlay.size),
+      items: [
+        if (ApiConfig.hasRobot) ...const [
+          PopupMenuItem(value: 'robotMove', child: Text('Привезти товар')),
+          PopupMenuItem(
+            value: 'robotCorrection',
+            child: Text('Коригування кількості в роботі   Ctrl+R'),
+          ),
+          PopupMenuItem(
+              value: 'robotClearQueue',
+              child: Text('Погасити індикатор черги')),
+        ],
+      ],
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'robotCorrection':
+        await showRobotCorrectionDialog(context: context, drug: drug);
+      case 'robotMove':
+        // Скільки привезти: як у кошику, інакше одну упаковку.
+        final skod = _stockSkod(drug);
+        if (skod.isEmpty) {
+          _showScanMessage('${drug.displayName}: немає s-коду — роботу нічого передати');
+          return;
+        }
+        final qty = _getCartItem(drug.id)?.quantity ?? 0;
+        final r = await RobotService.moveSkod(skod, qty > 0 ? qty : 1);
+        if (!mounted) return;
+        _showScanMessage(r.ok
+            ? 'Робот: везе ${drug.displayName} × ${qty > 0 ? qty : 1}'
+            : 'Робот не прийняв команду${r.message.isNotEmpty ? ": ${r.message}" : ""}');
+      case 'robotClearQueue':
+        final r = await RobotService.clearQueue();
+        if (!mounted) return;
+        _showScanMessage(r.ok
+            ? 'Робот: індикатор черги погашено'
+            : 'Робот не прийняв команду${r.message.isNotEmpty ? ": ${r.message}" : ""}');
+    }
   }
 
   Widget _buildTableHeader() {

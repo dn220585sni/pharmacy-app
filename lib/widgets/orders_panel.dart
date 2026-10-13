@@ -806,7 +806,8 @@ class OrdersPanelState extends State<OrdersPanel>
 
         setState(() {
           if (detail != null) {
-            item.enrichedSeries = detail.series;
+            // `series` GetSKUdetail — s-код якоїсь партії, а не заводська
+            // серія (Катя 12.10) — під підписом «Серія» не показуємо.
             item.enrichedExpiryDate = detail.expiryDate;
           }
           final cacheImg = detail?.imageUrl;

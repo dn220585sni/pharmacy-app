@@ -1011,9 +1011,14 @@ class _StorageSectionState extends State<_StorageSection> {
   // ── Batch info (right side of storage section) ──────────────────────────
   Widget _buildBatchInfo() {
     final drug = widget.drug;
-    final rows = <(String, String)>[
-      if (drug.series != null) ('Серія', drug.series!),
-      if (drug.barcode != null) ('Штрих-код', drug.barcode!),
+    // Серія — заводська, як на упаковці (SearchByNameSKU `series`); код
+    // приходу (s-код партії) — дрібніше, для звірки з підтримкою (Катя 12.10).
+    final skod = drug.skuCode;
+    final rows = <(String, String, bool)>[
+      if (drug.series != null) ('Серія', drug.series!, true),
+      if (drug.barcode != null) ('Штрих-код', drug.barcode!, true),
+      if (skod != null && drug.id == 'srv_$skod')
+        ('Код приходу', skod, false),
     ];
     if (rows.isEmpty) return const SizedBox.shrink();
 
@@ -1028,17 +1033,19 @@ class _StorageSectionState extends State<_StorageSection> {
             children: [
               Text(
                 '${r.$1}: ',
-                style: const TextStyle(
-                  color: Color(0xFF6B7280),
-                  fontSize: 11,
+                style: TextStyle(
+                  color: const Color(0xFF6B7280),
+                  fontSize: r.$3 ? 11 : 10,
                 ),
               ),
               Text(
                 r.$2,
-                style: const TextStyle(
-                  color: Color(0xFF374151),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
+                style: TextStyle(
+                  color: r.$3
+                      ? const Color(0xFF374151)
+                      : const Color(0xFF6B7280),
+                  fontSize: r.$3 ? 11 : 10,
+                  fontWeight: r.$3 ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
             ],

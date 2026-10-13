@@ -111,7 +111,7 @@ class ActionSidebar extends StatelessWidget {
         tooltip: 'е-Рецепт',
         onTap: onPrescriptionTap,
         isActive: prescriptionActive,
-        hotkeyLabel: 'Ctrl R',
+        hotkeyLabel: 'Ctrl P',
       ),
       _SidebarItem(
         icon: Icons.volunteer_activism_rounded,

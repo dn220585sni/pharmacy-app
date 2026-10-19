@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'api_config.dart';
 import 'cache_api_client.dart';
+import 'glob_param_service.dart';
 import 'sale_journal.dart';
 
 /// Інформація про фармацевта.
@@ -93,6 +94,8 @@ class AuthService {
         // main() вона ще не встановлена — відновлення там гарантовано падало з
         // «Не авторизована сесія» (спіймано на касі 1334, 2026-08-26).
         unawaited(SaleJournal.recover());
+        // Чи є в аптеці робот / лікомат — від них залежать меню й кнопки.
+        unawaited(GlobParamService.load());
         return true;
       }
     }

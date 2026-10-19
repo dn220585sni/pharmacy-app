@@ -70,6 +70,8 @@ class SessionService {
     Money? sumChange,
     Money? sumChangeSpl,
     String? reserveLabel,
+    String? lockerCell,
+    String? lockerRefusal,
   }) async {
     if (ApiConfig.useMock) return null;
     try {
@@ -90,6 +92,12 @@ class SessionService {
       // (як у Єврофармі). Назва параметра — здогад з відповіді OpenRezerv
       // (`lblRezerv`); у GetNaklKas це поле `rezerv`. Звірити після тесту.
       if (reserveLabel != null) params['lblRezerv'] = reserveLabel;
+      // Комірка лікомата (Катя 14.10): ІЗ кладемо в лікомат тим самим
+      // збереженням накладної-резерву, лише з номером комірки.
+      if (lockerCell != null) params['Cell'] = lockerCell;
+      // ІЗ мало йти в лікомат, але фармацевт видає інакше — причина
+      // (`ResPostmate`, Катя 14.10; лише для нової накладної з OpenIZ).
+      if (lockerRefusal != null) params['ResPostmate'] = lockerRefusal;
       final r = await CacheApiClient().call('SavesgVNakl', params: params);
       if (r.isOk) {
         final numNakl = r.data['NumNakl']?.toString();

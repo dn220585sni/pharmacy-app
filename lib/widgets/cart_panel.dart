@@ -41,6 +41,9 @@ import 'checkout/bonus_discount_block.dart';
 import 'checkout/cash_change_section.dart';
 import 'checkout/payment_method_toggle.dart';
 import 'prro_receipt_dialog.dart';
+import 'likomat_dialog.dart';
+import 'locker_refusal_dialog.dart';
+import '../services/robot_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CartPanel — inline cart shown in the right detail panel.
@@ -111,6 +114,14 @@ class CartPanel extends StatefulWidget {
   /// Резерв збережено (NumNakl) — ДО очищення кошика: для ІЗ це «зібрано».
   final void Function(String numNakl)? onReserveSaved;
 
+  /// Відкрите ІЗ можна покласти в лікомат (аптека має лікомат, замовленню
+  /// не заборонено): кнопка «В лікомат» поруч із «Резерв F6».
+  final bool lockerAllowed;
+
+  /// Нове ІЗ (OpenIZ) мало йти в лікомат: якщо фармацевт резервує чи продає
+  /// без комірки — спершу причина (`ResPostmate` у SavesgVNakl, Катя 14.10).
+  final bool lockerReasonRequired;
+
   /// Останній `SetBonusOpl` не вдався — сума бонусу в сеансі невідома, тому
   /// оплату блокуємо (пояснення на кнопці), поки касир не прибере списання
   /// або не почне чек заново.
@@ -145,6 +156,8 @@ class CartPanel extends StatefulWidget {
     this.reserveLabel,
     this.onVirtualScan,
     this.onReserveSaved,
+    this.lockerAllowed = false,
+    this.lockerReasonRequired = false,
     this.bonusSyncFailed = false,
   });
 
@@ -757,6 +770,20 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
 
   bool _isSavingReserve = false;
 
+  /// Причина «не в лікомат» для поточного ІЗ — питаємо один раз.
+  String? _lockerRefusal;
+
+  /// false — фармацевт скасував вікно причини: нічого не зберігаємо.
+  Future<bool> _ensureLockerRefusal() async {
+    if (!widget.lockerReasonRequired || _lockerRefusal != null) return true;
+    final r = await showLockerRefusalDialog(context);
+    if (r == null || !mounted) return false;
+    _lockerRefusal = r;
+    FiscalLog.log('ЛІКОМАТ: ІЗ «${widget.reserveLabel}» видається не через '
+        'лікомат — причина «$r»');
+    return true;
+  }
+
   /// Хто клієнт резерву (прізвище + телефон) — reserve_client_dialog.dart.
   /// Телефон підставляється з ідентифікованого клієнта Лайк.
   Future<String?> _askReserveClient(int count, double total) =>
@@ -781,12 +808,14 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     final label =
         widget.reserveLabel ?? await _askReserveClient(count, total);
     if (label == null || !mounted) return;
+    if (!await _ensureLockerRefusal()) return;
 
     setState(() => _isSavingReserve = true);
     final saved = await SessionService.saveNakladna(
       kodKli: ApiConfig.ekkKodKli,
       typeNakl: '2',
       reserveLabel: label,
+      lockerRefusal: widget.lockerReasonRequired ? _lockerRefusal : null,
     );
     if (!mounted) return;
     setState(() => _isSavingReserve = false);
@@ -816,6 +845,61 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     widget.onClear();
   }
 
+  /// ІЗ → лікомат: той самий резерв (SavesgVNakl), що й «Резерв F6», але з
+  /// комірою лікомата (`Cell`, Катя 14.10). Комірку обирає фармацевт.
+  Future<void> _placeInLocker() async {
+    final label = widget.reserveLabel;
+    if (widget.cart.isEmpty || label == null || _isSavingReserve ||
+        _isProcessingPayment) {
+      return;
+    }
+    final cell = await showLikomatDialog(context);
+    if (cell == null || !mounted) return;
+    setState(() => _isSavingReserve = true);
+    final saved = await SessionService.saveNakladna(
+      kodKli: ApiConfig.ekkKodKli,
+      typeNakl: '2',
+      reserveLabel: label,
+      lockerCell: '$cell',
+    );
+    if (!mounted) return;
+    setState(() => _isSavingReserve = false);
+    if (saved == null || saved.isEmpty) {
+      FiscalLog.log('ЛІКОМАТ: SaveSgVNakl(Cell=$cell) не повернув NumNakl — '
+          'НЕ збережено, кошик лишається');
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Замовлення не збережено в лікомат — кошик лишається. '
+            'Спробуйте ще раз.'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Color(0xFFDC2626),
+        duration: Duration(seconds: 5),
+      ));
+      return;
+    }
+    FiscalLog.log('ЛІКОМАТ: «$label» → комірка $cell, nakl=$saved, '
+        '${widget.cart.length} поз.');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Замовлення в лікоматі: комірка $cell (накладна №$saved)'),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: const Color(0xFF15803D),
+      duration: const Duration(seconds: 4),
+    ));
+    widget.onReserveSaved?.call(saved);
+    widget.onClear();
+  }
+  /// «Привезти чек» — робот везе весь кошик сеансу (MoveBasket, Катя 13.10).
+  Future<void> _moveBasket() async {
+    final r = await RobotService.moveBasket();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(r.ok
+          ? 'Робот: привожу чек (${widget.cart.length} поз.)'
+          : 'Робот не прийняв команду'
+              '${r.message.isNotEmpty ? ": ${r.message}" : ""}'),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 3),
+    ));
+  }
   /// Public method — F5 processes payment when already in checkout
   void processPayment() => unawaited(_processPayment());
 
@@ -824,6 +908,8 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   @override
   void didUpdateWidget(covariant oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // Інше замовлення в кошику — причину «не в лікомат» питаємо заново.
+    if (oldWidget.reserveLabel != widget.reserveLabel) _lockerRefusal = null;
     // Auto-fetch available discount when loyalty card is first linked
     if (oldWidget.loyalty == null && widget.loyalty != null && availableDiscount == null) {
       _fetchAvailableDiscount();
@@ -994,6 +1080,8 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     // телефон у руках клієнта (той самий дзвінок/SMS, що й при реєстрації).
     if (!await _ensureBonusVerified()) return;
     if (!mounted) return;
+    // ІЗ, що мало йти в лікомат, — причина ДО будь-яких грошей.
+    if (!await _ensureLockerRefusal()) return;
 
     // Без відкритої зміни чек не проводимо — див. `_ensureShiftOpen`. На час
     // перевірки кнопка зайнята: запит до ПРРО триває, і подвійний клік
@@ -1207,6 +1295,7 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
         sumClient: sumClient,
         sumChange: sumChange,
         sumChangeSpl: sumChangeSpl,
+        lockerRefusal: widget.lockerReasonRequired ? _lockerRefusal : null,
       );
       if (!mounted) return false;
       // A3: накладна не збереглась → продаж БЛОКУЄМО. Раніше тут був фолбек
@@ -3226,12 +3315,22 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
                       // невідомою.
                       looksDisabled: !_canMakeReserve,
                       onTap: _canMakeReserve ? _makeReserve : _denyReserve)),
-              const SizedBox(width: 7),
-              Expanded(
-                  child: _SmallButton(
-                      icon: Icons.smart_toy_outlined,
-                      label: 'Привезти чек',
-                      onTap: () {})),
+              if (widget.lockerAllowed) ...[
+                const SizedBox(width: 7),
+                Expanded(
+                    child: _SmallButton(
+                        icon: Icons.lock_outline_rounded,
+                        label: 'В лікомат',
+                        onTap: _placeInLocker)),
+              ],
+              if (ApiConfig.hasRobot) ...[
+                const SizedBox(width: 7),
+                Expanded(
+                    child: _SmallButton(
+                        icon: Icons.smart_toy_outlined,
+                        label: 'Привезти чек',
+                        onTap: _moveBasket)),
+              ],
             ],
           ),
 

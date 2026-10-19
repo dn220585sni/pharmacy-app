@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../services/api_config.dart';
+import '../services/likomat_service.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // LIKOMAT DIALOG — cell selection for medicine vending machine (лікомат).
@@ -23,12 +25,15 @@ class LikomatCell {
   final LikomatCellSize size;
   final LikomatCellStatus status;
   final String? orderNumber; // set when occupied
+  /// Положення на схемі DrawLikomat (координати сервісу); null — мок-сітка.
+  final Rect? rect;
 
   const LikomatCell({
     required this.number,
     required this.size,
     this.status = LikomatCellStatus.available,
     this.orderNumber,
+    this.rect,
   });
 }
 
@@ -152,7 +157,40 @@ class _LikomatDialogContentState extends State<_LikomatDialogContent> {
   int? _selectedCell;
   String? _errorMessage;
 
-  List<LikomatCell> get _cells => _allCells;
+  /// Живий сервер — схема й стан із DrawLikomat (Катя 14.10); мок — сітка.
+  List<LikomatCell> _cells = ApiConfig.useMock ? _allCells : const [];
+  bool _loading = !ApiConfig.useMock;
+  bool _schemeFailed = false;
+  double _maxX = 0, _maxY = 0;
+
+  Future<void> _loadScheme() async {
+    final s = await LikomatService.draw();
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      if (s == null) {
+        _schemeFailed = true;
+        return;
+      }
+      _maxX = s.maxX;
+      _maxY = s.maxY;
+      _cells = [
+        for (final c in s.cells)
+          LikomatCell(
+            number: c.number,
+            size: LikomatCellSize.m,
+            status: c.isOccupied
+                ? LikomatCellStatus.occupied
+                : c.isAvailable
+                    ? LikomatCellStatus.available
+                    : LikomatCellStatus.disabled,
+            orderNumber: c.isOccupied ? c.orderId : null,
+            rect: c.rect,
+          ),
+      ];
+    });
+    _onInputChanged();
+  }
 
   int get _availableCount =>
       _cells.where((c) => c.status == LikomatCellStatus.available).length;
@@ -164,6 +202,7 @@ class _LikomatDialogContentState extends State<_LikomatDialogContent> {
   void initState() {
     super.initState();
     _cellInputController.addListener(_onInputChanged);
+    if (!ApiConfig.useMock) _loadScheme();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _cellInputFocus.requestFocus();
     });
@@ -191,6 +230,14 @@ class _LikomatDialogContentState extends State<_LikomatDialogContent> {
       setState(() {
         _selectedCell = null;
         _errorMessage = 'Введіть число';
+      });
+      return;
+    }
+    // Схеми немає (DrawLikomat недоступний) — приймаємо номер як є.
+    if (_schemeFailed) {
+      setState(() {
+        _selectedCell = num > 0 ? num : null;
+        _errorMessage = num > 0 ? null : 'Введіть номер комірки';
       });
       return;
     }
@@ -271,6 +318,20 @@ class _LikomatDialogContentState extends State<_LikomatDialogContent> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildHeader(),
+              // Стан комірок — демонстраційний: сервісу стану лікомата в Caché
+              // немає (лист Каті 14.10). Номер комірки при цьому реальний —
+              // іде в SavesgVNakl (Cell).
+              if (_schemeFailed)
+                Container(
+                  width: double.infinity,
+                  color: const Color(0xFFFEF3C7),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: const Text(
+                    'Схему лікомата не отримано — переконайтеся, що комірка '
+                    'вільна, і введіть її номер вручну.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF92400E)),
+                  ),
+                ),
               const Divider(height: 1, color: Color(0xFFE5E7EB)),
               _buildInputSection(),
               const Divider(height: 1, color: Color(0xFFE5E7EB)),
@@ -483,6 +544,7 @@ class _LikomatDialogContentState extends State<_LikomatDialogContent> {
   // ── Grid ─────────────────────────────────────────────────────────────────────
 
   Widget _buildGrid() {
+    if (!ApiConfig.useMock) return _buildLiveGrid();
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
       child: Container(
@@ -526,6 +588,47 @@ class _LikomatDialogContentState extends State<_LikomatDialogContent> {
     );
   }
 
+  /// Схема з DrawLikomat: комірки на своїх місцях (x, y, x2, y2), у масштабі
+  /// вікна. Висота обмежена, щоб вікно лізло на екран 1080p.
+  Widget _buildLiveGrid() {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.all(32),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    if (_schemeFailed || _cells.isEmpty || _maxX <= 0 || _maxY <= 0) {
+      return const SizedBox(height: 8);
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+      child: LayoutBuilder(builder: (context, c) {
+        const maxH = 430.0;
+        var scale = c.maxWidth / _maxX;
+        if (_maxY * scale > maxH) scale = maxH / _maxY;
+        return Center(
+          child: SizedBox(
+            width: _maxX * scale,
+            height: _maxY * scale,
+            child: Stack(
+              children: [
+                for (final cell in _cells)
+                  if (cell.rect != null)
+                    Positioned(
+                      left: cell.rect!.left * scale + 1.5,
+                      top: cell.rect!.top * scale + 1.5,
+                      width: cell.rect!.width * scale - 3,
+                      height: cell.rect!.height * scale - 3,
+                      child: _buildCellTile(
+                          cell, cell.rect!.height * scale - 3),
+                    ),
+              ],
+            ),
+          ),
+        );
+      }),
+    );
+  }
   Widget _buildSizeLabel(String code, String label) {
     return Row(
       children: [

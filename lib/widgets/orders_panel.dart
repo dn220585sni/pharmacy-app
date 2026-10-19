@@ -1153,7 +1153,24 @@ class OrdersPanelState extends State<OrdersPanel>
   /// Place order into locker → show cell picker → change status to collected.
   void _placeInLocker() {
     final order = _selectedOrder;
-    if (order == null || !_allScanned) return;
+    // Зібране (є накладна) кладемо одразу; нове — після скану всіх позицій.
+    if (order == null ||
+        (order.status != OrderStatus.collected && !_allScanned)) {
+      return;
+    }
+
+    // Живий сервер: у лікомат кладемо з кошика каси — той самий резерв
+    // (SavesgVNakl), що й «Резерв F6», лише з коміркою (`Cell`, Катя 14.10).
+    if (!ApiConfig.useMock && widget.onOpenInCart != null) {
+      widget.onOpenInCart!(order);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Замовлення відкрито в кошику: відскануйте позиції '
+            'й натисніть «В лікомат».'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 4),
+      ));
+      return;
+    }
 
     showLikomatDialog(context).then((selectedCell) async {
       if (selectedCell == null) return; // user cancelled
@@ -2340,9 +2357,50 @@ class OrdersPanelState extends State<OrdersPanel>
 
   // ── Collected order actions: single "Розрахувати F5" button ────────────────
 
+  /// Кнопку «В лікомат» показуємо, коли в аптеці є лікомат (GetGlobParam),
+  /// замовлення не заборонено класти (isLockerEligible), воно ще не в комірці
+  /// й не об'єднане (Микола 14.10: усі ІЗ без ознаки «не класти»).
+  bool _canPlaceInLocker(InternetOrder order) =>
+      ApiConfig.hasLikomat &&
+      order.isLockerEligible &&
+      !order.isLockerOrder &&
+      !order.isMerged;
+
+  Widget _buildLockerButton({required bool enabled}) {
+    return SizedBox(
+      height: 42,
+      child: ElevatedButton.icon(
+        onPressed: enabled ? _placeInLocker : null,
+        icon: const Icon(Icons.lock_outline_rounded, size: 16),
+        label: const Text('В лікомат',
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+        style: ElevatedButton.styleFrom(
+          foregroundColor: Colors.white,
+          backgroundColor: const Color(0xFF1E7DC8),
+          disabledForegroundColor: const Color(0xFFD1D5DB),
+          disabledBackgroundColor: const Color(0xFFF4F5F8),
+          elevation: 0,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+        ),
+      ),
+    );
+  }
+
   Widget _buildCollectedActions() {
+    final order = _selectedOrder;
+    final showLocker = order != null && _canPlaceInLocker(order);
     return Column(
       children: [
+        if (showLocker) ...[
+          // Зібране замовлення — одразу можна класти в лікомат.
+          SizedBox(
+            width: double.infinity,
+            child: _buildLockerButton(enabled: true),
+          ),
+          const SizedBox(height: 8),
+        ],
         SizedBox(
           width: double.infinity,
           height: 42,
@@ -2459,7 +2517,7 @@ class OrdersPanelState extends State<OrdersPanel>
   Widget _buildNotCollectedActions() {
     final allDone = _allScanned;
     final order = _selectedOrder;
-    final showLocker = order != null && order.isLockerEligible;
+    final showLocker = order != null && _canPlaceInLocker(order);
 
     return Column(
       children: [

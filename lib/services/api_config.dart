@@ -21,7 +21,12 @@ class ApiConfig {
   /// Чи має аптека робот для автоматичної подачі ліків.
   /// true  = кнопка «Робот» видима, per-item привезення активне
   /// false = функціонал робота прихований
-  static const bool hasRobot = true;
+  /// Після входу перекривається `GetGlobParam.exRobot` ([GlobParamService]).
+  static bool hasRobot = true;
+
+  /// Чи є в аптеці лікомат (`GetGlobParam.exLikomat`, Катя 13.10). До
+  /// завантаження — false: кнопка «В лікомат» не з'являється наосліп.
+  static bool hasLikomat = false;
 
   /// Поточна аптека.
   /// Дніпро, вул. Сергієнка Василя, 48 (АНЦ), GlobID=152

@@ -28,8 +28,8 @@ class RobotPanel extends StatefulWidget {
 }
 
 class RobotPanelState extends State<RobotPanel> {
-  bool _deliveryEnabled = true;
-  bool _trayOpen = false;
+  // Вимикач привезення й лоток прибрано 14.10 (Катя: таких аптек немає).
+  static const bool _deliveryEnabled = true;
 
   // ── Public API for POS screen Esc cascade ─────────────────────────────────
   bool get isDetailOpen => false;
@@ -190,24 +190,11 @@ class RobotPanelState extends State<RobotPanel> {
               ? 'Кошик порожній'
               : '${widget.cart.length} поз.',
           color: const Color(0xFF1E7DC8),
-          enabled: widget.cart.isNotEmpty && _deliveryEnabled,
+          enabled: widget.cart.isNotEmpty,
           onTap: () {
             widget.onRequestAll?.call();
             _runCommand(RobotService.moveBasket(),
                 'Робот: привожу весь чек (${widget.cart.length} поз.)');
-          },
-        ),
-        _buildCommandTile(
-          icon: _trayOpen
-              ? Icons.door_sliding_outlined
-              : Icons.door_front_door_outlined,
-          title: _trayOpen ? 'Закрити лоток' : 'Відкрити лоток',
-          subtitle: _trayOpen ? 'Лоток відкритий' : 'Лоток закритий',
-          color: const Color(0xFF8B5CF6),
-          onTap: () {
-            setState(() => _trayOpen = !_trayOpen);
-            _showStub(
-                'Робот: ${_trayOpen ? "лоток відкрито" : "лоток закрито"}');
           },
         ),
         _buildCommandTile(
@@ -226,12 +213,6 @@ class RobotPanelState extends State<RobotPanel> {
           onTap: () => _runCommand(RobotService.restartFront(),
               'Робот: передню стінку перезапущено'),
         ),
-        const Divider(
-            height: 1,
-            indent: 16,
-            endIndent: 16,
-            color: Color(0xFFE5E7EB)),
-        _buildToggleTile(),
       ],
     );
   }
@@ -299,70 +280,6 @@ class RobotPanelState extends State<RobotPanel> {
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildToggleTile() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: _deliveryEnabled
-                  ? const Color(0xFFDCFCE7)
-                  : const Color(0xFFFEE2E2),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              _deliveryEnabled
-                  ? Icons.toggle_on_rounded
-                  : Icons.toggle_off_rounded,
-              size: 22,
-              color: _deliveryEnabled
-                  ? const Color(0xFF22C55E)
-                  : const Color(0xFFEF4444),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Привезення з робота',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1C1C2E),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _deliveryEnabled ? 'Увімкнено' : 'Вимкнено',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: _deliveryEnabled
-                        ? const Color(0xFF22C55E)
-                        : const Color(0xFFEF4444),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Switch.adaptive(
-            value: _deliveryEnabled,
-            onChanged: (val) {
-              setState(() => _deliveryEnabled = val);
-              _showStub(
-                  'Робот: привезення ${val ? "увімкнено" : "вимкнено"}');
-            },
-            activeColor: const Color(0xFF22C55E),
-          ),
-        ],
       ),
     );
   }

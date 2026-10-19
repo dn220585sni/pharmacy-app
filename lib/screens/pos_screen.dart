@@ -397,6 +397,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// замовлень»). Після резерву — статус «зібрано», після чека — «оплачено».
   String? _openedOrderId;
 
+  /// Відкрите ІЗ можна покласти в лікомат: в аптеці є лікомат, замовленню
+  /// не заборонено (isLockerEligible) і воно ще не в комірці.
+  bool _openedOrderLockerOk = false;
+
+  /// Сервер (OpenIZ `ResPostmate`) сам сказав, чому це ІЗ не класти в
+  /// лікомат — тоді причину у фармацевта не питаємо.
+  String _openedOrderServerLockerReason = '';
+
   Future<void> _setOpenedOrderStatus(String orderId, String status) async {
     final r = await OrderService.updateOrderStatus(
       orderId: orderId,
@@ -479,6 +487,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         ));
       }
       _openedOrderId = o.id;
+      _openedOrderServerLockerReason =
+          data['ResPostmate']?.toString().trim() ?? '';
+      _openedOrderLockerOk = ApiConfig.hasLikomat &&
+          o.isLockerEligible &&
+          !o.isLockerOrder &&
+          !o.isMerged;
       // Зібране (через OpenRezerv) — це існуючий резерв: очищення кошика
       // його знищить, попереджаємо так само.
       _openedReserve = viaRezerv ? naklList.single.trim() : null;
@@ -4268,6 +4282,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _openedReserve = null;
       _openedReserveLabel = null;
       _openedOrderId = null;
+      _openedOrderLockerOk = false;
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -4724,6 +4739,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _openedReserve = null;
       _openedReserveLabel = null;
       _openedOrderId = null;
+      _openedOrderLockerOk = false;
       _scannedDrugIds.clear();
       _selectedDrug = null;   // show ShiftDashboard after payment
       _searchResults = [];
@@ -4748,6 +4764,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _openedReserve = null;
       _openedReserveLabel = null;
       _openedOrderId = null;
+      _openedOrderLockerOk = false;
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -5010,6 +5027,13 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         onBonusChanged: _onBonusChanged,
         onVerifyBonusSpend: _verifyBonusSpend,
         reserveLabel: _openedReserveLabel,
+        lockerAllowed: _openedOrderLockerOk,
+        // Причина «не в лікомат» — лише для НОВОГО ІЗ (OpenIZ, без резерву),
+        // Катя 14.10: «при взятті в роботу нової накл».
+        lockerReasonRequired: _openedOrderLockerOk &&
+            _openedOrderId != null &&
+            _openedReserve == null &&
+            _openedOrderServerLockerReason.isEmpty,
         onVirtualScan: _virtualScan,
         onReserveSaved: (numNakl) {
           final orderId = _openedOrderId;
@@ -5627,9 +5651,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             value: 'robotCorrection',
             child: Text('Коригування кількості в роботі   Ctrl+R'),
           ),
-          PopupMenuItem(
-              value: 'robotClearQueue',
-              child: Text('Погасити індикатор черги')),
         ],
       ],
     );
@@ -5649,12 +5670,6 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         if (!mounted) return;
         _showScanMessage(r.ok
             ? 'Робот: везе ${drug.displayName} × ${qty > 0 ? qty : 1}'
-            : 'Робот не прийняв команду${r.message.isNotEmpty ? ": ${r.message}" : ""}');
-      case 'robotClearQueue':
-        final r = await RobotService.clearQueue();
-        if (!mounted) return;
-        _showScanMessage(r.ok
-            ? 'Робот: індикатор черги погашено'
             : 'Робот не прийняв команду${r.message.isNotEmpty ? ": ${r.message}" : ""}');
     }
   }

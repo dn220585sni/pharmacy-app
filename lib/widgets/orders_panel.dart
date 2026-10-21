@@ -1106,6 +1106,13 @@ class OrdersPanelState extends State<OrdersPanel>
   /// Public — accept EDK package from PosScreen (Enter)
   void acceptEdkPackage() => _acceptEdkPackage();
 
+  /// Живий сервер: позиції збирають і сканують у КОШИКУ каси (OpenIZ /
+  /// OpenRezerv), а не в цій панелі — «Розрахувати» доступна одразу
+  /// (Катя з Юлією 21.10 не могли взяти замовлення в роботу). Передоплачені
+  /// лишаються тут: звичайна оплата в кошику взяла б гроші вдруге.
+  bool _scansInCart(InternetOrder o) =>
+      !ApiConfig.useMock && widget.onOpenInCart != null && !_isPrepaid(o);
+
   /// Whether all real items (total >= 0) in the current order have been scanned.
   bool get _allScanned {
     final order = _selectedOrder;
@@ -1155,7 +1162,9 @@ class OrdersPanelState extends State<OrdersPanel>
     final order = _selectedOrder;
     // Зібране (є накладна) кладемо одразу; нове — після скану всіх позицій.
     if (order == null ||
-        (order.status != OrderStatus.collected && !_allScanned)) {
+        (order.status != OrderStatus.collected &&
+            !_allScanned &&
+            !_scansInCart(order))) {
       return;
     }
 
@@ -2515,8 +2524,9 @@ class OrdersPanelState extends State<OrdersPanel>
   // ── Not-collected order actions: Розрахувати + Лікомат + Відмовити + Відсутність
 
   Widget _buildNotCollectedActions() {
-    final allDone = _allScanned;
     final order = _selectedOrder;
+    final allDone =
+        _allScanned || (order != null && _scansInCart(order));
     final showLocker = order != null && _canPlaceInLocker(order);
 
     return Column(
@@ -2846,7 +2856,8 @@ class OrdersPanelState extends State<OrdersPanel>
           if (order.status != OrderStatus.collected &&
               order.status != OrderStatus.paidOnline &&
               order.status != OrderStatus.dispensed &&
-              !_allScanned) ...[
+              !_allScanned &&
+              !_scansInCart(order)) ...[
             const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.all(10),
@@ -3774,7 +3785,7 @@ class _OrderStatusBadge extends StatelessWidget {
 
     final label = switch (status) {
       OrderStatus.newOrder => 'Нове',
-      OrderStatus.inProgress => 'В обробці',
+      OrderStatus.inProgress => 'Переглянуте',
       OrderStatus.collected => 'Зібране',
       OrderStatus.atWork => 'В роботі',
       OrderStatus.paidOnline => 'Відпущено',

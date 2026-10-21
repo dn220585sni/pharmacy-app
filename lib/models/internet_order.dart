@@ -333,6 +333,10 @@ class InternetOrder {
       case 'нове':
       case 'новий':
         return OrderStatus.newOrder;
+      // « Переглянуте» — після OpenIZ (взято в роботу). Раніше не знали й
+      // показували «Нове» (Катя 21.10; у журналі з 08.10).
+      case 'переглянуте':
+      case 'переглянуто':
       case 'в обробці':
       case 'обробляється':
       case 'прочитане':
@@ -469,7 +473,7 @@ class InternetOrder {
   String get statusLabel {
     switch (status) {
       case OrderStatus.newOrder:        return 'Нове';
-      case OrderStatus.inProgress:      return 'В обробці';
+      case OrderStatus.inProgress:      return 'Переглянуте';
       case OrderStatus.collected:       return 'Зібране';
       case OrderStatus.atWork:          return 'В роботі';
       case OrderStatus.paidOnline:      return 'Відпущено';

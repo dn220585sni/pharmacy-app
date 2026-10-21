@@ -432,39 +432,86 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
     final naklList =
         o.nakladnaNumbers.where((n) => n.trim().isNotEmpty).toList();
-    if (o.isOpenDisabled || naklList.length > 1) {
-      _showQtySnack('Обʼєднане замовлення №${o.id} поки проводиться в '
+    // Схема Каті (07.10): NumNaklList = "" → OpenIZ; інакше
+    // isOpenDisabled = 1 → «аналог Alt0»; інакше → OpenRezerv.
+    // isOpenDisabled важить ЛИШЕ коли накладна вже є (Микола 21.10: раніше
+    // перевіряли першим і блокували нові замовлення з цією ознакою).
+    final viaRezerv = naklList.isNotEmpty;
+    if (viaRezerv && (o.isOpenDisabled || naklList.length > 1)) {
+      // TODO: «аналог Alt0» — що саме робить у роздрібі, уточнити в Каті.
+      FiscalLog.log('ІЗ ${o.id}: isOpenDisabled=${o.isOpenDisabled ? 1 : 0}, '
+          'накладні ${naklList.join(";")} — гілка «Alt0» ще не реалізована');
+      _showQtySnack('Замовлення №${o.id} (обʼєднане) поки проводиться в '
           'роздрібному модулі');
       return;
     }
-    final goods = o.items
+    // Блістери — ДО взяття в роботу: кошик нової каси дробових поки не
+    // відкриває, і брати замовлення в роботу даремно не треба. Позиції тут
+    // ще можуть бути без кодів, тож відбираємо за сумою, а не за s-кодом.
+    if (o.items.any((i) =>
+        i.total > 0 &&
+        !i.strikeOut &&
+        (i.fraction != null || i.quantity != i.quantity.roundToDouble()))) {
+      _showQtySnack('Замовлення з блістерами поки не відкривається в новій '
+          'касі — проведіть його в роздрібному модулі');
+      FiscalLog.log('ІЗ ${o.id}: дробова кількість — не відкриваємо');
+      return;
+    }
+    List<OrderItem> pick(InternetOrder x) => x.items
         .where((i) =>
             !i.isServiceLine &&
             !i.strikeOut &&
             i.sku.isNotEmpty &&
             i.quantity > 0)
         .toList();
-    if (goods.isEmpty) {
-      _showQtySnack('У замовленні №${o.id} немає позицій для відпуску');
-      return;
-    }
-    if (goods.any((i) =>
-        i.fraction != null || i.quantity != i.quantity.roundToDouble())) {
-      _showQtySnack('Замовлення з блістерами поки не відкривається в новій '
-          'касі — проведіть його в роздрібному модулі');
-      FiscalLog.log('ІЗ ${o.id}: дробова кількість — не відкриваємо');
-      return;
-    }
+    var goods = pick(o);
 
-    final viaRezerv = naklList.isNotEmpty;
-    final data = viaRezerv
-        ? await SessionService.openRezerv(naklList.single.trim())
-        : await SessionService.openIZ(o.id);
-    if (!mounted) return;
-    if (data == null) {
-      _showQtySnack('Не вдалося відкрити замовлення №${o.id} — спробуйте '
-          'ще раз або проведіть його в роздрібному модулі');
-      return;
+    final Map<String, dynamic> data;
+    if (!viaRezerv) {
+      // Нове ІЗ → OpenIZ (взяти в роботу) — завжди, без попередніх умов.
+      final iz = await SessionService.openIZ(o.id);
+      if (!mounted) return;
+      if (iz == null) {
+        _showQtySnack('Не вдалося взяти замовлення №${o.id} в роботу — '
+            'спробуйте ще раз або проведіть його в роздрібному модулі');
+        return;
+      }
+      data = iz;
+      // У нового ІЗ GetOrders може віддати позиції без s-кодів (Юлія 21.10,
+      // №194627582) — перечитуємо замовлення після OpenIZ.
+      if (goods.isEmpty) {
+        String fmt(DateTime x) => '${x.day.toString().padLeft(2, '0')}.'
+            '${x.month.toString().padLeft(2, '0')}.${x.year}';
+        final fresh = await OrderService.fetchOrders(
+          editNumber: o.id,
+          dateFrom: fmt(o.dateTime),
+          dateTo: fmt(DateTime.now()),
+        );
+        if (!mounted) return;
+        final again = fresh.where((x) => x.id == o.id).firstOrNull;
+        if (again != null) goods = pick(again);
+        FiscalLog.log('ІЗ ${o.id}: позиції без s-кодів → після OpenIZ '
+            'GetOrders: ${again == null ? "замовлення не знайдено" : "${goods.length} поз. з s-кодом з ${again.items.length}"}');
+      }
+      if (goods.isEmpty) {
+        _showQtySnack('Замовлення №${o.id} взято в роботу, але сервер не дав '
+            'кодів позицій — повідомте розробника '
+            '(час: ${TimeOfDay.now().format(context)})');
+        return;
+      }
+    } else {
+      if (goods.isEmpty) {
+        _showQtySnack('У замовленні №${o.id} немає позицій для відпуску');
+        return;
+      }
+      final rz = await SessionService.openRezerv(naklList.single.trim());
+      if (!mounted) return;
+      if (rz == null) {
+        _showQtySnack('Не вдалося відкрити замовлення №${o.id} — спробуйте '
+            'ще раз або проведіть його в роздрібному модулі');
+        return;
+      }
+      data = rz;
     }
 
     setState(() {

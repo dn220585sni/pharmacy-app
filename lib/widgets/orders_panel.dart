@@ -1125,7 +1125,9 @@ class OrdersPanelState extends State<OrdersPanel>
   bool get _allScanned {
     final order = _selectedOrder;
     if (order == null) return false;
-    final realItems = order.items.where((i) => i.total >= 0);
+    // StrikeOut — позиція не потрапила в чек/резерв: сканувати нічого.
+    final realItems =
+        order.items.where((i) => i.total >= 0 && !i.strikeOut);
     return realItems.every((i) => _scannedSkus.contains(_scanKey(i)));
   }
 
@@ -2104,6 +2106,9 @@ class OrdersPanelState extends State<OrdersPanel>
                 ),
               if (order.isMerged) _buildMergedSummary(order),
               for (final item in order.items)
+                if (item.strikeOut)
+                  _StrikeOutItemRow(item: item)
+                else
                 _OrderItemRow(
                   item: item,
                   isScanned: _scannedSkus.contains(_scanKey(item)),
@@ -3834,6 +3839,55 @@ class _OrderStatusBadge extends StatelessWidget {
 }
 
 // ── Order item row (mirrors CartItemWidget layout) ──────────────────────────
+
+/// Позиція ІЗ, що не потрапила в чек / резерв (`StrikeOut` у GetOrders) —
+/// викреслена, як у роздрібному модулі (Катя 22.10, Смекта 0,167).
+class _StrikeOutItemRow extends StatelessWidget {
+  final OrderItem item;
+  const _StrikeOutItemRow({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final qty = item.quantity % 1 == 0
+        ? item.quantity.toInt().toString()
+        : item.quantity.toString().replaceAll('.', ',');
+    const grey = Color(0xFF6B7280);
+    const strike = TextStyle(
+      color: grey,
+      fontSize: 12.5,
+      decoration: TextDecoration.lineThrough,
+    );
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.name,
+                    style: strike,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text('Не потрапила в чек · ${item.price.asMoney} × $qty',
+                    style: const TextStyle(color: grey, fontSize: 11)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(item.total.asMoney, style: strike),
+        ],
+      ),
+    );
+  }
+}
 
 class _OrderItemRow extends StatelessWidget {
   final OrderItem item;

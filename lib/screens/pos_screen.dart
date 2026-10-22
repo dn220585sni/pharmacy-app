@@ -452,7 +452,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   }  /// Комірка лікомата з відповіді OpenIZ / OpenRezerv. Назва поля в Каті не
   /// зафіксована (22.10: «я поверну комірку»), тож приймаємо варіанти.
   static int? _lockerCellFrom(Map<String, dynamic> data) {
-    for (final k in const ['cellPostmate', 'Cell', 'CellLikomat', 'Likomat']) {
+    for (final k in const [
+      'CellPosmate', // Катя 22.10: так тепер у OpenRezerv
+      'cellPostmate', 'Cell', 'CellLikomat', 'Likomat',
+    ]) {
       final n = int.tryParse(data[k]?.toString().trim() ?? '');
       if (n != null && n > 0) return n;
     }
@@ -510,6 +513,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     var goods = pick(o);
 
     final Map<String, dynamic> data;
+    var missing = <String>[];
     if (!viaRezerv) {
       // Нове ІЗ → OpenIZ (взяти в роботу) — завжди, без попередніх умов.
       final iz = await SessionService.openIZ(o.id);
@@ -559,6 +563,18 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         FiscalLog.log('ІЗ ${o.id}: позиції без SKod → з сеансу після OpenIZ: '
             '${goods.map((i) => '${i.sku}×${i.quantity}${i.fraction != null ? "(${i.fraction})" : ""}').join(', ')}'
             ' (у замовленні ${src.length})');
+        // Позиції замовлення, яких сервер НЕ поклав у сеанс (22.10: Смекта
+        // 0,167 у №194627582 — резерв збережено без неї мовчки).
+        final got = goods.map((i) => norm(i.name)).toSet();
+        missing = src
+            .where((i) => !got.contains(norm(i.name)))
+            .map((i) => i.name)
+            .toList();
+        if (goods.length >= src.length) missing = [];
+        if (missing.isNotEmpty) {
+          FiscalLog.log('ІЗ ${o.id}: після OpenIZ у сеансі немає позицій: '
+              '${missing.join('; ')}');
+        }
       }
       if (goods.isEmpty) {
         _showQtySnack('Замовлення №${o.id} взято в роботу, але сервер не дав '
@@ -657,6 +673,24 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _ordersOpen = false;
       _cartOpen = true;
     });
+    if (missing.isNotEmpty && mounted) {
+      unawaited(showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Не всі позиції потрапили в кошик'),
+          content: Text('Сервер не додав у кошик позиції замовлення '
+              '№${o.id}:\n\n${missing.map((n) => '• $n').join('\n')}\n\n'
+              'Резерв чи чек без них буде неповним. Додайте їх вручну '
+              'або проведіть замовлення в роздрібному модулі.'),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Зрозуміло'),
+            ),
+          ],
+        ),
+      ));
+    }
     FiscalLog.log('ІЗ ${o.id} → кошик через '
         '${viaRezerv ? "OpenRezerv ${naklList.single}" : "OpenIZ"}: '
         '${goods.length} поз. (${goods.map((i) => '${i.sku}×${i.quantity.round()}').join(', ')})');

@@ -68,6 +68,7 @@ import '../widgets/client_registration_dialog.dart';
 import '../widgets/robot_panel.dart';
 import '../widgets/robot_correction_dialog.dart';
 import '../services/robot_service.dart';
+import '../services/likomat_service.dart';
 import '../services/api_config.dart';
 import '../data/mock_messages.dart';
 import '../models/prescription.dart';
@@ -399,6 +400,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
   /// Відкрите ІЗ можна покласти в лікомат: в аптеці є лікомат, замовленню
   /// не заборонено (isLockerEligible) і воно ще не в комірці.
+
+  /// Комірка лікомата, де вже лежить відкрите ІЗ (OpenRezerv її повертає,
+  /// або GetOrders `Likomat`). Після оплати — OpenCellLikomat з NumNakl.
+  int? _openedOrderCell;
+
+  /// `BonusesAllowed` відкритого ІЗ (OpenIZ / OpenRezerv): false — без
+  /// списання бонусів Лайк (Катя 22.10).
+  bool _openedOrderBonusesAllowed = true;
   bool _openedOrderLockerOk = false;
 
   /// Сервер (OpenIZ `ResPostmate`) сам сказав, чому це ІЗ не класти в
@@ -419,6 +428,36 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     }
   }
 
+  /// Дріб позиції ІЗ як (k, n) — k саше/блістерів з упаковки по n;
+  /// null — ціла упаковка; (0, 0) — дріб є, але не розібрано.
+  /// `Drob` у GetOrders — «1» для цілої, інакше «a/b» (старий роздріб).
+  /// Дріб з Drob — джерело правди: «0 1/3» → 1 з 3, «5/30» → 5 з 30.
+  static (int, int)? _orderFraction(OrderItem i) {
+    final d = (i.fraction ?? '').trim();
+    final wholeQty = (i.quantity - i.quantity.round()).abs() < 1e-6;
+    // «1» / «2» / порожньо — цілі упаковки.
+    if (d.isEmpty || RegExp(r'^\d+$').hasMatch(d)) {
+      return wholeQty ? null : (0, 0);
+    }
+    // «5/30» або мішане «0 1/3», «1 2/10» (Катя 22.10, скрини роздрібу).
+    final m = RegExp(r'^(?:(\d+)\s+)?(\d+)\s*/\s*(\d+)$').firstMatch(d);
+    if (m == null) return (0, 0);
+    final w = int.tryParse(m.group(1) ?? '0') ?? 0;
+    final a = int.parse(m.group(2)!), n = int.parse(m.group(3)!);
+    if (n <= 1) return (0, 0);
+    final k = w * n + a;
+    if (k <= 0) return (0, 0);
+    if (a == 0 || a == n) return wholeQty ? null : (k, n);
+    return (k, n);
+  }  /// Комірка лікомата з відповіді OpenIZ / OpenRezerv. Назва поля в Каті не
+  /// зафіксована (22.10: «я поверну комірку»), тож приймаємо варіанти.
+  static int? _lockerCellFrom(Map<String, dynamic> data) {
+    for (final k in const ['cellPostmate', 'Cell', 'CellLikomat', 'Likomat']) {
+      final n = int.tryParse(data[k]?.toString().trim() ?? '');
+      if (n != null && n > 0) return n;
+    }
+    return null;
+  }
   /// «Інтернет-замовлення» → «Розрахувати»: схема Каті 07.10 —
   /// NumNaklList порожній → OpenIZ (взяти в роботу); є накладна і
   /// isOpenDisabled ≠ 1 → OpenRezerv (зібране); isOpenDisabled = 1 (обʼєднане)
@@ -438,23 +477,27 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     // перевіряли першим і блокували нові замовлення з цією ознакою).
     final viaRezerv = naklList.isNotEmpty;
     if (viaRezerv && (o.isOpenDisabled || naklList.length > 1)) {
-      // TODO: «аналог Alt0» — що саме робить у роздрібі, уточнити в Каті.
+      // Катя 22.10: IsOpenDisabled = «заборона відкриття замовлення в
+      // інтерфейсі». Як влаштоване обʼєднання ІЗ — розпише розробник роздрібу.
       FiscalLog.log('ІЗ ${o.id}: isOpenDisabled=${o.isOpenDisabled ? 1 : 0}, '
           'накладні ${naklList.join(";")} — гілка «Alt0» ще не реалізована');
       _showQtySnack('Замовлення №${o.id} (обʼєднане) поки проводиться в '
           'роздрібному модулі');
       return;
     }
-    // Блістери — ДО взяття в роботу: кошик нової каси дробових поки не
-    // відкриває, і брати замовлення в роботу даремно не треба. Позиції тут
-    // ще можуть бути без кодів, тож відбираємо за сумою, а не за s-кодом.
-    if (o.items.any((i) =>
+    // Блістери: дріб ІЗ (`Drob` «3/10») відкриваємо дробовою позицією
+    // кошика (Микола 22.10). Не відкриваємо лише той дріб, який не вдалось
+    // розібрати — ДО OpenIZ, щоб не брати замовлення в роботу даремно.
+    final badFraction = o.items.where((i) =>
         i.total > 0 &&
         !i.strikeOut &&
-        (i.fraction != null || i.quantity != i.quantity.roundToDouble()))) {
-      _showQtySnack('Замовлення з блістерами поки не відкривається в новій '
-          'касі — проведіть його в роздрібному модулі');
-      FiscalLog.log('ІЗ ${o.id}: дробова кількість — не відкриваємо');
+        _orderFraction(i) == (0, 0));
+    if (badFraction.isNotEmpty) {
+      final i = badFraction.first;
+      FiscalLog.log('ІЗ ${o.id}: дріб не розібрано — «${i.name}» '
+          'qty=${i.quantity} Drob="${i.fraction ?? ""}"');
+      _showQtySnack('Не вдалося розібрати дробову кількість «${i.name}» — '
+          'проведіть замовлення в роздрібному модулі');
       return;
     }
     List<OrderItem> pick(InternetOrder x) => x.items
@@ -477,21 +520,45 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         return;
       }
       data = iz;
-      // У нового ІЗ GetOrders може віддати позиції без s-кодів (Юлія 21.10,
-      // №194627582) — перечитуємо замовлення після OpenIZ.
-      if (goods.isEmpty) {
-        String fmt(DateTime x) => '${x.day.toString().padLeft(2, '0')}.'
-            '${x.month.toString().padLeft(2, '0')}.${x.year}';
-        final fresh = await OrderService.fetchOrders(
-          editNumber: o.id,
-          dateFrom: fmt(o.dateTime),
-          dateTo: fmt(DateTime.now()),
-        );
+      // У нового ІЗ GetOrders не дає SKod (лише `ids` = код СЦ, Катя 22.10):
+      // s-коди партій з'являються в серверному сеансі після OpenIZ. Тож
+      // позиції кошика беремо з сеансу (GetSumSkid), а дріб і термін — з
+      // відповідної позиції замовлення.
+      final needSession = o.items.any(
+          (i) => i.total > 0 && !i.strikeOut && i.quantity > 0 && !i.hasSkod);
+      if (needSession) {
+        final sess = await CartPriceService.fetchSessionGoods();
         if (!mounted) return;
-        final again = fresh.where((x) => x.id == o.id).firstOrNull;
-        if (again != null) goods = pick(again);
-        FiscalLog.log('ІЗ ${o.id}: позиції без s-кодів → після OpenIZ '
-            'GetOrders: ${again == null ? "замовлення не знайдено" : "${goods.length} поз. з s-кодом з ${again.items.length}"}');
+        final src = o.items
+            .where((i) => i.total > 0 && !i.strikeOut && i.quantity > 0)
+            .toList();
+        String norm(String s) =>
+            s.toUpperCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+        goods = [];
+        for (var n = 0; n < (sess ?? const []).length; n++) {
+          final g = sess![n];
+          final byName = src.where((i) =>
+              norm(i.name) == norm(g.name) ||
+              (g.nameUkr.isNotEmpty && norm(i.name) == norm(g.nameUkr)));
+          final m = byName.isNotEmpty
+              ? byName.first
+              : (src.length == sess.length ? src[n] : null);
+          goods.add(OrderItem(
+            sku: g.skod,
+            ukod: m?.ukod,
+            kodSc: m?.kodSc,
+            name: g.nameUkr.isNotEmpty ? g.nameUkr : g.name,
+            manufacturer: g.manufacture.isNotEmpty ? g.manufacture : m?.manufacturer,
+            quantity: g.qty,
+            fraction: m?.fraction,
+            price: g.price,
+            total: g.total,
+            expiryDate: m?.expiryDate,
+          ));
+        }
+        FiscalLog.log('ІЗ ${o.id}: позиції без SKod → з сеансу після OpenIZ: '
+            '${goods.map((i) => '${i.sku}×${i.quantity}${i.fraction != null ? "(${i.fraction})" : ""}').join(', ')}'
+            ' (у замовленні ${src.length})');
       }
       if (goods.isEmpty) {
         _showQtySnack('Замовлення №${o.id} взято в роботу, але сервер не дав '
@@ -499,7 +566,16 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             '(час: ${TimeOfDay.now().format(context)})');
         return;
       }
-    } else {
+      // Позиція з дробом, який не вдалось розібрати (сесійна кількість без
+      // Drob) — не вгадуємо.
+      final bad = goods.where((i) => _orderFraction(i) == (0, 0));
+      if (bad.isNotEmpty) {
+        FiscalLog.log('ІЗ ${o.id}: дріб не розібрано після OpenIZ — '
+            '«${bad.first.name}» qty=${bad.first.quantity} Drob="${bad.first.fraction ?? ""}"');
+        _showQtySnack('Не вдалося розібрати дробову кількість '
+            '«${bad.first.name}» — проведіть замовлення в роздрібному модулі');
+        return;
+      }    } else {
       if (goods.isEmpty) {
         _showQtySnack('У замовленні №${o.id} немає позицій для відпуску');
         return;
@@ -516,6 +592,33 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
 
     setState(() {
       for (final i in goods) {
+        final fr = _orderFraction(i);
+        if (fr != null) {
+          // Дробова позиція: k саше/блістерів з упаковки по n. Ціна в
+          // Drug — за упаковку (total за k/n упаковки → × n / k).
+          final (k, n) = fr;
+          FiscalLog.log('ІЗ ${o.id}: «${i.name}» дріб $k/$n '
+              '(qty=${i.quantity}, Drob="${i.fraction ?? ""}")');
+          _cart.add(CartItem(
+            drug: Drug(
+              id: 'srv_${i.sku}',
+              name: i.name,
+              manufacturer: i.manufacturer ?? '',
+              category: '',
+              price: i.price > 0 ? i.price : i.total * n / k,
+              stock: 0,
+              stockRaw: k / n,
+              unit: 'шт',
+              skuCode: i.sku,
+              ukod: i.ukod,
+              expiryDate: i.expiryDate,
+              unitsPerPackage: n,
+            ),
+            quantity: 0,
+            fractionalQty: k,
+          ));
+          continue;
+        }
         final qty = i.quantity.round();
         _cart.add(CartItem(
           drug: Drug(
@@ -534,10 +637,14 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         ));
       }
       _openedOrderId = o.id;
+      _openedOrderCell = _lockerCellFrom(data) ?? o.lockerCell;
+      _openedOrderBonusesAllowed =
+          data['BonusesAllowed']?.toString().trim().toLowerCase() != 'false';
       _openedOrderServerLockerReason =
           data['ResPostmate']?.toString().trim() ?? '';
       _openedOrderLockerOk = ApiConfig.hasLikomat &&
           o.isLockerEligible &&
+          _openedOrderCell == null &&
           !o.isLockerOrder &&
           !o.isMerged;
       // Зібране (через OpenRezerv) — це існуючий резерв: очищення кошика
@@ -4330,6 +4437,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _openedReserveLabel = null;
       _openedOrderId = null;
       _openedOrderLockerOk = false;
+      _openedOrderCell = null;
+      _openedOrderBonusesAllowed = true;
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -4771,6 +4880,19 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     if (paidOrder != null) {
       unawaited(_setOpenedOrderStatus(paidOrder, 'apteka pay'));
     }
+    // ІЗ лежить у лікоматі — після оплати відчиняємо його комірку
+    // (OpenCellLikomat з NumNakl, Катя 22.10). Накладна = відкритий резерв.
+    final paidCell = _openedOrderCell;
+    final paidNakl = _openedReserve;
+    if (paidOrder != null && paidCell != null) {
+      unawaited(LikomatService.openCell(paidCell, numNakl: paidNakl)
+          .then((res) {
+        if (!mounted) return;
+        _showQtySnack(res.$1
+            ? 'Комірка лікомата №$paidCell відчинена'
+            : 'Комірка №$paidCell не відчинилась${res.$2.isNotEmpty ? ": ${res.$2}" : ""}');
+      }));
+    }
 
     unawaited(_newClientSession());
 
@@ -4787,6 +4909,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _openedReserveLabel = null;
       _openedOrderId = null;
       _openedOrderLockerOk = false;
+      _openedOrderCell = null;
+      _openedOrderBonusesAllowed = true;
       _scannedDrugIds.clear();
       _selectedDrug = null;   // show ShiftDashboard after payment
       _searchResults = [];
@@ -4812,6 +4936,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _openedReserveLabel = null;
       _openedOrderId = null;
       _openedOrderLockerOk = false;
+      _openedOrderCell = null;
+      _openedOrderBonusesAllowed = true;
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -5075,6 +5201,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         onVerifyBonusSpend: _verifyBonusSpend,
         reserveLabel: _openedReserveLabel,
         lockerAllowed: _openedOrderLockerOk,
+        bonusesAllowed: _openedOrderBonusesAllowed,
         // Причина «не в лікомат» — лише для НОВОГО ІЗ (OpenIZ, без резерву),
         // Катя 14.10: «при взятті в роботу нової накл».
         lockerReasonRequired: _openedOrderLockerOk &&

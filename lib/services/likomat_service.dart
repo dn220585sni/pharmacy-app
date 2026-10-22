@@ -77,4 +77,25 @@ class LikomatService {
       return null;
     }
   }
+
+  /// Відчинити комірку (`OpenCellLikomat`, Катя 22.10):
+  /// - без [numNakl] — при зборі, щоб покласти замовлення;
+  /// - з [numNakl] — після успішної оплати замовлення, що лежить у комірці.
+  /// SMS сервер не шле. Повертає (успіх, текст сервера).
+  static Future<(bool, String)> openCell(int cell, {String? numNakl}) async {
+    try {
+      final r = await CacheApiClient().call('OpenCellLikomat', params: {
+        'cell': '$cell',
+        if (numNakl != null && numNakl.isNotEmpty) 'NumNakl': numNakl,
+      });
+      final msg = r.result.trim();
+      FiscalLog.log('ЛІКОМАТ OpenCellLikomat cell=$cell'
+          '${numNakl != null ? " NumNakl=$numNakl" : ""}: '
+          '${r.isOk ? "OK" : "FAIL"}${msg.isNotEmpty ? " — $msg" : ""}');
+      return (r.isOk, msg);
+    } catch (e) {
+      FiscalLog.log('ЛІКОМАТ OpenCellLikomat cell=$cell помилка: $e');
+      return (false, '$e');
+    }
+  }
 }

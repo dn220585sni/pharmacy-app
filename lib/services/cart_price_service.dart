@@ -318,6 +318,20 @@ class CartPriceService {
   /// з server-side state (через окремий "add to cart" API — поки невідомо
   /// як саме). Якщо server повертає `Goods` що не співпадає з локальним
   /// `cart` — fallback на локальну калькуляцію з логом.
+  /// Позиції серверного сеансу (після OpenIZ) — з них збираємо кошик нового
+  /// ІЗ: у GetOrders його позиції ще без s-кодів (Катя 22.10). null — помилка.
+  static Future<List<GetSumSkidItem>?> fetchSessionGoods(
+      {String typeNakl = '2'}) async {
+    final r = await CacheApiClient()
+        .call('GetSumSkid', params: {'TypeNakl': typeNakl});
+    if (!r.isOk) {
+      FiscalLog.log('GetSumSkid (позиції сеансу) FAIL: ${r.result}');
+      return null;
+    }
+    final p = GetSumSkidResponse.fromJson(r.data);
+    if (!p.ok) return null;
+    return p.goods.where((g) => g.skod.isNotEmpty && g.qty > 0).toList();
+  }
   static Future<CartPricing> _fetchFromServer({
     required List<CartItem> cart,
     String? socialProgramCode,

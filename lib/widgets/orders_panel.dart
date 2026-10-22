@@ -1074,10 +1074,18 @@ class OrdersPanelState extends State<OrdersPanel>
     return true;
   }
 
+  /// Ключ позначки «відскановано». У нового ІЗ s-кодів ще немає (сервер
+  /// дає їх після OpenIZ) — тоді в усіх позицій `sku` порожній, і скан однієї
+  /// позначав усі (Микола 22.10). Без s-коду — назва + ціна + кількість:
+  /// стабільно між перечитуваннями списку.
+  static String _scanKey(OrderItem i) => i.sku.isNotEmpty
+      ? i.sku
+      : 'без-коду|${i.name}|${i.price}|${i.quantity}';
+
   /// Simulate barcode scan (triggered by tapping item price).
   void _scanItem(OrderItem item) {
-    final wasScanned = _scannedSkus.contains(item.sku);
-    setState(() => _scannedSkus.add(item.sku));
+    final wasScanned = _scannedSkus.contains(_scanKey(item));
+    setState(() => _scannedSkus.add(_scanKey(item)));
     // Trigger EDK if this item has an offer and wasn't already scanned
     if (_edkAllowed && !wasScanned) {
       final edkKey = ApiConfig.useMock ? item.sku : (item.ukod ?? '');
@@ -1118,7 +1126,7 @@ class OrdersPanelState extends State<OrdersPanel>
     final order = _selectedOrder;
     if (order == null) return false;
     final realItems = order.items.where((i) => i.total >= 0);
-    return realItems.every((i) => _scannedSkus.contains(i.sku));
+    return realItems.every((i) => _scannedSkus.contains(_scanKey(i)));
   }
 
   /// Enter checkout mode for the current order.
@@ -2098,7 +2106,7 @@ class OrdersPanelState extends State<OrdersPanel>
               for (final item in order.items)
                 _OrderItemRow(
                   item: item,
-                  isScanned: _scannedSkus.contains(item.sku),
+                  isScanned: _scannedSkus.contains(_scanKey(item)),
                   canScan: order.status != OrderStatus.collected &&
                       order.status != OrderStatus.paidOnline &&
                       order.status != OrderStatus.dispensed,

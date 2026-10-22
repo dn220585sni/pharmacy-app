@@ -44,6 +44,7 @@ import 'prro_receipt_dialog.dart';
 import 'likomat_dialog.dart';
 import 'locker_refusal_dialog.dart';
 import '../services/robot_service.dart';
+import '../services/likomat_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CartPanel — inline cart shown in the right detail panel.
@@ -122,6 +123,10 @@ class CartPanel extends StatefulWidget {
   /// без комірки — спершу причина (`ResPostmate` у SavesgVNakl, Катя 14.10).
   final bool lockerReasonRequired;
 
+  /// `BonusesAllowed` з OpenIZ / OpenRezerv: false — списувати бонуси Лайк
+  /// для цього замовлення не можна (Катя 22.10).
+  final bool bonusesAllowed;
+
   /// Останній `SetBonusOpl` не вдався — сума бонусу в сеансі невідома, тому
   /// оплату блокуємо (пояснення на кнопці), поки касир не прибере списання
   /// або не почне чек заново.
@@ -158,6 +163,7 @@ class CartPanel extends StatefulWidget {
     this.onReserveSaved,
     this.lockerAllowed = false,
     this.lockerReasonRequired = false,
+    this.bonusesAllowed = true,
     this.bonusSyncFailed = false,
   });
 
@@ -855,6 +861,45 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
     }
     final cell = await showLikomatDialog(context);
     if (cell == null || !mounted) return;
+    // Спершу фізично відчинити комірку (OpenCellLikomat, Катя 22.10), і
+    // лише коли фармацевт поклав замовлення — зберегти накладну з Cell.
+    setState(() => _isSavingReserve = true);
+    final (opened, openMsg) = await LikomatService.openCell(cell);
+    if (!mounted) return;
+    setState(() => _isSavingReserve = false);
+    if (!opened) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Комірка №$cell не відчинилась'
+            '${openMsg.isNotEmpty ? ": $openMsg" : ""}. Виберіть іншу.'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFFDC2626),
+        duration: const Duration(seconds: 5),
+      ));
+      return;
+    }
+    final placed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text('Комірка №$cell відчинена'),
+        content: const Text('Покладіть замовлення в комірку і зачиніть її.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Не поклав(-ла)'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Поклав(-ла)'),
+          ),
+        ],
+      ),
+    );
+    if (placed != true || !mounted) {
+      FiscalLog.log('ЛІКОМАТ: комірку $cell відчинено, але замовлення '
+          '«$label» НЕ покладено — накладну не зберігаємо');
+      return;
+    }
     setState(() => _isSavingReserve = true);
     final saved = await SessionService.saveNakladna(
       kodKli: ApiConfig.ekkKodKli,
@@ -3134,6 +3179,15 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
               loyalty: widget.loyalty,
               useBonuses: useBonuses,
               onUseBonusesChanged: (v) {
+                if (v && !widget.bonusesAllowed) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Для цього інтернет-замовлення списання '
+                        'бонусів заборонено'),
+                    behavior: SnackBarBehavior.floating,
+                    duration: Duration(seconds: 3),
+                  ));
+                  return;
+                }
                 setState(() {
                   useBonuses = v;
                   if (useBonuses && widget.loyalty != null) {

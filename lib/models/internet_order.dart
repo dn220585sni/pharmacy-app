@@ -55,6 +55,11 @@ class OrderItem {
   /// Позицію викреслено з замовлення (`StrikeOut` = "1", контракт 22.09).
   final bool strikeOut;
 
+  /// `sku` — справжній s-код партії (`SKod`), а не підставлений `ids`.
+  /// У нового ІЗ (до накладної) SKod порожній, а `ids` — код СЦ
+  /// (Катя 22.10): з ним кошик не зіставить ціни GetSumSkid.
+  final bool hasSkod;
+
   // ── Enriched fields (populated from GetSKUdetail / GetSKUprice) ──────────
   String? enrichedImageUrl;
   String? enrichedSeries;
@@ -75,6 +80,7 @@ class OrderItem {
     this.expiryDate,
     this.refusalReason,
     this.strikeOut = false,
+    this.hasSkod = true,
   });
 
   /// Приймає обидва контракти GetOrders:
@@ -112,6 +118,7 @@ class OrderItem {
       expiryDate: expire.isEmpty ? null : expire,
       refusalReason: refusal.isEmpty ? null : refusal,
       strikeOut: s('StrikeOut') == '1',
+      hasSkod: skod.isNotEmpty,
     );
   }
 

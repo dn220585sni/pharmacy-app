@@ -2797,8 +2797,14 @@ class OrdersPanelState extends State<OrdersPanel>
   // ── Detail footer (mirrors CartPanel footer with total) ───────────────────
 
   Widget _buildDetailFooter(InternetOrder order) {
+    // Частина позицій не потрапила в чек/резерв (StrikeOut): великим — сума
+    // зібраного, під нею дрібніше — сума замовлення (Юлія 22.10).
+    final hasStruck = order.items.any((i) => i.strikeOut);
+    final collectedTotal = order.items
+        .where((i) => !i.strikeOut)
+        .fold<double>(0, (s, i) => s + i.total);
     final formattedTotal =
-        order.total.asMoney;
+        (hasStruck ? collectedTotal : order.total).asMoney;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
@@ -2830,6 +2836,17 @@ class OrdersPanelState extends State<OrdersPanel>
               ),
             ],
           ),
+          if (hasStruck)
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                'Сума замовлення: ${order.total.asMoney} ₴',
+                style: const TextStyle(
+                  color: Color(0xFF1C1C2E),
+                  fontSize: 12,
+                ),
+              ),
+            ),
           // Locker hint for collected orders awaiting pickup
           if (order.lockerCell != null &&
               order.status == OrderStatus.collected) ...[

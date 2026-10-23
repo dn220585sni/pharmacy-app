@@ -248,6 +248,15 @@ class CacheApiClient {
         if (fixedBody != prev) patches.add('GetDataRRO: порожній bar_code');
         prev = fixedBody;
 
+        // Fix Caché JSON: те саме для БУДЬ-ЯКОГО поля — порожнє значення без
+        // лапок (`"isLockerEligible":,` в OpenIZ, 23.10: сервер брав ІЗ у роботу,
+        // а каса не могла прочитати відповідь і показувала «не вдалося»).
+        fixedBody = fixedBody.replaceAllMapped(
+            RegExp(r'("[A-Za-z_][A-Za-z0-9_]*"):\s*(?=[,}])'),
+            (m) => '${m[1]}:""');
+        if (fixedBody != prev) patches.add('порожнє значення поля без лапок');
+        prev = fixedBody;
+
         // Fix Caché JSON: GetDataSPL — порожній `code` у discounts[] іде як
         // "code":","order":1 (пропущена закривна лапка) → "code":"","order":1.
         fixedBody = fixedBody.replaceAllMapped(

@@ -403,6 +403,13 @@ class OrdersPanelState extends State<OrdersPanel>
       _extrasOf(o).prepaid ||
       (_selectedOrder?.id == o.id && _orderData?.isPaidOnline == true);
 
+  /// Ще не взяте в роботу (накладних немає) — стадія ЗБОРУ. Передоплачене на
+  /// цій стадії теж іде в кошик через OpenIZ без коду видачі: код потрібен
+  /// лише при видачі (Катя 26.10). Оплату/чек кошик тоді блокує сам
+  /// (`lbWebReqCli` з OpenIZ).
+  static bool _isCollectStage(InternetOrder o) =>
+      o.nakladnaNumbers.every((n) => n.trim().isEmpty);
+
   Future<void> _pickOrdersDate({required bool isFrom}) async {
     final initial = isFrom ? _dateFrom : _dateTo;
     final picked = await showDatePicker(
@@ -1119,7 +1126,9 @@ class OrdersPanelState extends State<OrdersPanel>
   /// (Катя з Юлією 21.10 не могли взяти замовлення в роботу). Передоплачені
   /// лишаються тут: звичайна оплата в кошику взяла б гроші вдруге.
   bool _scansInCart(InternetOrder o) =>
-      !ApiConfig.useMock && widget.onOpenInCart != null && !_isPrepaid(o);
+      !ApiConfig.useMock &&
+      widget.onOpenInCart != null &&
+      (!_isPrepaid(o) || _isCollectStage(o));
 
   /// Whether all real items (total >= 0) in the current order have been scanned.
   bool get _allScanned {
@@ -1137,7 +1146,9 @@ class OrdersPanelState extends State<OrdersPanel>
     if (order == null) return;
     // Передоплачене (LiqPay): каса заблокована, доки код видачі з SMS
     // покупця не пройшов перевірку (ТЗ §10).
-    if (_isPrepaid(order) && !_issueVerifiedIds.contains(order.id)) {
+    if (_isPrepaid(order) &&
+        !_isCollectStage(order) &&
+        !_issueVerifiedIds.contains(order.id)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Спершу введіть і перевірте код видачі замовлення '
             'з SMS покупця.'),
@@ -1150,9 +1161,7 @@ class OrdersPanelState extends State<OrdersPanel>
     // Живий сервер: замовлення відкривається в кошику каси (OpenIZ /
     // OpenRezerv), де є повний конвеєр — скан, GetSumSkid, оплата, ПРРО,
     // резерв. Передоплачені — НЕ туди: звичайна оплата взяла б гроші вдруге.
-    if (!ApiConfig.useMock &&
-        widget.onOpenInCart != null &&
-        !_isPrepaid(order)) {
+    if (_scansInCart(order)) {
       widget.onOpenInCart!(order);
       return;
     }

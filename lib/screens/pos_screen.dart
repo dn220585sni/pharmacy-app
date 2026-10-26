@@ -408,6 +408,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// `BonusesAllowed` відкритого ІЗ (OpenIZ / OpenRezerv): false — без
   /// списання бонусів Лайк (Катя 22.10).
   bool _openedOrderBonusesAllowed = true;
+
+  /// `lbWebReqCli` з OpenIZ — платник по безготівці (LiqPay). Не порожній:
+  /// замовлення оплачене онлайн, при зборі чек на касі не пробиваємо.
+  String _openedOrderPayerCli = '';
+  String _openedOrderPayerName = '';
   bool _openedOrderLockerOk = false;
 
   /// Сервер (OpenIZ `ResPostmate`) сам сказав, чому це ІЗ не класти в
@@ -654,6 +659,10 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       }
       _openedOrderId = o.id;
       _openedOrderCell = _lockerCellFrom(data) ?? o.lockerCell;
+      _openedOrderPayerCli =
+          data['lbWebReqCli']?.toString().trim() ?? '';
+      _openedOrderPayerName =
+          data['lbWebReqCliName']?.toString().trim() ?? '';
       _openedOrderBonusesAllowed =
           data['BonusesAllowed']?.toString().trim().toLowerCase() != 'false';
       _openedOrderServerLockerReason =
@@ -4473,6 +4482,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _openedOrderLockerOk = false;
       _openedOrderCell = null;
       _openedOrderBonusesAllowed = true;
+      _openedOrderPayerCli = '';
+      _openedOrderPayerName = '';
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -4945,6 +4956,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _openedOrderLockerOk = false;
       _openedOrderCell = null;
       _openedOrderBonusesAllowed = true;
+      _openedOrderPayerCli = '';
+      _openedOrderPayerName = '';
       _scannedDrugIds.clear();
       _selectedDrug = null;   // show ShiftDashboard after payment
       _searchResults = [];
@@ -4972,6 +4985,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       _openedOrderLockerOk = false;
       _openedOrderCell = null;
       _openedOrderBonusesAllowed = true;
+      _openedOrderPayerCli = '';
+      _openedOrderPayerName = '';
       _scannedDrugIds.clear();
       _selectedDrug = null;
       _searchResults = [];
@@ -5236,6 +5251,12 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         reserveLabel: _openedReserveLabel,
         lockerAllowed: _openedOrderLockerOk,
         bonusesAllowed: _openedOrderBonusesAllowed,
+        paymentBlockedReason: _openedOrderPayerCli.isEmpty
+            ? null
+            : 'Замовлення оплачене онлайн'
+                '${_openedOrderPayerName.isNotEmpty ? " ($_openedOrderPayerName)" : ""}'
+                ' — чек при зборі не пробивається. Збережіть «Резерв F6» '
+                'або покладіть у лікомат.',
         // Причина «не в лікомат» — лише для НОВОГО ІЗ (OpenIZ, без резерву),
         // Катя 14.10: «при взятті в роботу нової накл».
         lockerReasonRequired: _openedOrderLockerOk &&

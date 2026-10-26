@@ -127,6 +127,12 @@ class CartPanel extends StatefulWidget {
   /// для цього замовлення не можна (Катя 22.10).
   final bool bonusesAllowed;
 
+  /// Чому оплата/чек на касі заборонені для відкритого ІЗ (null — дозволено).
+  /// Передоплачене онлайн (OpenIZ `lbWebReqCli` не порожній, Катя 26.10):
+  /// при зборі чек не пробивається, лише «Резерв F6» — SavesgVNakl сам
+  /// переносить накладну на LiqPay (TypeNakl=5).
+  final String? paymentBlockedReason;
+
   /// Останній `SetBonusOpl` не вдався — сума бонусу в сеансі невідома, тому
   /// оплату блокуємо (пояснення на кнопці), поки касир не прибере списання
   /// або не почне чек заново.
@@ -164,6 +170,7 @@ class CartPanel extends StatefulWidget {
     this.lockerAllowed = false,
     this.lockerReasonRequired = false,
     this.bonusesAllowed = true,
+    this.paymentBlockedReason,
     this.bonusSyncFailed = false,
   });
 
@@ -1119,6 +1126,16 @@ class CartPanelState extends State<CartPanel> with CheckoutMixin {
   // ── Payment ───────────────────────────────────────────────────────────────
 
   Future<void> _processPayment() async {
+    final blocked = widget.paymentBlockedReason;
+    if (blocked != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(blocked),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFFB45309),
+        duration: const Duration(seconds: 5),
+      ));
+      return;
+    }
     if (!_canProcessPayment || _isProcessingPayment) return;
 
     // Списання бонусів від порогу VerifySPLSum — спершу підтвердити, що

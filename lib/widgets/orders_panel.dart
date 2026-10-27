@@ -37,6 +37,7 @@ import 'disbanded_orders_screen.dart';
 import 'hover_icon_button.dart';
 import 'panel_layout.dart';
 import 'likomat_dialog.dart';
+import '../services/alt0_rezerv_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OrdersPanel — Internet orders panel shown in the right detail column.
@@ -742,6 +743,7 @@ class OrdersPanelState extends State<OrdersPanel>
     _enrichOrderItems(order);
     // Fetch extended order data (source, phone, delivery, payment, etc.)
     _fetchOrderData(order.id);
+    _fetchAlt0(order);
   }
 
   /// Enrich order items with data from GetSKUdetail and GetSKUprice APIs.
@@ -1035,6 +1037,22 @@ class OrdersPanelState extends State<OrdersPanel>
   }
 
   /// Fetch extended order data from GetOrderData API.
+  /// `Alt0Rezerv` для зібраного «складного» ІЗ (код видачі, кур'єр,
+  /// страхова) — Катя 26.10. Лише на стадії ВИДАЧІ: є накладна.
+  final Map<String, Alt0Info> _alt0 = {};
+
+  Future<void> _fetchAlt0(InternetOrder order) async {
+    if (ApiConfig.useMock || _isCollectStage(order)) return;
+    if (!(_isSpecial(order) || _isPrepaid(order))) return;
+    final nakl = order.nakladnaNumbers
+        .map((n) => n.trim())
+        .firstWhere((n) => n.isNotEmpty, orElse: () => '');
+    if (nakl.isEmpty) return;
+    final info = await Alt0RezervService.fetch(nakl);
+    if (!mounted || info == null) return;
+    setState(() => _alt0[order.id] = info);
+  }
+
   Future<void> _fetchOrderData(String orderId) async {
     setState(() => _orderDataLoading = true);
     try {
@@ -1146,7 +1164,9 @@ class OrdersPanelState extends State<OrdersPanel>
     if (order == null) return;
     // Передоплачене (LiqPay): каса заблокована, доки код видачі з SMS
     // покупця не пройшов перевірку (ТЗ §10).
-    if (_isPrepaid(order) &&
+    // Код видачі обов'язковий при видачі передоплаченого, а також коли
+    // Alt0Rezerv дав lblPass (кур'єр, страхова тощо — Катя 26.10).
+    if ((_isPrepaid(order) || (_alt0[order.id]?.needsCode ?? false)) &&
         !_isCollectStage(order) &&
         !_issueVerifiedIds.contains(order.id)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -2097,7 +2117,10 @@ class OrdersPanelState extends State<OrdersPanel>
               // Only shown when there are extra fields not in the header
               // (payment, delivery, insurance, medical programs, etc.)
               _buildOrderDataSection(),
-              if (_isSpecial(order) || _isPrepaid(order))
+              // Код видачі — лише при ВИДАЧІ (є накладна), не при зборі
+              // (Юлія 26.10; так само для страхових).
+              if ((_isSpecial(order) || _isPrepaid(order)) &&
+                  !_isCollectStage(order))
                 OrderIssueBlock(
                   key: ValueKey('issue_${order.id}'),
                   order: order,
@@ -2112,6 +2135,8 @@ class OrdersPanelState extends State<OrdersPanel>
                     }
                   }),
                   prescriptionController: _prescriptionCtrl,
+                  expectedCode: _alt0[order.id]?.lblPass,
+                  presetCode: _alt0[order.id]?.edPass,
                 ),
               if (order.isMerged) _buildMergedSummary(order),
               for (final item in order.items)

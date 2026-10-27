@@ -358,9 +358,14 @@ class CashExpensesService {
     required DateTime to,
     String? kodKli,
     String? poisk,
+    // Усі каси аптеки ОДНИМ викликом — порожній KodKli (Катя 26.10). Так
+    // приходять і накладні без каси (страхова), яких поштучно не видно.
+    bool allRegisters = false,
   }) async {
     if (ApiConfig.useMock) return const [];
-    final register = (kodKli == null || kodKli.trim().isEmpty)
+    final register = allRegisters
+        ? ''
+        : (kodKli == null || kodKli.trim().isEmpty)
         ? ApiConfig.ekkKodKli
         : kodKli.trim();
     final query = poisk?.trim() ?? '';

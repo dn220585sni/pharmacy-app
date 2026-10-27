@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../services/fiscal_log.dart';
 
 import '../../models/internet_order.dart';
 import '../../models/money.dart';
@@ -24,6 +25,13 @@ class OrderIssueBlock extends StatefulWidget {
   /// Номер е-рецепта або соцкартки, введений касиром.
   final TextEditingController prescriptionController;
 
+  /// Код видачі з `Alt0Rezerv.lblPass` — звіряємо з ним (не показуємо).
+  /// null / порожньо — сервер коду не дав, лишається демо-перевірка.
+  final String? expectedCode;
+
+  /// `Alt0Rezerv.edPass` — код, який вписуємо замість клієнта (напр. PlanB).
+  final String? presetCode;
+
   const OrderIssueBlock({
     super.key,
     required this.order,
@@ -32,6 +40,8 @@ class OrderIssueBlock extends StatefulWidget {
     required this.verified,
     required this.onVerifiedChanged,
     required this.prescriptionController,
+    this.expectedCode,
+    this.presetCode,
   });
 
   @override
@@ -46,6 +56,25 @@ class _OrderIssueBlockState extends State<OrderIssueBlock> {
 
   bool get _prepaid => widget.extras.prepaid || widget.paidOnlineConfirmed;
 
+  bool get _hasServerCode => (widget.expectedCode ?? '').isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _applyPreset();
+  }
+
+  @override
+  void didUpdateWidget(covariant OrderIssueBlock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.presetCode != widget.presetCode) _applyPreset();
+  }
+
+  void _applyPreset() {
+    final p = widget.presetCode ?? '';
+    if (p.isNotEmpty && _codeCtrl.text.isEmpty) _codeCtrl.text = p;
+  }
+
   @override
   void dispose() {
     _codeCtrl.dispose();
@@ -59,7 +88,15 @@ class _OrderIssueBlockState extends State<OrderIssueBlock> {
       _checking = true;
       _error = null;
     });
-    final ok = await OrderExtrasService.verifyIssueCode(widget.order, code);
+    final bool ok;
+    if (_hasServerCode) {
+      // Код з Alt0Rezerv (Катя 26.10) — звіряємо локально; сам код не логуємо.
+      ok = code == widget.expectedCode!.trim();
+      FiscalLog.log('ІЗ №${widget.order.reserveNumber}: код видачі '
+          '${ok ? "OK" : "невірний"} (Alt0Rezerv)');
+    } else {
+      ok = await OrderExtrasService.verifyIssueCode(widget.order, code);
+    }
     if (!mounted) return;
     setState(() {
       _checking = false;
@@ -213,7 +250,7 @@ class _OrderIssueBlockState extends State<OrderIssueBlock> {
                 labelText: 'Код видачі замовлення',
                 helperText: widget.verified
                     ? 'Код підтверджено'
-                    : OrderExtrasService.isMock
+                    : OrderExtrasService.isMock && !_hasServerCode
                         ? 'демо: останні 4 цифри номера замовлення'
                         : 'Код із SMS покупця',
                 helperStyle: TextStyle(

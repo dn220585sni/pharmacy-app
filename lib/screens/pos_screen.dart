@@ -543,8 +543,15 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
       final needSession = o.items.any(
           (i) => i.total > 0 && !i.strikeOut && i.quantity > 0 && !i.hasSkod);
       if (needSession) {
-        final sess = await CartPriceService.fetchSessionGoods();
+        var sess = await CartPriceService.fetchSessionGoods();
         if (!mounted) return;
+        if (sess == null || sess.isEmpty) {
+          // 29.10: сеанс порожній одразу після OpenIZ — ще одна спроба.
+          await Future.delayed(const Duration(milliseconds: 800));
+          if (!mounted) return;
+          sess = await CartPriceService.fetchSessionGoods();
+          if (!mounted) return;
+        }
         final src = o.items
             .where((i) => i.total > 0 && !i.strikeOut && i.quantity > 0)
             .toList();

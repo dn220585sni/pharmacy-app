@@ -190,11 +190,11 @@ class GetSumSkidItem {
   });
 
   factory GetSumSkidItem.fromJson(Map<String, dynamic> j) => GetSumSkidItem(
-        skod: j['skod']?.toString() ?? '',
+        skod: (j['skod'] ?? j['SKod'] ?? j['Skod'])?.toString() ?? '',
         name: j['name']?.toString() ?? '',
         nameUkr: j['nameukr']?.toString() ?? '',
         manufacture: j['manufacture']?.toString() ?? '',
-        qty: _toDouble(j['qty']),
+        qty: _toDouble(j['qty'] ?? j['Qty']),
         price: _toDouble(j['price']),
         total: _toDouble(j['total']),
         discPercent: _toDouble(j['disc']),
@@ -329,8 +329,19 @@ class CartPriceService {
       return null;
     }
     final p = GetSumSkidResponse.fromJson(r.data);
-    if (!p.ok) return null;
-    return p.goods.where((g) => g.skod.isNotEmpty && g.qty > 0).toList();
+    final goods = p.ok
+        ? p.goods.where((g) => g.skod.isNotEmpty && g.qty > 0).toList()
+        : null;
+    // 29.10 Юлія (№194464523): після OpenIZ сеанс «порожній», хоча Катя
+    // бачить і OpenIZ, і GetSumSkid, і резерв позицій — пишемо сиру відповідь.
+    if (goods == null || goods.isEmpty) {
+      final raw = r.data['Goods'];
+      FiscalLog.log('GetSumSkid (позиції сеансу) порожньо: '
+          'Status=${r.data['Status']} Result=${r.data['Result']}; '
+          'ключі=${r.data.keys.join(',')}; '
+          'Goods=${raw is List ? raw.take(5).map((g) => g is Map ? g.entries.map((e) => '${e.key}=${e.value}').join(' ') : '$g').join(' ;; ') : '$raw'}');
+    }
+    return p.ok ? goods : null;
   }
   static Future<CartPricing> _fetchFromServer({
     required List<CartItem> cart,

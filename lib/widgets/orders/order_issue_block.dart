@@ -58,6 +58,10 @@ class _OrderIssueBlockState extends State<OrderIssueBlock> {
 
   bool get _hasServerCode => (widget.expectedCode ?? '').isNotEmpty;
 
+  /// Поле коду: передоплачене або Alt0Rezerv дав lblPass (Glovo, страхова —
+  /// без ознаки передоплати блок ховався, а касу код блокував; Юлія 29.10).
+  bool get _needsCode => _prepaid || _hasServerCode;
+
   @override
   void initState() {
     super.initState();
@@ -133,7 +137,7 @@ class _OrderIssueBlockState extends State<OrderIssueBlock> {
         ),
     ];
 
-    if (!_prepaid && attrs.isEmpty && !isInsurance) {
+    if (!_needsCode && attrs.isEmpty && !isInsurance) {
       return const SizedBox.shrink();
     }
 
@@ -148,8 +152,8 @@ class _OrderIssueBlockState extends State<OrderIssueBlock> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (_prepaid) ..._prepaidSection(),
-          if (_prepaid && (attrs.isNotEmpty || isInsurance))
+          if (_needsCode) ..._prepaidSection(),
+          if (_needsCode && (attrs.isNotEmpty || isInsurance))
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 10),
               child: Divider(height: 1, color: Color(0xFFE5E7EB)),
@@ -204,6 +208,7 @@ class _OrderIssueBlockState extends State<OrderIssueBlock> {
 
   List<Widget> _prepaidSection() {
     return [
+      if (_prepaid) ...[
       Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
@@ -232,6 +237,7 @@ class _OrderIssueBlockState extends State<OrderIssueBlock> {
         ),
       ),
       const SizedBox(height: 10),
+      ],
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -252,7 +258,9 @@ class _OrderIssueBlockState extends State<OrderIssueBlock> {
                     ? 'Код підтверджено'
                     : OrderExtrasService.isMock && !_hasServerCode
                         ? 'демо: останні 4 цифри номера замовлення'
-                        : 'Код із SMS покупця',
+                        : _prepaid
+                            ? 'Код із SMS покупця'
+                            : 'Код називає покупець або кур\'єр',
                 helperStyle: TextStyle(
                   fontSize: 11,
                   color: widget.verified

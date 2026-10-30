@@ -1171,7 +1171,7 @@ class OrdersPanelState extends State<OrdersPanel>
         !_issueVerifiedIds.contains(order.id)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Спершу введіть і перевірте код видачі замовлення '
-            'з SMS покупця.'),
+            '(поле «Код видачі» вгорі картки).'),
         behavior: SnackBarBehavior.floating,
         backgroundColor: Color(0xFFB45309),
         duration: Duration(seconds: 4),

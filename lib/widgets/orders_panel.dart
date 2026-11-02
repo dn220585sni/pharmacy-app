@@ -23,7 +23,6 @@ import '../data/mock_orders.dart';
 import '../data/edk_offers.dart';
 import '../data/mock_drugs.dart';
 import '../services/api_config.dart';
-import '../services/cache_api_client.dart';
 import '../services/auth_service.dart';
 import '../services/order_service.dart';
 import '../services/drug_service.dart';
@@ -741,8 +740,8 @@ class OrdersPanelState extends State<OrdersPanel>
     _triggerEdkForOrder(order);
     // Enrich order items with drug details (image, storage, series, expiry)
     _enrichOrderItems(order);
-    // Fetch extended order data (source, phone, delivery, payment, etc.)
-    _fetchOrderData(order.id);
+    // GetOrderData більше не викликаємо (Катя 02.11): дані для видачі —
+    // з Alt0Rezerv, для збору — з OpenIZ.
     _fetchAlt0(order);
   }
 
@@ -1043,36 +1042,27 @@ class OrdersPanelState extends State<OrdersPanel>
 
   Future<void> _fetchAlt0(InternetOrder order) async {
     if (ApiConfig.useMock || _isCollectStage(order)) return;
-    if (!(_isSpecial(order) || _isPrepaid(order))) return;
+    // Для КОЖНОГО зібраного (Катя 02.11): ознака онлайн-оплати тепер звідси.
     final nakl = order.nakladnaNumbers
         .map((n) => n.trim())
         .firstWhere((n) => n.isNotEmpty, orElse: () => '');
     if (nakl.isEmpty) return;
     final info = await Alt0RezervService.fetch(nakl);
     if (!mounted || info == null) return;
-    setState(() => _alt0[order.id] = info);
-  }
-
-  Future<void> _fetchOrderData(String orderId) async {
-    setState(() => _orderDataLoading = true);
-    try {
-      final resp = await CacheApiClient().call(
-        'GetOrderData',
-        params: {'orderId': orderId},
-      );
-      if (!mounted || _selectedOrder?.id != orderId) return;
-      if (resp.isOk) {
-        setState(() {
-          _orderData = OrderData.fromJson(resp.data);
-          _orderDataLoading = false;
-        });
-      } else {
-        setState(() => _orderDataLoading = false);
+    setState(() {
+      _alt0[order.id] = info;
+      // Віртуальний термінал (LIQPAY/BINANCE/PRIVATQR/Ліки24) = оплачено
+      // онлайн — замість GetOrderData (is_paid / liqpay_status).
+      if (_selectedOrder?.id == order.id) {
+        final paid = info.virtTermKod.isNotEmpty;
+        _orderData = OrderData({
+          if (paid)
+            'Оплата онлайн':
+                info.virtTermName.isNotEmpty ? info.virtTermName : info.virtTermKod,
+          if (info.phone.isNotEmpty) 'Телефон': info.phone,
+        }, isPaidOnline: paid);
       }
-    } catch (e) {
-      debugPrint('GetOrderData failed for $orderId: $e');
-      if (mounted) setState(() => _orderDataLoading = false);
-    }
+    });
   }
 
   /// Find the first EDK offer for an order's items and activate it.
@@ -2357,7 +2347,7 @@ class OrdersPanelState extends State<OrdersPanel>
                     ),
                   ),
                 ],
-                // Online payment badge (from GetOrderData LiqPay fields)
+                // Бейдж онлайн-оплати (віртуальний термінал з Alt0Rezerv)
                 if (_orderData?.isPaidOnline == true) ...[
                   const SizedBox(width: 8),
                   Container(
@@ -2565,7 +2555,6 @@ class OrdersPanelState extends State<OrdersPanel>
     // «фото взагалі не відображаються»). Збагачуємо як звичайне відкриття;
     // уже збагачені позиції пропускаються.
     _enrichOrderItems(merged);
-    _fetchOrderData(merged.id);
   }
 
   // ── Not-collected order actions: Розрахувати + Лікомат + Відмовити + Відсутність

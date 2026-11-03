@@ -131,8 +131,7 @@ class _DrugListItemState extends State<DrugListItem> {
               selection: TextSelection.collapsed(offset: pending.length),
             );
             final qty = int.tryParse(pending) ?? 0;
-            final clamped = qty.clamp(0, _maxQty);
-            if (clamped > 0) widget.onQuantityChanged(clamped);
+            if (qty > 0) _applyTypedQty(qty);
           } else {
             _qtyController.selection = TextSelection(
               baseOffset: 0,
@@ -167,6 +166,25 @@ class _DrugListItemState extends State<DrugListItem> {
   /// Верхня межа кількості для введення: залишок у таблиці вже зменшений на
   /// зарезервоване в кошику, тому додаємо його назад.
   int get _maxQty => widget.drug.stock + widget.cartQuantity;
+
+  /// Введене в «Відпущ». Цілих упаковок немає, лише розпочата (напр. 3/10) —
+  /// число = блістери/саше: раніше clamp(0, 0) давав 0, і в sgVRoznSetLock
+  /// ішла кількість 0 (Катя 03.11, Аміцитрон 3/10). Нуль шлемо лише щоб
+  /// прибрати товар, який уже в кошику.
+  void _applyTypedQty(int qty) {
+    if (_maxQty < 1 &&
+        widget.drug.canSplitByBlister &&
+        widget.onFractionalChanged != null) {
+      if (qty > 0) {
+        widget.onFractionalChanged!(qty);
+      } else if (_inCart) {
+        widget.onQuantityChanged(0);
+      }
+      return;
+    }
+    final clamped = qty.clamp(0, _maxQty);
+    if (clamped > 0 || _inCart) widget.onQuantityChanged(clamped);
+  }
 
   /// Map Ctrl+key to digit 0-9, or null if not a digit key.
   static int? _ctrlDigit(LogicalKeyboardKey key) {
@@ -528,9 +546,7 @@ class _DrugListItemState extends State<DrugListItem> {
                                 onChanged: (value) {
                                   // Ignore programmatic "N/M" values
                                   if (value.contains('/')) return;
-                                  final qty = int.tryParse(value) ?? 0;
-                                  final clamped = qty.clamp(0, _maxQty);
-                                  widget.onQuantityChanged(clamped);
+                                  _applyTypedQty(int.tryParse(value) ?? 0);
                                 },
                                 onTap: () {
                                   if (!widget.isSelected) widget.onTap();

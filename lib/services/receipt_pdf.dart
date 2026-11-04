@@ -154,6 +154,7 @@ class ReceiptPdf {
     Uint8List? qrPng,
     String? fontName,
     double? qrScale,
+    int? chars,
   }) async {
     if (text.trim().isEmpty && qrPng == null) return null;
 
@@ -165,7 +166,8 @@ class ReceiptPdf {
     final usableWidth = PdfPageFormat.roll80.width - margin * 2;
 
     // Кегль — від ширини стрічки, а не з константи: див. [fontSizeFor].
-    final small = fontSizeFor(usableWidth, PrroConfig.printWidth);
+    final small = fontSizeFor(
+        usableWidth, chars != null && chars > 0 ? chars : PrroConfig.printWidth);
     final large = small * largeRatio;
 
     // QR: `koef_scale` збільшує ПОЛОТНО растра (Андрій, 04.09), тобто впливає

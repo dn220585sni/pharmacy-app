@@ -37,6 +37,7 @@ import 'hover_icon_button.dart';
 import 'panel_layout.dart';
 import 'likomat_dialog.dart';
 import '../services/alt0_rezerv_service.dart';
+import '../services/receipt_printer.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OrdersPanel — Internet orders panel shown in the right detail column.
@@ -1168,6 +1169,13 @@ class OrdersPanelState extends State<OrdersPanel>
       ));
       return;
     }
+    // tNakl=BN (страхова, доставка): чек не пробивається — «Відпущено» /
+    // «Передано кур'єру» (Катя, док специфікації: OtpuskRecipe / SetStatusWds).
+    final bn = _alt0[order.id];
+    if (bn != null && bn.noFiscalOnIssue && !_isCollectStage(order)) {
+      if (bn.btnOtpuskBN && !_bnBusy) _issueBn(order, bn);
+      return;
+    }
     // Живий сервер: замовлення відкривається в кошику каси (OpenIZ /
     // OpenRezerv), де є повний конвеєр — скан, GetSumSkid, оплата, ПРРО,
     // резерв. Передоплачені — НЕ туди: звичайна оплата взяла б гроші вдруге.
@@ -1184,6 +1192,94 @@ class OrdersPanelState extends State<OrdersPanel>
       return;
     }
     setState(() => _orderCheckoutMode = true);
+  }
+
+  bool _bnBusy = false;
+
+  void _bnSnack(String text, {bool error = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(text),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: error ? const Color(0xFFB45309) : null,
+      duration: const Duration(seconds: 5),
+    ));
+  }
+
+  /// Видача BN-замовлення без чека. Страхове: спершу друк заявки
+  /// (PrintZCheck — її підписує покупець), далі OtpuskRecipe. Доставка:
+  /// SetStatusWds `courier`.
+  Future<void> _issueBn(InternetOrder order, Alt0Info info) async {
+    final nakls = info.numNakls.isNotEmpty
+        ? info.numNakls
+        : order.nakladnaNumbers
+            .map((n) => n.trim())
+            .where((n) => n.isNotEmpty)
+            .join(';');
+    if (nakls.isEmpty) return;
+    setState(() => _bnBusy = true);
+    try {
+      if (info.isInsurance) {
+        final printed = await _printInsuranceRequest(order, info, nakls);
+        if (!mounted) return;
+        if (!printed) {
+          final go = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Заявку не надруковано'),
+              content: const Text('Заявку для страхової не вдалося '
+                  'надрукувати. Відпустити замовлення без неї?'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Скасувати')),
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Відпустити')),
+              ],
+            ),
+          );
+          if (go != true || !mounted) return;
+        }
+      }
+      final r = info.isInsurance
+          ? await Alt0RezervService.otpuskRecipe(nakls)
+          : await Alt0RezervService.setStatusWds(nakls);
+      if (!mounted) return;
+      if (!r.ok) {
+        _bnSnack(
+            'Не вдалося позначити замовлення №${order.id} '
+            '${info.isInsurance ? "відпущеним" : "переданим кур'єру"}'
+            '${r.message.isNotEmpty ? ": ${r.message}" : ""}',
+            error: true);
+        return;
+      }
+      _bnSnack(info.isInsurance
+          ? 'Замовлення №${order.id} відпущено (страхова)'
+          : 'Замовлення №${order.id} передано кур\'єру');
+      final idx = _orders.indexWhere((o) => o.id == order.id);
+      setState(() {
+        if (idx >= 0) {
+          _orders[idx] = order.copyWith(status: OrderStatus.dispensed);
+        }
+        _resetOrderCheckoutState();
+        _selectedOrder = null;
+        _scannedSkus.clear();
+        _filterOrders();
+      });
+    } finally {
+      if (mounted) setState(() => _bnBusy = false);
+    }
+  }
+
+  Future<bool> _printInsuranceRequest(
+      InternetOrder order, Alt0Info info, String nakls) async {
+    final first = nakls.split(';').map((n) => n.trim()).firstWhere(
+        (n) => n.isNotEmpty,
+        orElse: () => '');
+    final z = await Alt0RezervService.printZCheck(
+        first, info.idOrder.isNotEmpty ? info.idOrder : order.id);
+    if (z == null) return false;
+    return ReceiptPrinter.printInsuranceRequest(z.$1, z.$2);
   }
 
   /// Place order into locker → show cell picker → change status to collected.
@@ -2109,7 +2205,9 @@ class OrdersPanelState extends State<OrdersPanel>
               _buildOrderDataSection(),
               // Код видачі — лише при ВИДАЧІ (є накладна), не при зборі
               // (Юлія 26.10; так само для страхових).
-              if ((_isSpecial(order) || _isPrepaid(order)) &&
+              if ((_isSpecial(order) ||
+                      _isPrepaid(order) ||
+                      (_alt0[order.id]?.needsCode ?? false)) &&
                   !_isCollectStage(order))
                 OrderIssueBlock(
                   key: ValueKey('issue_${order.id}'),
@@ -2437,6 +2535,10 @@ class OrdersPanelState extends State<OrdersPanel>
   Widget _buildCollectedActions() {
     final order = _selectedOrder;
     final showLocker = order != null && _canPlaceInLocker(order);
+    // BN (страхова / доставка): «Відпущено» замість пробиття чека.
+    final bn = order == null ? null : _alt0[order.id];
+    final bnBlocked =
+        bn != null && bn.noFiscalOnIssue && (!bn.btnOtpuskBN || _bnBusy);
     return Column(
       children: [
         if (showLocker) ...[
@@ -2451,7 +2553,7 @@ class OrdersPanelState extends State<OrdersPanel>
           width: double.infinity,
           height: 42,
           child: ElevatedButton(
-            onPressed: _enterOrderCheckout,
+            onPressed: bnBlocked ? null : _enterOrderCheckout,
             style: ElevatedButton.styleFrom(
               foregroundColor: Colors.white,
               backgroundColor: const Color(0xFF1E7DC8),
@@ -2465,9 +2567,15 @@ class OrdersPanelState extends State<OrdersPanel>
                 const Icon(Icons.point_of_sale_rounded, size: 16),
                 const SizedBox(width: 8),
                 Text(
-                    _selectedOrder != null && _isPrepaid(_selectedOrder!)
-                        ? 'Пробити по касі'
-                        : 'Розрахувати',
+                    bn != null && bn.noFiscalOnIssue
+                        ? (_bnBusy
+                            ? 'Зачекайте…'
+                            : bn.isInsurance
+                                ? 'Відпущено'
+                                : 'Передано кур\'єру')
+                        : _selectedOrder != null && _isPrepaid(_selectedOrder!)
+                            ? 'Пробити по касі'
+                            : 'Розрахувати',
                     style: const TextStyle(
                         fontSize: 13, fontWeight: FontWeight.w600)),
                 const SizedBox(width: 8),

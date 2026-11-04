@@ -114,6 +114,14 @@ class ReceiptPrinter {
     return printPdf(pdf, name: 'Z-звіт');
   }
 
+  /// Заявка для страхової (`PrintZCheck`, Катя): готові рядки ширини
+  /// [width] — друкуємо на касовий принтер як є.
+  static Future<bool> printInsuranceRequest(List<String> lines, int width) async {
+    final pdf = await ReceiptPdf.build(text: lines.join('\n'), chars: width);
+    if (pdf == null) return false;
+    return printPdf(pdf, name: 'Заявка страхової');
+  }
+
   /// X-звіт — **на перегляд**, не на друк (Андрій, 03.09). Кладемо у тимчасову
   /// теку, а не в `out`: там живуть чеки роздрібу з чистилкою за іменами, і
   /// класти туди сторонній файл — напрошуватись на проблеми.

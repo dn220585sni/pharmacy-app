@@ -437,6 +437,23 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// null — ціла упаковка; (0, 0) — дріб є, але не розібрано.
   /// `Drob` у GetOrders — «1» для цілої, інакше «a/b» (старий роздріб).
   /// Дріб з Drob — джерело правди: «0 1/3» → 1 з 3, «5/30» → 5 з 30.
+  /// 03.11 №194500745: 1 уп. Занідіпу №28 сервер після OpenIZ розклав на дві
+  /// партії по 0.5 без `Drob`. Дріб «14/28» виводимо з «№N» у назві — лише
+  /// коли сума партій збігається з кількістю в замовленні (інакше не вгадуємо).
+  static String? _splitBatchFraction(
+      double qty, OrderItem? m, List<double> batches) {
+    if (m == null || (qty - qty.round()).abs() < 1e-6) return null;
+    if (_orderFraction(m) != null) return null;
+    final sum = batches.fold<double>(0, (s, q) => s + q);
+    if ((sum - m.quantity).abs() > 1e-3) return null;
+    final no = RegExp(r'№\s*(\d+)').allMatches(m.name).lastOrNull;
+    final n = int.tryParse(no?.group(1) ?? '') ?? 0;
+    if (n <= 1) return null;
+    final k = (qty * n).round();
+    if (k <= 0 || (k / n - qty).abs() > 1e-3) return null;
+    return '$k/$n';
+  }
+
   static (int, int)? _orderFraction(OrderItem i) {
     final d = (i.fraction ?? '').trim();
     final wholeQty = (i.quantity - i.quantity.round()).abs() < 1e-6;
@@ -558,6 +575,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         String norm(String s) =>
             s.toUpperCase().replaceAll(RegExp(r'\s+'), ' ').trim();
         goods = [];
+        final matched = <OrderItem?>[];
         for (var n = 0; n < (sess ?? const []).length; n++) {
           final g = sess![n];
           final byName = src.where((i) =>
@@ -566,6 +584,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
           final m = byName.isNotEmpty
               ? byName.first
               : (src.length == sess.length ? src[n] : null);
+          matched.add(m);
+        }
+        for (var n = 0; n < (sess ?? const []).length; n++) {
+          final g = sess![n];
+          final m = matched[n];
           goods.add(OrderItem(
             sku: g.skod,
             ukod: m?.ukod,
@@ -573,7 +596,11 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             name: g.nameUkr.isNotEmpty ? g.nameUkr : g.name,
             manufacturer: g.manufacture.isNotEmpty ? g.manufacture : m?.manufacturer,
             quantity: g.qty,
-            fraction: m?.fraction,
+            fraction: _splitBatchFraction(g.qty, m, [
+                  for (var j = 0; j < sess.length; j++)
+                    if (identical(matched[j], m)) sess[j].qty
+                ]) ??
+                m?.fraction,
             price: g.price,
             total: g.total,
             expiryDate: m?.expiryDate,

@@ -36,6 +36,9 @@ class Alt0Info {
   /// `BtnOtpuskBN` — чи активна кнопка «Відпущено» для BN.
   final bool btnOtpuskBN;
 
+  /// Коментар покупця / страхової (`lblcomment`).
+  final String comment;
+
   const Alt0Info({
     this.lblPass = '',
     this.edPass = '',
@@ -48,6 +51,7 @@ class Alt0Info {
     this.numNakls = '',
     this.idOrder = '',
     this.btnOtpuskBN = true,
+    this.comment = '',
   });
 
   bool get needsCode => lblPass.isNotEmpty;
@@ -98,6 +102,7 @@ class Alt0RezervService {
         idOrder: _s(d, ['idorder', 'idOrder']),
         // Порожньо — вважаємо активною: сервер не заборонив.
         btnOtpuskBN: _s(d, ['BtnOtpuskBN', 'btnOtpuskBN']) != '0',
+        comment: _s(d, ['lblcomment', 'lblComment', 'LblComment']),
       );
       // Сам код у журнал НЕ пишемо — лише чи він є.
       FiscalLog.log('Alt0Rezerv $numNakl: код видачі '

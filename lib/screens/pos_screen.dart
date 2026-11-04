@@ -748,12 +748,102 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
     final card = data['SpartaCard']?.toString().trim() ?? '';
     final phone = (data['SpartaPhone']?.toString() ?? '')
         .replaceAll(RegExp(r'\D'), '');
+    // Системний номер майданчика (Таблетки: 0800…/8800…) — не покупець.
+    // Код після +380 не може починатися з 0/1/2 чи бути 80/88.
+    final systemPhone = phone.length >= 9 &&
+        RegExp(r'^(?:[012]|80|88)')
+            .hasMatch(phone.substring(phone.length - 9));
     if (card.isNotEmpty) {
       unawaited(_identifyByLoyaltyCard(card, identSpl: false));
-    } else if (phone.length >= 9) {
+    } else if (phone.length >= 9 && !systemPhone) {
       unawaited(
           _fetchLoyalty(phone.substring(phone.length - 9), identSpl: false));
+    } else if (viaRezerv) {
+      // Нарада 04.11 (Катя): у Таблеток (більшість до 1000 грн) телефон
+      // фіктивний — OpenRezerv тоді повертає порожні SpartaCard/SpartaPhone
+      // («не ідентифікувала»). Питаємо телефон, щоб транзакція й бонуси
+      // прив'язались до покупця; далі звичайний IdentSPL.
+      FiscalLog.log('ІЗ ${o.id}: OpenRezerv без клієнта Лайк — питаємо телефон');
+      final digits = await _askOrderPhone(o.id);
+      if (!mounted || digits == null) return;
+      // Поле телефону в кошику заповнить _applyLoyalty.
+      unawaited(_fetchLoyalty(digits));
     }
+  }
+
+  /// Вікно телефону покупця для ІЗ без ідентифікації. 9 цифр після +380;
+  /// null — «Без телефону».
+  Future<String?> _askOrderPhone(String orderId) async {
+    final ctrl = TextEditingController();
+    String? digitsOf(String s) {
+      final d = s.replaceAll(RegExp(r'\D'), '');
+      final nine = d.length > 9 ? d.substring(d.length - 9) : d;
+      return nine.length == 9 ? nine : null;
+    }
+
+    final r = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final ok = digitsOf(ctrl.text) != null;
+          void submit() {
+            final d = digitsOf(ctrl.text);
+            if (d != null) Navigator.of(ctx).pop(d);
+          }
+
+          return AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('Телефон покупця',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'У замовленні №$orderId немає телефону покупця. Запитайте '
+                  'номер, щоб нарахувати бонуси Лайк.',
+                  style: const TextStyle(
+                      fontSize: 13, color: Color(0xFF6B7280), height: 1.5),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: ctrl,
+                  autofocus: true,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    prefixText: '+380 ',
+                    hintText: '50 123 45 67',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (_) => setLocal(() {}),
+                  onSubmitted: (_) => submit(),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Без телефону',
+                    style: TextStyle(color: Color(0xFF6B7280))),
+              ),
+              ElevatedButton(
+                onPressed: ok ? submit : null,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E7DC8),
+                    foregroundColor: Colors.white,
+                    elevation: 0),
+                child: const Text('Прикріпити'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    ctrl.dispose();
+    return r;
   }
 
   /// «Витрати по касі» → «Відкрити в касі»: резерв стає кошиком для

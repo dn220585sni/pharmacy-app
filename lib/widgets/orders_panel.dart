@@ -1061,6 +1061,9 @@ class OrdersPanelState extends State<OrdersPanel>
             'Оплата онлайн':
                 info.virtTermName.isNotEmpty ? info.virtTermName : info.virtTermKod,
           if (info.phone.isNotEmpty) 'Телефон': info.phone,
+          if (info.lblWds.isNotEmpty) 'Доставка': info.lblWds,
+          // Нарада 04.11: примітки покупця / страхової мають бути видні.
+          if (info.comment.isNotEmpty) 'Коментар': info.comment,
         }, isPaidOnline: paid);
       }
     });

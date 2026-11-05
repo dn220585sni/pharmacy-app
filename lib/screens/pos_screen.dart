@@ -440,14 +440,32 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
   /// 03.11 №194500745: 1 уп. Занідіпу №28 сервер після OpenIZ розклав на дві
   /// партії по 0.5 без `Drob`. Дріб «14/28» виводимо з «№N» у назві — лише
   /// коли сума партій збігається з кількістю в замовленні (інакше не вгадуємо).
+  /// 04.11 №196314584 (Катя): 0,4 Спринцю з Drob «0 4/10» сервер розклав на
+  /// партії 0,1 + 0,3 — обидві показувались 4/10. Знаменник — з Drob
+  /// замовлення (або «№N»), чисельник — з кількості партії. [sessDrob] —
+  /// Drob партії з GetSumSkid (Катя 04.11), береться, якщо збігається з qty.
   static String? _splitBatchFraction(
-      double qty, OrderItem? m, List<double> batches) {
+      double qty, OrderItem? m, List<double> batches, [String sessDrob = '']) {
     if (m == null || (qty - qty.round()).abs() < 1e-6) return null;
-    if (_orderFraction(m) != null) return null;
+    if (sessDrob.isNotEmpty) {
+      final s = _orderFraction(OrderItem(
+          sku: '', name: '', quantity: qty, fraction: sessDrob, price: 0, total: 0));
+      if (s != null && s != (0, 0) && (s.$1 / s.$2 - qty).abs() < 1e-3) {
+        return '${s.$1}/${s.$2}';
+      }
+    }
+    final ofr = _orderFraction(m);
+    // Одна партія на всю кількість — дріб замовлення як є.
+    if (ofr != null && batches.length < 2 && (qty - m.quantity).abs() < 1e-3) {
+      return null;
+    }
     final sum = batches.fold<double>(0, (s, q) => s + q);
     if ((sum - m.quantity).abs() > 1e-3) return null;
-    final no = RegExp(r'№\s*(\d+)').allMatches(m.name).lastOrNull;
-    final n = int.tryParse(no?.group(1) ?? '') ?? 0;
+    var n = ofr != null && ofr != (0, 0) ? ofr.$2 : 0;
+    if (n <= 1) {
+      final no = RegExp(r'№\s*(\d+)').allMatches(m.name).lastOrNull;
+      n = int.tryParse(no?.group(1) ?? '') ?? 0;
+    }
     if (n <= 1) return null;
     final k = (qty * n).round();
     if (k <= 0 || (k / n - qty).abs() > 1e-3) return null;
@@ -599,7 +617,7 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
             fraction: _splitBatchFraction(g.qty, m, [
                   for (var j = 0; j < sess.length; j++)
                     if (identical(matched[j], m)) sess[j].qty
-                ]) ??
+                ], g.drob) ??
                 m?.fraction,
             price: g.price,
             total: g.total,
@@ -608,7 +626,8 @@ class _PosScreenState extends State<PosScreen> with EdkStateMixin {
         }
         FiscalLog.log('ІЗ ${o.id}: позиції без SKod → з сеансу після OpenIZ: '
             '${goods.map((i) => '${i.sku}×${i.quantity}${i.fraction != null ? "(${i.fraction})" : ""}').join(', ')}'
-            ' (у замовленні ${src.length})');
+            ' (у замовленні ${src.length}; Drob сеансу: '
+            '${(sess ?? const []).map((g) => '"${g.drob}"').join(',')})');
         // Позиції замовлення, яких сервер НЕ поклав у сеанс (22.10: Смекта
         // 0,167 у №194627582 — резерв збережено без неї мовчки).
         final got = goods.map((i) => norm(i.name)).toSet();

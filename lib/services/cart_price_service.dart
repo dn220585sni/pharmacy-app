@@ -176,6 +176,8 @@ class GetSumSkidItem {
   /// Закодоване правило знижки — для tooltip/audit. Приклад:
   /// `stop-price:41202:0:0,00{r:-20.00%:1:}`
   final String pravilo;
+  /// Дріб партії («0 1/10») — Катя додала в GetSumSkid 04.11.
+  final String drob;
 
   const GetSumSkidItem({
     required this.skod,
@@ -187,6 +189,7 @@ class GetSumSkidItem {
     required this.total,
     required this.discPercent,
     required this.pravilo,
+    this.drob = '',
   });
 
   factory GetSumSkidItem.fromJson(Map<String, dynamic> j) => GetSumSkidItem(
@@ -199,6 +202,7 @@ class GetSumSkidItem {
         total: _toDouble(j['total']),
         discPercent: _toDouble(j['disc']),
         pravilo: j['pravilo']?.toString() ?? '',
+        drob: (j['Drob'] ?? j['drob'])?.toString().trim() ?? '',
       );
 }
 

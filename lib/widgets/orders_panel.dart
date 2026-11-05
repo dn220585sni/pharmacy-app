@@ -1276,13 +1276,20 @@ class OrdersPanelState extends State<OrdersPanel>
 
   Future<bool> _printInsuranceRequest(
       InternetOrder order, Alt0Info info, String nakls) async {
-    final first = nakls.split(';').map((n) => n.trim()).firstWhere(
-        (n) => n.isNotEmpty,
-        orElse: () => '');
-    final z = await Alt0RezervService.printZCheck(
-        first, info.idOrder.isNotEmpty ? info.idOrder : order.id);
-    if (z == null) return false;
-    return ReceiptPrinter.printInsuranceRequest(z.$1, z.$2);
+    // Катя 05.11: сервіси — для ВСІХ накладних списку; PrintZCheck бере
+    // одну накладну, тож заявку (2 примірники) друкуємо на кожну.
+    final list =
+        nakls.split(';').map((n) => n.trim()).where((n) => n.isNotEmpty);
+    if (list.isEmpty) return false;
+    var ok = true;
+    for (final n in list) {
+      final z = await Alt0RezervService.printZCheck(
+          n, info.idOrder.isNotEmpty ? info.idOrder : order.id);
+      if (z == null || !await ReceiptPrinter.printInsuranceRequest(z.$1, z.$2)) {
+        ok = false;
+      }
+    }
+    return ok;
   }
 
   /// Place order into locker → show cell picker → change status to collected.
